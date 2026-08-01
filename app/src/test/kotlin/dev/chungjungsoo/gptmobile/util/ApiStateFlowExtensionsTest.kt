@@ -34,7 +34,7 @@ class ApiStateFlowExtensionsTest {
             )
         )
 
-        flowOf(
+        val outcome = flowOf(
             ApiState.Success("Partial answer"),
             ApiState.Error("Request timed out.")
         ).handleStates(
@@ -47,6 +47,7 @@ class ApiStateFlowExtensionsTest {
         val assistantContent = messageFlow.value.assistantMessages.last().first().content
         assertTrue(assistantContent.contains("Partial answer"))
         assertTrue(assistantContent.contains("[Response stopped: Request timed out.]"))
+        assertEquals(ApiStateFlowOutcome.Failed("Request timed out."), outcome)
     }
 
     @Test
@@ -177,7 +178,7 @@ class ApiStateFlowExtensionsTest {
             )
         )
 
-        flowOf(ApiState.Done).handleStates(
+        val outcome = flowOf(ApiState.Done).handleStates(
             messageFlow = messageFlow,
             turnIndex = 0,
             platformIdx = 1,
@@ -189,6 +190,28 @@ class ApiStateFlowExtensionsTest {
         assertEquals(1234L, messageFlow.value.assistantMessages[0][1].createdAt)
         assertEquals(untouchedTimestamp, messageFlow.value.assistantMessages[1][0].createdAt)
         assertEquals(untouchedTimestamp, messageFlow.value.assistantMessages[1][1].createdAt)
+        assertEquals(ApiStateFlowOutcome.Completed, outcome)
+    }
+
+    @Test
+    fun `handleStates reports incomplete when stream ends without terminal state`() = runBlocking {
+        val messageFlow = MutableStateFlow(
+            ChatViewModel.GroupedMessages(
+                userMessages = listOf(MessageV2(content = "Hello", platformType = null)),
+                assistantMessages = listOf(
+                    listOf(MessageV2(content = "", platformType = "platform-1"))
+                )
+            )
+        )
+
+        val outcome = flowOf(ApiState.Success("Partial answer")).handleStates(
+            messageFlow = messageFlow,
+            turnIndex = 0,
+            platformIdx = 0,
+            onLoadingComplete = {}
+        )
+
+        assertEquals(ApiStateFlowOutcome.Incomplete, outcome)
     }
 
     @Test

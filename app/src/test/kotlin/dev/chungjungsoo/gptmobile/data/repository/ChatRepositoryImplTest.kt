@@ -333,6 +333,8 @@ class ChatRepositoryImplTest {
         chatRoomV2Dao = proxy(),
         messageV2Dao = proxy(),
         chatPlatformModelV2Dao = proxy(),
+        agentPersistenceDao = proxy(),
+        agentRunDao = proxy(),
         settingRepository = proxy(),
         openAIAPI = openAIAPI,
         groqAPI = groqAPI,

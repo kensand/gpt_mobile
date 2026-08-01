@@ -7,6 +7,8 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dev.chungjungsoo.gptmobile.data.context.ContextBuilder
+import dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
+import dev.chungjungsoo.gptmobile.data.database.dao.AgentRunDao
 import dev.chungjungsoo.gptmobile.data.database.dao.ChatPlatformModelV2Dao
 import dev.chungjungsoo.gptmobile.data.database.dao.ChatRoomDao
 import dev.chungjungsoo.gptmobile.data.database.dao.ChatRoomV2Dao
@@ -34,6 +36,8 @@ object ChatRepositoryModule {
         chatRoomV2Dao: ChatRoomV2Dao,
         messageV2Dao: MessageV2Dao,
         chatPlatformModelV2Dao: ChatPlatformModelV2Dao,
+        agentPersistenceDao: AgentPersistenceDao,
+        agentRunDao: AgentRunDao,
         settingRepository: SettingRepository,
         openAIAPI: OpenAIAPI,
         groqAPI: GroqAPI,
@@ -48,6 +52,8 @@ object ChatRepositoryModule {
         chatRoomV2Dao,
         messageV2Dao,
         chatPlatformModelV2Dao,
+        agentPersistenceDao,
+        agentRunDao,
         settingRepository,
         openAIAPI,
         groqAPI,

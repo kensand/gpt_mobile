@@ -7,6 +7,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -103,6 +104,34 @@ class ChatDatabaseV2MigrationsTest {
         val revisions = AssistantRevisionListConverter().fromString("[")
 
         assertTrue(revisions.isEmpty())
+    }
+
+    @Test
+    fun `assistant revision serialization preserves run linkage`() {
+        val converter = AssistantRevisionListConverter()
+        val encoded = converter.fromList(
+            listOf(
+                dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision(
+                    content = "Answer",
+                    thoughts = "Reasoning",
+                    createdAt = 1234L,
+                    runId = "run-123"
+                )
+            )
+        )
+
+        val decoded = converter.fromString(encoded)
+
+        assertEquals("run-123", decoded.single().runId)
+    }
+
+    @Test
+    fun `legacy assistant revision json decodes without run linkage`() {
+        val decoded = AssistantRevisionListConverter().fromString(
+            """[{"content":"Old answer","thoughts":"","createdAt":1234}]"""
+        )
+
+        assertNull(decoded.single().runId)
     }
 
     @Test

@@ -5,6 +5,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.chungjungsoo.gptmobile.data.context.ContextBuilder
 import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
 import dev.chungjungsoo.gptmobile.data.context.ProviderContextPolicy
+import dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
+import dev.chungjungsoo.gptmobile.data.database.dao.AgentRunDao
 import dev.chungjungsoo.gptmobile.data.database.dao.ChatPlatformModelV2Dao
 import dev.chungjungsoo.gptmobile.data.database.dao.ChatRoomDao
 import dev.chungjungsoo.gptmobile.data.database.dao.ChatRoomV2Dao
@@ -15,6 +17,10 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoom
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
 import dev.chungjungsoo.gptmobile.data.database.entity.Message
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryRequest
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryResult
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnResult
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
@@ -76,6 +82,8 @@ class ChatRepositoryImpl @Inject constructor(
     private val chatRoomV2Dao: ChatRoomV2Dao,
     private val messageV2Dao: MessageV2Dao,
     private val chatPlatformModelV2Dao: ChatPlatformModelV2Dao,
+    private val agentPersistenceDao: AgentPersistenceDao,
+    private val agentRunDao: AgentRunDao,
     private val settingRepository: SettingRepository,
     private val openAIAPI: OpenAIAPI,
     private val groqAPI: GroqAPI,
@@ -817,6 +825,22 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun persistAgentTurn(request: PersistAgentTurnRequest): PersistAgentTurnResult = agentPersistenceDao.persistAgentTurn(request)
+
+    override suspend fun persistAgentRetry(request: PersistAgentRetryRequest): PersistAgentRetryResult = agentPersistenceDao.persistAgentRetry(request)
+
+    override suspend fun updateAgentRunStatus(
+        runId: String,
+        status: String,
+        startedAt: Long?,
+        completedAt: Long?,
+        terminalError: String?
+    ) {
+        agentRunDao.updateStatus(runId, status, startedAt, completedAt, terminalError)
+    }
+
+    override suspend fun interruptActiveAgentRuns(completedAt: Long): Int = agentRunDao.interruptActiveRuns(completedAt)
+
     override suspend fun migrateToChatRoomV2MessageV2() {
         val leftOverChatRoomV2s = chatRoomV2Dao.getChatRooms()
         leftOverChatRoomV2s.forEach { chatPlatformModelV2Dao.deleteByChatId(it.id) }
@@ -902,26 +926,10 @@ class ChatRepositoryImpl @Inject constructor(
             return savedChatRoom.copy(title = updatedMessages[0].content.replace('\n', ' ').take(50))
         }
 
-        val savedMessages = fetchMessagesV2(chatRoom.id)
-        val updatedMessages = messages.map { it.copy(chatId = chatRoom.id) }
-
-        val shouldBeDeleted = savedMessages.filter { m ->
-            updatedMessages.firstOrNull { it.id == m.id } == null
-        }
-        val shouldBeUpdated = updatedMessages.filter { m ->
-            savedMessages.firstOrNull { it.id == m.id && it != m } != null
-        }
-        val shouldBeAdded = updatedMessages.filter { m ->
-            savedMessages.firstOrNull { it.id == m.id } == null
-        }
-
-        chatRoomV2Dao.editChatRoom(chatRoom)
-        messageV2Dao.deleteMessages(*shouldBeDeleted.toTypedArray())
-        messageV2Dao.editMessages(*shouldBeUpdated.toTypedArray())
-        messageV2Dao.addMessages(*shouldBeAdded.toTypedArray())
-        saveChatPlatformModels(
-            chatId = chatRoom.id,
-            models = chatPlatformModels.filterKeys { it in chatRoom.enabledPlatform }
+        agentPersistenceDao.saveChatSnapshot(
+            chatRoom = chatRoom,
+            messages = messages,
+            chatPlatformModels = chatPlatformModels.filterKeys { it in chatRoom.enabledPlatform }
         )
 
         return chatRoom
@@ -929,32 +937,10 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun duplicateChatV2(chatRoom: ChatRoomV2): ChatRoomV2 {
         val duplicatedTitle = "${chatRoom.title} (copy)".take(50)
-        val duplicatedChatId = chatRoomV2Dao.addChatRoom(
-            ChatRoomV2(
-                title = duplicatedTitle,
-                enabledPlatform = chatRoom.enabledPlatform
-            )
-        ).toInt()
-
-        val messages = fetchMessagesV2(chatRoom.id).map { message ->
-            message.copy(
-                id = 0,
-                chatId = duplicatedChatId,
-                linkedMessageId = 0
-            )
-        }
-        if (messages.isNotEmpty()) {
-            messageV2Dao.addMessages(*messages.toTypedArray())
-        }
-
-        val chatPlatformModels = fetchChatPlatformModels(chatRoom.id)
-        saveChatPlatformModels(duplicatedChatId, chatPlatformModels)
-
-        return chatRoom.copy(
-            id = duplicatedChatId,
+        return agentPersistenceDao.duplicateChatWithHistory(
+            sourceChatId = chatRoom.id,
             title = duplicatedTitle,
-            createdAt = System.currentTimeMillis() / 1000,
-            updatedAt = System.currentTimeMillis() / 1000
+            timestamp = System.currentTimeMillis() / 1000
         )
     }
 

@@ -49,6 +49,9 @@ data class MessageV2(
     @ColumnInfo(name = "platform_type")
     val platformType: String?,
 
+    @ColumnInfo(name = "current_run_id")
+    val currentRunId: String? = null,
+
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis() / 1000
 )
@@ -57,7 +60,8 @@ data class MessageV2(
 data class AssistantRevision(
     val content: String,
     val thoughts: String = "",
-    val createdAt: Long
+    val createdAt: Long,
+    val runId: String? = null
 )
 
 const val ACTIVE_REVISION_LATEST = -1
@@ -89,6 +93,7 @@ fun MessageV2.snapshotLatestAssistantRevision(timestamp: Long = System.currentTi
     return AssistantRevision(
         content = content,
         thoughts = thoughts,
-        createdAt = timestamp
+        createdAt = timestamp,
+        runId = currentRunId
     )
 }

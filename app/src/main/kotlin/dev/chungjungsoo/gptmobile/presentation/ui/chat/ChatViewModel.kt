@@ -10,8 +10,12 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunDraft
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryRequest
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
@@ -21,12 +25,17 @@ import dev.chungjungsoo.gptmobile.data.database.entity.snapshotLatestAssistantRe
 import dev.chungjungsoo.gptmobile.data.repository.AttachmentUploadCoordinator
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
+import dev.chungjungsoo.gptmobile.util.ApiStateFlowOutcome
 import dev.chungjungsoo.gptmobile.util.AttachmentPayloadCache
 import dev.chungjungsoo.gptmobile.util.FileUtils
+import dev.chungjungsoo.gptmobile.util.buildAssistantErrorContent
 import dev.chungjungsoo.gptmobile.util.getPlatformName
 import dev.chungjungsoo.gptmobile.util.handleStates
+import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -251,41 +260,48 @@ class ChatViewModel @Inject constructor(
     fun retryChat(turnIndex: Int, platformIndex: Int) {
         if (turnIndex !in _groupedMessages.value.assistantMessages.indices) return
         if (platformIndex >= enabledPlatformsInChat.size || platformIndex < 0) return
-        val platform = _enabledPlatformsInApp.value.firstOrNull { it.uid == enabledPlatformsInChat[platformIndex] } ?: return
+        val platform = _platformsInApp.value.firstOrNull { it.uid == enabledPlatformsInChat[platformIndex] } ?: return
         val platformWithChatModel = resolvePlatformModel(platform)
-        val revisionToAppendOnSuccess = _groupedMessages.value.assistantMessages
+        val currentAssistantMessage = _groupedMessages.value.assistantMessages
             .getOrNull(turnIndex)
             ?.getOrNull(platformIndex)
-            ?.snapshotLatestAssistantRevision(currentTimeStamp)
+            ?: return
+        val userMessage = _groupedMessages.value.userMessages.getOrNull(turnIndex) ?: return
+        val runId = UUID.randomUUID().toString()
         _loadingStates.update { it.toMutableList().apply { this[platformIndex] = LoadingState.Loading } }
-        _groupedMessages.update {
-            updateAssistantSlot(
-                groupedMessages = it,
-                turnIndex = turnIndex,
-                platformIndex = platformIndex
-            ) { currentMessage ->
-                createRetryAssistantMessage(
-                    currentMessage = currentMessage,
-                    chatId = chatRoomId,
-                    platformUid = platformWithChatModel.uid
-                )
-            }
-        }
 
         viewModelScope.launch {
-            val retryContext = groupedMessagesThroughTurn(_groupedMessages.value, turnIndex)
-            chatRepository.completeChat(
-                retryContext.userMessages,
-                retryContext.assistantMessages,
-                platformWithChatModel
-            ).handleStates(
-                messageFlow = _groupedMessages,
-                turnIndex = turnIndex,
-                platformIdx = platformIndex,
-                onLoadingComplete = {
-                    _loadingStates.update { it.toMutableList().apply { this[platformIndex] = LoadingState.Idle } }
+            persistBeforeProvider(
+                persist = {
+                    chatRepository.persistAgentRetry(
+                        PersistAgentRetryRequest(
+                            userMessage = userMessage,
+                            assistantMessage = currentAssistantMessage,
+                            run = AgentRunDraft(
+                                runId = runId,
+                                profileUid = platformWithChatModel.uid,
+                                providerSnapshot = platformWithChatModel.compatibleType.name,
+                                modelSnapshot = platformWithChatModel.model,
+                                createdAt = currentTimeStamp
+                            )
+                        )
+                    )
                 },
-                revisionToAppendOnSuccess = revisionToAppendOnSuccess
+                startProvider = { persisted ->
+                    _groupedMessages.update { groupedMessages ->
+                        updateAssistantSlot(groupedMessages, turnIndex, platformIndex) { persisted.assistantMessage }
+                    }
+                    launchProviderRun(
+                        runId = runId,
+                        turnIndex = turnIndex,
+                        platformIndex = platformIndex,
+                        platform = platformWithChatModel,
+                        contextMessages = groupedMessagesThroughTurn(_groupedMessages.value, turnIndex)
+                    )
+                },
+                onFailure = { error ->
+                    showPersistenceFailure(turnIndex, listOf(platformIndex), error)
+                }
             )
         }
     }
@@ -415,7 +431,7 @@ class ChatViewModel @Inject constructor(
         }
 
         // Start new conversation from the edited question
-        completeChat()
+        completeChat(persistSnapshotFirst = true)
         return true
     }
 
@@ -522,28 +538,197 @@ class ChatViewModel @Inject constructor(
         return Pair(fileName, chatHistoryMarkdown)
     }
 
-    private fun completeChat() {
+    private fun completeChat(persistSnapshotFirst: Boolean = false) {
         // Update all the platform loading states to Loading
         _loadingStates.update { List(enabledPlatformsInChat.size) { LoadingState.Loading } }
         val turnIndex = _groupedMessages.value.assistantMessages.lastIndex
 
-        // Send chat completion requests
-        enabledPlatformsInChat.forEachIndexed { idx, platformUid ->
-            val platform = _enabledPlatformsInApp.value.firstOrNull { it.uid == platformUid } ?: return@forEachIndexed
-            val platformWithChatModel = resolvePlatformModel(platform)
-            viewModelScope.launch {
-                chatRepository.completeChat(
-                    _groupedMessages.value.userMessages,
-                    _groupedMessages.value.assistantMessages,
-                    platformWithChatModel
+        viewModelScope.launch {
+            val platforms = resolveSelectedPlatforms(enabledPlatformsInChat, _platformsInApp.value)
+                .map { IndexedValue(it.index, resolvePlatformModel(it.value)) }
+            val unavailableIndexes = enabledPlatformsInChat.indices - platforms.mapTo(mutableSetOf()) { it.index }
+            _loadingStates.update { states ->
+                states.toMutableList().apply {
+                    unavailableIndexes.forEach { this[it] = LoadingState.Idle }
+                }
+            }
+            if (platforms.isEmpty()) {
+                _loadingStates.update { List(enabledPlatformsInChat.size) { LoadingState.Idle } }
+                return@launch
+            }
+            val timestamp = currentTimeStamp
+            val userMessage = _groupedMessages.value.userMessages.getOrNull(turnIndex)
+            if (userMessage == null) {
+                _loadingStates.update { List(enabledPlatformsInChat.size) { LoadingState.Idle } }
+                return@launch
+            }
+            val runs = platforms.map { (_, platform) ->
+                AgentRunDraft(
+                    runId = UUID.randomUUID().toString(),
+                    profileUid = platform.uid,
+                    providerSnapshot = platform.compatibleType.name,
+                    modelSnapshot = platform.model,
+                    createdAt = timestamp
+                )
+            }
+            val chatRoom = _chatRoom.value.copy(
+                title = if (_chatRoom.value.id == 0) {
+                    userMessage.content.replace('\n', ' ').take(50)
+                } else {
+                    _chatRoom.value.title
+                },
+                updatedAt = timestamp
+            )
+            persistBeforeProvider(
+                persist = {
+                    if (persistSnapshotFirst && _chatRoom.value.id > 0) {
+                        chatRepository.saveChat(
+                            chatRoom = _chatRoom.value,
+                            messages = persistableMessages(_groupedMessages.value),
+                            chatPlatformModels = _chatPlatformModels.value
+                        )
+                    }
+                    chatRepository.persistAgentTurn(
+                        PersistAgentTurnRequest(
+                            chatRoom = chatRoom,
+                            userMessage = userMessage,
+                            runs = runs,
+                            chatPlatformModels = _chatPlatformModels.value.filterKeys { it in chatRoom.enabledPlatform }
+                        )
+                    )
+                },
+                startProvider = { persisted ->
+                    _chatRoom.update { persisted.chatRoom }
+                    _groupedMessages.update { groupedMessages ->
+                        groupedMessages.copy(
+                            userMessages = groupedMessages.userMessages.toMutableList().apply {
+                                this[turnIndex] = persisted.userMessage
+                            },
+                            assistantMessages = groupedMessages.assistantMessages.toMutableList().apply {
+                                this[turnIndex] = mergePersistedAssistantRow(
+                                    currentRow = this[turnIndex],
+                                    selectedProfileUids = enabledPlatformsInChat,
+                                    persistedMessages = persisted.assistantMessages,
+                                    chatId = persisted.chatRoom.id
+                                )
+                            }
+                        )
+                    }
+                    val contextMessages = _groupedMessages.value
+                    platforms.forEachIndexed { runIndex, (platformIndex, platform) ->
+                        launchProviderRun(
+                            runId = runs[runIndex].runId,
+                            turnIndex = turnIndex,
+                            platformIndex = platformIndex,
+                            platform = platform,
+                            contextMessages = contextMessages
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    showPersistenceFailure(turnIndex, platforms.map { it.index }, error)
+                }
+            )
+        }
+    }
+
+    private fun launchProviderRun(
+        runId: String,
+        turnIndex: Int,
+        platformIndex: Int,
+        platform: PlatformV2,
+        contextMessages: GroupedMessages
+    ) {
+        viewModelScope.launch {
+            val startedAt = currentTimeStamp
+            try {
+                chatRepository.updateAgentRunStatus(
+                    runId,
+                    AgentRunStatus.RUNNING,
+                    startedAt,
+                    null,
+                    null
+                )
+                val outcome = chatRepository.completeChat(
+                    contextMessages.userMessages,
+                    contextMessages.assistantMessages,
+                    platform
                 ).handleStates(
                     messageFlow = _groupedMessages,
                     turnIndex = turnIndex,
-                    platformIdx = idx,
-                    onLoadingComplete = {
-                        _loadingStates.update { it.toMutableList().apply { this[idx] = LoadingState.Idle } }
-                    }
+                    platformIdx = platformIndex,
+                    onLoadingComplete = {}
                 )
+                val terminal = outcome.toAgentRunTerminalUpdate()
+                chatRepository.updateAgentRunStatus(
+                    runId,
+                    terminal.status,
+                    startedAt,
+                    currentTimeStamp,
+                    terminal.error
+                )
+            } catch (error: CancellationException) {
+                withContext(NonCancellable) {
+                    runCatching {
+                        chatRepository.updateAgentRunStatus(
+                            runId,
+                            AgentRunStatus.CANCELED,
+                            startedAt,
+                            currentTimeStamp,
+                            null
+                        )
+                    }
+                    runCatching {
+                        chatRepository.saveChat(
+                            chatRoom = _chatRoom.value,
+                            messages = persistableMessages(_groupedMessages.value),
+                            chatPlatformModels = _chatPlatformModels.value
+                        )
+                    }
+                }
+                throw error
+            } catch (error: Throwable) {
+                val message = error.message ?: "Unknown provider error."
+                _groupedMessages.update { groupedMessages ->
+                    updateAssistantSlot(groupedMessages, turnIndex, platformIndex) { assistantMessage ->
+                        assistantMessage.copy(
+                            content = buildAssistantErrorContent(assistantMessage.content, message),
+                            createdAt = currentTimeStamp
+                        )
+                    }
+                }
+                chatRepository.updateAgentRunStatus(
+                    runId,
+                    AgentRunStatus.FAILED,
+                    startedAt,
+                    currentTimeStamp,
+                    message
+                )
+            } finally {
+                _loadingStates.update { states ->
+                    states.toMutableList().apply { this[platformIndex] = LoadingState.Idle }
+                }
+            }
+        }
+    }
+
+    private fun showPersistenceFailure(turnIndex: Int, platformIndexes: List<Int>, error: Throwable) {
+        val message = error.message ?: "Failed to save this turn."
+        _groupedMessages.update { groupedMessages ->
+            platformIndexes.fold(groupedMessages) { current, platformIndex ->
+                updateAssistantSlot(current, turnIndex, platformIndex) { assistantMessage ->
+                    assistantMessage.copy(
+                        content = buildAssistantErrorContent(assistantMessage.content, message),
+                        createdAt = currentTimeStamp
+                    )
+                }
+            }
+        }
+        _loadingStates.update { states ->
+            states.toMutableList().apply {
+                platformIndexes.forEach { index ->
+                    if (index in indices) this[index] = LoadingState.Idle
+                }
             }
         }
     }
@@ -934,13 +1119,68 @@ internal fun groupedMessagesThroughTurn(
     assistantMessages = groupedMessages.assistantMessages.take(turnIndex + 1)
 )
 
+internal data class AgentRunTerminalUpdate(val status: String, val error: String?)
+
+internal fun resolveSelectedPlatforms(
+    selectedProfileUids: List<String>,
+    configuredPlatforms: List<PlatformV2>
+): List<IndexedValue<PlatformV2>> {
+    val platformsByUid = configuredPlatforms.associateBy(PlatformV2::uid)
+    return selectedProfileUids.mapIndexedNotNull { index, uid ->
+        platformsByUid[uid]?.let { IndexedValue(index, it) }
+    }
+}
+
+internal suspend fun <T> persistBeforeProvider(
+    persist: suspend () -> T,
+    startProvider: suspend (T) -> Unit,
+    onFailure: suspend (Throwable) -> Unit
+) {
+    val persisted = try {
+        persist()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        onFailure(error)
+        return
+    }
+    startProvider(persisted)
+}
+
+internal fun mergePersistedAssistantRow(
+    currentRow: List<MessageV2>,
+    selectedProfileUids: List<String>,
+    persistedMessages: List<MessageV2>,
+    chatId: Int
+): List<MessageV2> {
+    val currentByProfile = currentRow.associateBy { it.platformType }
+    val persistedByProfile = persistedMessages.associateBy { it.platformType }
+    return selectedProfileUids.map { profileUid ->
+        persistedByProfile[profileUid]
+            ?: currentByProfile[profileUid]
+            ?: createEmptyAssistantMessage(chatId, profileUid)
+    }
+}
+
+internal fun ApiStateFlowOutcome.toAgentRunTerminalUpdate(): AgentRunTerminalUpdate = when (this) {
+    ApiStateFlowOutcome.Completed -> AgentRunTerminalUpdate(AgentRunStatus.COMPLETED, null)
+
+    is ApiStateFlowOutcome.Failed -> AgentRunTerminalUpdate(AgentRunStatus.FAILED, message)
+
+    ApiStateFlowOutcome.Incomplete -> AgentRunTerminalUpdate(
+        AgentRunStatus.FAILED,
+        "Provider stream ended without completion."
+    )
+}
+
 internal fun persistableMessages(groupedMessages: ChatViewModel.GroupedMessages): List<MessageV2> {
     val merged = groupedMessages.userMessages + groupedMessages.assistantMessages.flatten()
     return merged
         .filter {
             it.effectiveContent().isNotBlank() ||
                 it.effectiveThoughts().isNotBlank() ||
-                it.attachments.isNotEmpty()
+                it.attachments.isNotEmpty() ||
+                it.currentRunId != null
         }
         .sortedBy { it.createdAt }
 }

@@ -1,19 +1,126 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.chat
 
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
+import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.selectRevision
+import dev.chungjungsoo.gptmobile.data.database.entity.snapshotLatestAssistantRevision
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
+import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.repository.hasSendableAssistantPayload
+import dev.chungjungsoo.gptmobile.util.ApiStateFlowOutcome
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatViewModelRetryTest {
+
+    @Test
+    fun `selected profiles resolve from all configured profiles without losing slot indexes`() {
+        val configured = listOf(
+            PlatformV2(
+                uid = "profile-2",
+                name = "Disabled but selected",
+                compatibleType = ClientType.OPENAI,
+                enabled = false,
+                apiUrl = "https://example.com",
+                model = "model"
+            )
+        )
+
+        val resolved = resolveSelectedPlatforms(
+            selectedProfileUids = listOf("missing-profile", "profile-2"),
+            configuredPlatforms = configured
+        )
+
+        assertEquals(listOf(1), resolved.map { it.index })
+        assertEquals(listOf("profile-2"), resolved.map { it.value.uid })
+    }
+
+    @Test
+    fun `persist before provider waits for persistence and skips provider on failure`() = runBlocking {
+        val persistenceGate = CompletableDeferred<String>()
+        var providerValue: String? = null
+        var failure: Throwable? = null
+
+        val successJob = launch {
+            persistBeforeProvider(
+                persist = { persistenceGate.await() },
+                startProvider = { providerValue = it },
+                onFailure = { failure = it }
+            )
+        }
+
+        assertFalse(successJob.isCompleted)
+        assertEquals(null, providerValue)
+        persistenceGate.complete("persisted")
+        successJob.join()
+        assertEquals("persisted", providerValue)
+        assertEquals(null, failure)
+
+        providerValue = null
+        persistBeforeProvider(
+            persist = { throw IllegalStateException("database unavailable") },
+            startProvider = { providerValue = it },
+            onFailure = { failure = it }
+        )
+
+        assertEquals(null, providerValue)
+        assertEquals("database unavailable", failure?.message)
+    }
+
+    @Test
+    fun `persisted assistant rows retain unavailable profile slots`() {
+        val currentRow = listOf(
+            MessageV2(chatId = 7, content = "Profile unavailable", platformType = "missing-profile"),
+            MessageV2(chatId = 7, content = "", platformType = "profile-2")
+        )
+        val persisted = listOf(
+            MessageV2(
+                id = 12,
+                chatId = 7,
+                content = "",
+                platformType = "profile-2",
+                currentRunId = "run-2"
+            )
+        )
+
+        val merged = mergePersistedAssistantRow(
+            currentRow = currentRow,
+            selectedProfileUids = listOf("missing-profile", "profile-2"),
+            persistedMessages = persisted,
+            chatId = 7
+        )
+
+        assertEquals(listOf("missing-profile", "profile-2"), merged.map { it.platformType })
+        assertEquals("Profile unavailable", merged[0].content)
+        assertEquals("run-2", merged[1].currentRunId)
+    }
+
+    @Test
+    fun `agent run terminal updates preserve provider failure details`() {
+        assertEquals(
+            AgentRunTerminalUpdate(AgentRunStatus.COMPLETED, null),
+            ApiStateFlowOutcome.Completed.toAgentRunTerminalUpdate()
+        )
+        assertEquals(
+            AgentRunTerminalUpdate(AgentRunStatus.FAILED, "provider failed"),
+            ApiStateFlowOutcome.Failed("provider failed").toAgentRunTerminalUpdate()
+        )
+        assertEquals(
+            AgentRunTerminalUpdate(AgentRunStatus.FAILED, "Provider stream ended without completion."),
+            ApiStateFlowOutcome.Incomplete.toAgentRunTerminalUpdate()
+        )
+    }
 
     @Test
     fun `normalizeAssistantRow pads sparse rows and preserves overflow messages`() {
@@ -95,6 +202,20 @@ class ChatViewModelRetryTest {
         assertEquals("", retryMessage.thoughts)
         assertEquals(listOf(AssistantRevision(content = "Older answer", createdAt = 100L)), retryMessage.revisions)
         assertEquals(ACTIVE_REVISION_LATEST, retryMessage.activeRevisionIndex)
+    }
+
+    @Test
+    fun `assistant revision preserves the run that produced the answer`() {
+        val assistantMessage = MessageV2(
+            chatId = 7,
+            content = "Answer",
+            platformType = "platform-1",
+            currentRunId = "run-123"
+        )
+
+        val revision = assistantMessage.snapshotLatestAssistantRevision(timestamp = 100L)
+
+        assertEquals("run-123", revision?.runId)
     }
 
     @Test
@@ -195,6 +316,30 @@ class ChatViewModelRetryTest {
         assertEquals("Question", messages[0].content)
         assertEquals("Internal reasoning", messages[1].thoughts)
         assertEquals(1, messages[2].attachments.size)
+    }
+
+    @Test
+    fun `persistable messages keep blank assistant placeholders linked to runs`() {
+        val groupedMessages = ChatViewModel.GroupedMessages(
+            userMessages = listOf(
+                MessageV2(chatId = 7, content = "Question", platformType = null, createdAt = 1L)
+            ),
+            assistantMessages = listOf(
+                listOf(
+                    MessageV2(
+                        chatId = 7,
+                        content = "",
+                        platformType = "platform-1",
+                        currentRunId = "run-123",
+                        createdAt = 2L
+                    )
+                )
+            )
+        )
+
+        val messages = persistableMessages(groupedMessages)
+
+        assertEquals(listOf(null, "run-123"), messages.map { it.currentRunId })
     }
 
     @Test

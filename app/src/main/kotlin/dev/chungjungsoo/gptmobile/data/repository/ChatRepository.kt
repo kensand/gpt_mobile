@@ -4,6 +4,10 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoom
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
 import dev.chungjungsoo.gptmobile.data.database.entity.Message
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryRequest
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryResult
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
+import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnResult
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
 import kotlinx.coroutines.flow.Flow
@@ -18,6 +22,16 @@ interface ChatRepository {
     suspend fun fetchMessagesV2(chatId: Int): List<MessageV2>
     suspend fun fetchChatPlatformModels(chatId: Int): Map<String, String>
     suspend fun saveChatPlatformModels(chatId: Int, models: Map<String, String>)
+    suspend fun persistAgentTurn(request: PersistAgentTurnRequest): PersistAgentTurnResult
+    suspend fun persistAgentRetry(request: PersistAgentRetryRequest): PersistAgentRetryResult
+    suspend fun updateAgentRunStatus(
+        runId: String,
+        status: String,
+        startedAt: Long?,
+        completedAt: Long?,
+        terminalError: String?
+    )
+    suspend fun interruptActiveAgentRuns(completedAt: Long): Int
     suspend fun migrateToChatRoomV2MessageV2()
     fun generateDefaultChatTitle(messages: List<MessageV2>): String?
     suspend fun updateChatTitle(chatRoom: ChatRoomV2, title: String)

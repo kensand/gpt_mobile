@@ -11,6 +11,12 @@ import kotlinx.coroutines.flow.update
 
 private const val STREAM_PUBLISH_INTERVAL_MILLIS = 50L
 
+sealed interface ApiStateFlowOutcome {
+    data object Completed : ApiStateFlowOutcome
+    data class Failed(val message: String) : ApiStateFlowOutcome
+    data object Incomplete : ApiStateFlowOutcome
+}
+
 suspend fun Flow<ApiState>.handleStates(
     messageFlow: MutableStateFlow<ChatViewModel.GroupedMessages>,
     turnIndex: Int,
@@ -19,7 +25,7 @@ suspend fun Flow<ApiState>.handleStates(
     nanoTimeProvider: () -> Long = System::nanoTime,
     currentTimeProvider: () -> Long = { System.currentTimeMillis() / 1000 },
     revisionToAppendOnSuccess: AssistantRevision? = null
-) {
+): ApiStateFlowOutcome {
     val buffer = StreamingMessageBuffer(nanoTimeProvider = nanoTimeProvider)
     var isCompletedSuccessfully = false
     var terminalError: String? = null
@@ -67,6 +73,12 @@ suspend fun Flow<ApiState>.handleStates(
             )
         }
         onLoadingComplete()
+    }
+
+    return when {
+        terminalError != null -> ApiStateFlowOutcome.Failed(terminalError)
+        isCompletedSuccessfully -> ApiStateFlowOutcome.Completed
+        else -> ApiStateFlowOutcome.Incomplete
     }
 }
 
