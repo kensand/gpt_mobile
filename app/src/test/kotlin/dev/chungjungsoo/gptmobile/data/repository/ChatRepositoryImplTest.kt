@@ -26,6 +26,7 @@ import dev.chungjungsoo.gptmobile.data.network.AnthropicAPI
 import dev.chungjungsoo.gptmobile.data.network.GoogleAPI
 import dev.chungjungsoo.gptmobile.data.network.GroqAPI
 import dev.chungjungsoo.gptmobile.data.network.OpenAIAPI
+import dev.chungjungsoo.gptmobile.data.network.ProviderRequestConfig
 import dev.chungjungsoo.gptmobile.data.network.UploadedProviderFile
 import java.io.File
 import java.lang.reflect.InvocationHandler
@@ -61,15 +62,13 @@ class ChatRepositoryImplTest {
     }
 
     @Test
-    fun `loading is emitted before expensive request preparation finishes`() = runBlocking {
+    fun `complete chat emits loading before request preparation`() = runBlocking {
+        val repository = createRepository()
         val firstState = withTimeout(100) {
-            streamPreparedApiState(
-                prepare = {
-                    Thread.sleep(200)
-                },
-                stream = {
-                    flowOf(ApiState.Success("done"))
-                }
+            repository.completeChat(
+                userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
+                assistantMessages = emptyList(),
+                platform = customPlatform()
             ).first()
         }
 
@@ -408,8 +407,7 @@ class ChatRepositoryImplTest {
         override fun streamChatCompletion(
             request: GroqChatCompletionRequest,
             timeoutSeconds: Int,
-            token: String?,
-            apiUrl: String
+            config: ProviderRequestConfig
         ): Flow<GroqChatCompletionChunk> {
             streamCalls += 1
             lastRequest = request
@@ -420,40 +418,46 @@ class ChatRepositoryImplTest {
     private class RecordingOpenAIAPI : OpenAIAPI {
         var streamChatCompletionCalls = 0
 
-        override fun setToken(token: String?) = Unit
-
-        override fun setAPIUrl(url: String) = Unit
-
-        override fun streamChatCompletion(request: ChatCompletionRequest, timeoutSeconds: Int): Flow<ChatCompletionChunk> {
+        override fun streamChatCompletion(
+            request: ChatCompletionRequest,
+            timeoutSeconds: Int,
+            config: ProviderRequestConfig
+        ): Flow<ChatCompletionChunk> {
             streamChatCompletionCalls += 1
             return emptyFlow()
         }
 
-        override fun streamResponses(request: ResponsesRequest, timeoutSeconds: Int): Flow<ResponsesStreamEvent> = emptyFlow()
+        override fun streamResponses(
+            request: ResponsesRequest,
+            timeoutSeconds: Int,
+            config: ProviderRequestConfig
+        ): Flow<ResponsesStreamEvent> = emptyFlow()
 
         override suspend fun uploadFile(
             filePath: String,
             fileName: String,
-            mimeType: String
+            mimeType: String,
+            config: ProviderRequestConfig
         ): UploadedProviderFile = UploadedProviderFile(id = "file-uploaded", mimeType = mimeType)
 
-        override suspend fun isFileAvailable(fileId: String): Boolean = false
+        override suspend fun isFileAvailable(fileId: String, config: ProviderRequestConfig): Boolean = false
     }
 
     private class FakeAnthropicAPI : AnthropicAPI {
-        override fun setToken(token: String?) = Unit
-
-        override fun setAPIUrl(url: String) = Unit
-
-        override fun streamChatMessage(messageRequest: MessageRequest, timeoutSeconds: Int): Flow<MessageResponseChunk> = emptyFlow()
+        override fun streamChatMessage(
+            messageRequest: MessageRequest,
+            timeoutSeconds: Int,
+            config: ProviderRequestConfig
+        ): Flow<MessageResponseChunk> = emptyFlow()
 
         override suspend fun uploadFile(
             filePath: String,
             fileName: String,
-            mimeType: String
+            mimeType: String,
+            config: ProviderRequestConfig
         ): UploadedProviderFile = UploadedProviderFile(id = "anthropic-file", mimeType = mimeType)
 
-        override suspend fun isFileAvailable(fileId: String): Boolean = false
+        override suspend fun isFileAvailable(fileId: String, config: ProviderRequestConfig): Boolean = false
     }
 
     private class FakeGoogleAPI(
@@ -462,14 +466,11 @@ class ChatRepositoryImplTest {
         var streamCalls = 0
         var lastRequest: GenerateContentRequest? = null
 
-        override fun setToken(token: String?) = Unit
-
-        override fun setAPIUrl(url: String) = Unit
-
         override fun streamGenerateContent(
             request: GenerateContentRequest,
             model: String,
-            timeoutSeconds: Int
+            timeoutSeconds: Int,
+            config: ProviderRequestConfig
         ): Flow<GenerateContentResponse> {
             streamCalls += 1
             lastRequest = request
@@ -479,9 +480,10 @@ class ChatRepositoryImplTest {
         override suspend fun uploadFile(
             filePath: String,
             fileName: String,
-            mimeType: String
+            mimeType: String,
+            config: ProviderRequestConfig
         ): UploadedProviderFile = UploadedProviderFile(id = "google-file", mimeType = mimeType)
 
-        override suspend fun isFileAvailable(fileName: String): Boolean = false
+        override suspend fun isFileAvailable(fileName: String, config: ProviderRequestConfig): Boolean = false
     }
 }

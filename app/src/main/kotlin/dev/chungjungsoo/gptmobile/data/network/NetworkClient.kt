@@ -37,7 +37,7 @@ class NetworkClient @Inject constructor(
             install(Logging) {
                 logger = Logger.DEFAULT
                 level = resolveNetworkLogLevel()
-                sanitizeHeader { header -> header == HttpHeaders.Authorization }
+                sanitizeHeader { header -> isSensitiveHeader(header) }
             }
 
             install(DefaultRequest) {
@@ -71,5 +71,8 @@ class NetworkClient @Inject constructor(
         }
 
         internal fun resolveNetworkLogLevel(): LogLevel = LogLevel.HEADERS
+
+        internal fun isSensitiveHeader(header: String): Boolean = header.equals(HttpHeaders.Authorization, ignoreCase = true) ||
+            header.equals("x-goog-api-key", ignoreCase = true)
     }
 }
