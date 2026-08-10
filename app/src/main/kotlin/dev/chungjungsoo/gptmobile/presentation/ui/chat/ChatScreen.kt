@@ -93,7 +93,9 @@ import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
+import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -119,6 +121,7 @@ fun ChatScreen(
 
     val chatRoom by chatViewModel.chatRoom.collectAsStateWithLifecycle()
     val groupedMessages by chatViewModel.groupedMessages.collectAsStateWithLifecycle()
+    val toolEventsByRun by chatViewModel.toolEventsByRun.collectAsStateWithLifecycle()
     val indexStates by chatViewModel.indexStates.collectAsStateWithLifecycle()
     val loadingStates by chatViewModel.loadingStates.collectAsStateWithLifecycle()
     val isChatTitleDialogOpen by chatViewModel.isChatTitleDialogOpen.collectAsStateWithLifecycle()
@@ -215,6 +218,7 @@ fun ChatScreen(
                             messageIndex = index,
                             message = groupedMessages.userMessages[index],
                             assistantMessages = groupedMessages.assistantMessages.getOrNull(index) ?: emptyList(),
+                            toolEventsByRun = toolEventsByRun,
                             platformIndexState = indexStates.getOrElse(index) { 0 },
                             loadingStates = loadingStates,
                             enabledPlatformsInChat = chatViewModel.enabledPlatformsInChat,
@@ -245,6 +249,7 @@ fun ChatScreen(
                                 messageIndex = lastMessageIndex,
                                 message = groupedMessages.userMessages[lastMessageIndex],
                                 assistantMessages = groupedMessages.assistantMessages.getOrNull(lastMessageIndex) ?: emptyList(),
+                                toolEventsByRun = toolEventsByRun,
                                 platformIndexState = indexStates.getOrElse(lastMessageIndex) { 0 },
                                 loadingStates = loadingStates,
                                 enabledPlatformsInChat = chatViewModel.enabledPlatformsInChat,
@@ -386,6 +391,7 @@ private fun ChatMessagePair(
     messageIndex: Int,
     message: MessageV2,
     assistantMessages: List<MessageV2>,
+    toolEventsByRun: Map<String, List<ToolEvent>>,
     platformIndexState: Int,
     loadingStates: List<ChatViewModel.LoadingState>,
     enabledPlatformsInChat: List<String>,
@@ -407,6 +413,9 @@ private fun ChatMessagePair(
     val selectedAssistantMessage = assistantMessages.getOrNull(platformIndexState)
     val assistantContent = selectedAssistantMessage?.effectiveContent() ?: ""
     val assistantThoughts = selectedAssistantMessage?.effectiveThoughts() ?: ""
+    val toolEvents = selectedAssistantMessage?.effectiveRunId()
+        ?.let(toolEventsByRun::get)
+        .orEmpty()
     val canShowPreviousRevision = selectedAssistantMessage?.let { assistantMessage ->
         assistantMessage.revisions.isNotEmpty() &&
             assistantMessage.activeRevisionIndex < assistantMessage.revisions.lastIndex
@@ -486,6 +495,7 @@ private fun ChatMessagePair(
                 text = assistantContent,
                 thoughts = assistantThoughts,
                 attachments = selectedAssistantMessage?.attachments.orEmpty().map { it.filePathForDisplay },
+                toolEvents = toolEvents,
                 contentIdentity = "$messageIndex:$selectedPlatformUid",
                 revisionIndexLabel = selectedAssistantMessage?.let { assistantMessage ->
                     val totalRevisions = assistantMessage.revisions.size + 1

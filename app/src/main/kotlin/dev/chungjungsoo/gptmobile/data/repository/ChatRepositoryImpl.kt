@@ -4,12 +4,16 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunEvent
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunner
+import dev.chungjungsoo.gptmobile.data.agent.AgentToolResult
 import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
+import dev.chungjungsoo.gptmobile.data.agent.ToolResultContent
 import dev.chungjungsoo.gptmobile.data.agent.provider.AnthropicMessagesAdapter
 import dev.chungjungsoo.gptmobile.data.agent.provider.GeminiAdapter
 import dev.chungjungsoo.gptmobile.data.agent.provider.OpenAICompatibleAdapter
 import dev.chungjungsoo.gptmobile.data.agent.provider.OpenAIResponsesAdapter
 import dev.chungjungsoo.gptmobile.data.agent.provider.ProviderAttachmentEncoder
+import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
+import dev.chungjungsoo.gptmobile.data.agent.tool.ResolvedAgentTool
 import dev.chungjungsoo.gptmobile.data.context.ContextBuilder
 import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
 import dev.chungjungsoo.gptmobile.data.context.ProviderContextPolicy
@@ -30,6 +34,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryResult
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnResult
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
 import dev.chungjungsoo.gptmobile.data.model.ApiType
@@ -62,7 +67,9 @@ class ChatRepositoryImpl @Inject constructor(
     private val anthropicAPI: AnthropicAPI,
     private val googleAPI: GoogleAPI,
     private val attachmentUploadCoordinator: AttachmentUploadCoordinator,
-    private val contextBuilder: ContextBuilder
+    private val contextBuilder: ContextBuilder,
+    private val agentToolResolver: AgentToolResolver,
+    private val toolEventRecorder: ToolEventRecorder
 ) : ChatRepository {
     private val providerAttachmentEncoder = ProviderAttachmentEncoder(context)
     private val openAIResponsesAdapter = OpenAIResponsesAdapter(openAIAPI, providerAttachmentEncoder)
@@ -74,33 +81,47 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun completeChat(
         userMessages: List<MessageV2>,
         assistantMessages: List<List<MessageV2>>,
-        platform: PlatformV2
+        platform: PlatformV2,
+        runId: String
     ): Flow<ApiState> = flow {
         emit(ApiState.Loading)
-        val contextTurns = withContext(Dispatchers.Default) {
-            buildContextTurns(userMessages, assistantMessages, platform).also { turns ->
-                validateInlineBudgetIfNeeded(turns, platform)
+        try {
+            val contextTurns = withContext(Dispatchers.Default) {
+                buildContextTurns(userMessages, assistantMessages, platform).also { turns ->
+                    validateInlineBudgetIfNeeded(turns, platform)
+                }
             }
-        }
-        val session = when (platform.compatibleType) {
-            ClientType.OPENAI -> openAIResponsesAdapter.openSession(contextTurns, platform)
+            val session = when (platform.compatibleType) {
+                ClientType.OPENAI -> openAIResponsesAdapter.openSession(contextTurns, platform)
 
-            ClientType.GROQ, ClientType.OLLAMA, ClientType.OPENROUTER, ClientType.CUSTOM ->
-                openAICompatibleAdapter.openSession(contextTurns, platform)
+                ClientType.GROQ, ClientType.OLLAMA, ClientType.OPENROUTER, ClientType.CUSTOM ->
+                    openAICompatibleAdapter.openSession(contextTurns, platform)
 
-            ClientType.ANTHROPIC -> anthropicMessagesAdapter.openSession(contextTurns, platform)
+                ClientType.ANTHROPIC -> anthropicMessagesAdapter.openSession(contextTurns, platform)
 
-            ClientType.GOOGLE -> geminiAdapter.openSession(contextTurns, platform)
-        }
-
-        agentRunner.run(session, emptyList()).collect { runEvent ->
-            val providerEvent = (runEvent as? AgentRunEvent.Provider)?.event ?: return@collect
-            when (providerEvent) {
-                is ProviderEvent.ThinkingDelta -> emit(ApiState.Thinking(providerEvent.text))
-                is ProviderEvent.TextDelta -> emit(ApiState.Success(providerEvent.text))
-                is ProviderEvent.Failed -> emit(ApiState.Error(providerEvent.message))
-                is ProviderEvent.ToolCall, ProviderEvent.Completed -> Unit
+                ClientType.GOOGLE -> geminiAdapter.openSession(contextTurns, platform)
             }
+            val resolvedTools = agentToolResolver.resolve(platform.uid)
+            val trace = ToolTraceSession(runId, resolvedTools, toolEventRecorder)
+
+            agentRunner.run(session, resolvedTools.map { it.tool }).collect { runEvent ->
+                when (runEvent) {
+                    is AgentRunEvent.Provider -> when (val providerEvent = runEvent.event) {
+                        is ProviderEvent.ThinkingDelta -> emit(ApiState.Thinking(providerEvent.text))
+                        is ProviderEvent.TextDelta -> emit(ApiState.Success(providerEvent.text))
+                        is ProviderEvent.Failed -> emit(ApiState.Error(providerEvent.message))
+                        is ProviderEvent.ToolCall, ProviderEvent.Completed -> Unit
+                    }
+
+                    is AgentRunEvent.ToolStarted -> trace.start(runEvent.call)
+
+                    is AgentRunEvent.ToolFinished -> trace.finish(runEvent.call, runEvent.result)
+
+                    is AgentRunEvent.Notice -> emit(ApiState.Notice(runEvent.message))
+                }
+            }
+        } finally {
+            toolEventRecorder.cancelRun(runId, currentEpochSeconds())
         }
     }.catch { error ->
         emit(ApiState.Error(error.message ?: "Failed to complete chat"))
@@ -184,6 +205,8 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun fetchMessages(chatId: Int): List<Message> = messageDao.loadMessages(chatId)
 
     override suspend fun fetchMessagesV2(chatId: Int): List<MessageV2> = messageV2Dao.loadMessages(chatId)
+
+    override fun observeToolEvents(chatId: Int): Flow<List<ToolEvent>> = toolEventRecorder.observeChat(chatId)
 
     override suspend fun fetchChatPlatformModels(chatId: Int): Map<String, String> = chatPlatformModelV2Dao.getByChatId(chatId).associate {
         it.platformUid to it.model
@@ -361,3 +384,50 @@ internal fun validateResponseInputPartsOrThrow(messageContent: String, partCount
         throw IllegalStateException("No encodable message content for messageId=$messageId")
     }
 }
+
+private class ToolTraceSession(
+    private val runId: String,
+    tools: List<ResolvedAgentTool>,
+    private val recorder: ToolEventRecorder
+) {
+    private val toolsByName = tools.associateBy { it.modelToolName }
+    private val pendingEventIds = mutableMapOf<String, ArrayDeque<String>>()
+    private var sequence = 0
+
+    suspend fun start(call: ProviderEvent.ToolCall) {
+        val resolved = toolsByName[call.name]
+        val event = recorder.startTool(
+            runId = runId,
+            sequence = sequence++,
+            callId = call.callId,
+            toolName = resolved?.realToolName ?: call.name,
+            modelToolName = call.name,
+            arguments = call.arguments,
+            connectionUid = resolved?.connectionUid,
+            connectionName = resolved?.connectionName,
+            startedAt = currentEpochSeconds()
+        )
+        pendingEventIds.getOrPut(call.callId, ::ArrayDeque).addLast(event.eventId)
+    }
+
+    suspend fun finish(call: ProviderEvent.ToolCall, result: AgentToolResult) {
+        val eventId = pendingEventIds[call.callId]?.removeFirstOrNull() ?: return
+        recorder.finishTool(
+            eventId = eventId,
+            result = result,
+            completedAt = currentEpochSeconds(),
+            error = result.errorMessage()
+        )
+    }
+}
+
+private fun AgentToolResult.errorMessage(): String? {
+    if (!isError) return null
+    return when (val value = content) {
+        is ToolResultContent.Text -> value.text
+        is ToolResultContent.Json -> value.value.toString()
+        is ToolResultContent.ResourceLinks -> "Tool call failed."
+    }
+}
+
+private fun currentEpochSeconds(): Long = System.currentTimeMillis() / 1000

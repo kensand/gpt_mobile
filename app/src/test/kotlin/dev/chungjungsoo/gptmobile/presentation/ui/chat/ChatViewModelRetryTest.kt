@@ -5,7 +5,10 @@ import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
+import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.selectRevision
@@ -217,6 +220,57 @@ class ChatViewModelRetryTest {
 
         assertEquals("run-123", revision?.runId)
     }
+
+    @Test
+    fun `effective run follows the selected assistant revision`() {
+        val assistantMessage = MessageV2(
+            content = "Latest",
+            revisions = listOf(AssistantRevision(content = "Previous", createdAt = 100L, runId = "run-old")),
+            activeRevisionIndex = 0,
+            platformType = "platform-1",
+            currentRunId = "run-new"
+        )
+
+        assertEquals("run-old", assistantMessage.effectiveRunId())
+        assertEquals("run-new", assistantMessage.resetActiveRevision().effectiveRunId())
+    }
+
+    @Test
+    fun `assistant export includes only the selected revision trace`() {
+        val message = MessageV2(
+            content = "Latest",
+            revisions = listOf(AssistantRevision(content = "Previous", createdAt = 100L, runId = "run-old")),
+            activeRevisionIndex = 0,
+            platformType = "platform-1",
+            currentRunId = "run-new"
+        )
+        val traces = mapOf(
+            "run-old" to listOf(toolEvent("old-event", "old result")),
+            "run-new" to listOf(toolEvent("new-event", "new result"))
+        )
+
+        val markdown = formatAssistantExport("OpenAI", message, traces)
+
+        assertTrue(markdown.contains("Previous"))
+        assertTrue(markdown.contains("old result"))
+        assertFalse(markdown.contains("Latest"))
+        assertFalse(markdown.contains("new result"))
+    }
+
+    private fun toolEvent(eventId: String, result: String) = ToolEvent(
+        eventId = eventId,
+        runId = if (eventId == "old-event") "run-old" else "run-new",
+        sequence = 0,
+        callId = "call-$eventId",
+        connectionUidSnapshot = null,
+        connectionNameSnapshot = null,
+        toolName = "web_search",
+        modelToolName = "web_search",
+        arguments = "{}",
+        result = result,
+        resultType = "TEXT",
+        status = ToolEventStatus.COMPLETED
+    )
 
     @Test
     fun `normalizeAssistantRow keeps known slots addressable when duplicates exist`() {

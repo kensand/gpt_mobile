@@ -1,9 +1,18 @@
 package dev.chungjungsoo.gptmobile.data.repository
 
 import android.content.ContextWrapper
+import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
 import dev.chungjungsoo.gptmobile.data.context.ContextBuilder
+import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
+import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentToolBinding
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventStatus
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.request.MessageRequest
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.response.MessageResponseChunk
@@ -18,6 +27,10 @@ import dev.chungjungsoo.gptmobile.data.dto.groq.response.GroqDelta
 import dev.chungjungsoo.gptmobile.data.dto.openai.request.ChatCompletionRequest
 import dev.chungjungsoo.gptmobile.data.dto.openai.request.ResponsesRequest
 import dev.chungjungsoo.gptmobile.data.dto.openai.response.ChatCompletionChunk
+import dev.chungjungsoo.gptmobile.data.dto.openai.response.ChatFunctionDelta
+import dev.chungjungsoo.gptmobile.data.dto.openai.response.ChatToolCallDelta
+import dev.chungjungsoo.gptmobile.data.dto.openai.response.Choice
+import dev.chungjungsoo.gptmobile.data.dto.openai.response.Delta
 import dev.chungjungsoo.gptmobile.data.dto.openai.response.ResponsesStreamEvent
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.model.ClientType
@@ -25,9 +38,12 @@ import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
 import dev.chungjungsoo.gptmobile.data.network.AnthropicAPI
 import dev.chungjungsoo.gptmobile.data.network.GoogleAPI
 import dev.chungjungsoo.gptmobile.data.network.GroqAPI
+import dev.chungjungsoo.gptmobile.data.network.NetworkClient
 import dev.chungjungsoo.gptmobile.data.network.OpenAIAPI
 import dev.chungjungsoo.gptmobile.data.network.ProviderRequestConfig
 import dev.chungjungsoo.gptmobile.data.network.UploadedProviderFile
+import dev.chungjungsoo.gptmobile.data.security.SecretVault
+import io.ktor.client.engine.cio.CIO
 import java.io.File
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
@@ -42,6 +58,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatRepositoryImplTest {
@@ -68,7 +85,8 @@ class ChatRepositoryImplTest {
             repository.completeChat(
                 userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
                 assistantMessages = emptyList(),
-                platform = customPlatform()
+                platform = customPlatform(),
+                runId = "test-run"
             ).first()
         }
 
@@ -101,7 +119,8 @@ class ChatRepositoryImplTest {
         val states = repository.completeChat(
             userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
             assistantMessages = emptyList(),
-            platform = groqPlatform(reasoning = true, model = "qwen/qwen3-32b")
+            platform = groqPlatform(reasoning = true, model = "qwen/qwen3-32b"),
+            runId = "test-run"
         ).toList()
 
         assertEquals(
@@ -136,7 +155,8 @@ class ChatRepositoryImplTest {
         val states = repository.completeChat(
             userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
             assistantMessages = emptyList(),
-            platform = groqPlatform(reasoning = true, model = "qwen/qwen3-32b")
+            platform = groqPlatform(reasoning = true, model = "qwen/qwen3-32b"),
+            runId = "test-run"
         ).toList()
 
         assertEquals(
@@ -158,7 +178,8 @@ class ChatRepositoryImplTest {
         repository.completeChat(
             userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
             assistantMessages = emptyList(),
-            platform = groqPlatform(reasoning = false, model = "qwen/qwen3-32b")
+            platform = groqPlatform(reasoning = false, model = "qwen/qwen3-32b"),
+            runId = "test-run"
         ).toList()
 
         val request = groqAPI.lastRequest
@@ -175,7 +196,8 @@ class ChatRepositoryImplTest {
         repository.completeChat(
             userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
             assistantMessages = emptyList(),
-            platform = groqPlatform(reasoning = false, model = "openai/gpt-oss-20b")
+            platform = groqPlatform(reasoning = false, model = "openai/gpt-oss-20b"),
+            runId = "test-run"
         ).toList()
 
         val request = groqAPI.lastRequest
@@ -192,7 +214,8 @@ class ChatRepositoryImplTest {
         repository.completeChat(
             userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
             assistantMessages = emptyList(),
-            platform = googlePlatform()
+            platform = googlePlatform(),
+            runId = "test-run"
         ).toList()
 
         assertEquals(1, googleAPI.streamCalls)
@@ -222,7 +245,8 @@ class ChatRepositoryImplTest {
         val states = repository.completeChat(
             userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
             assistantMessages = emptyList(),
-            platform = googlePlatform()
+            platform = googlePlatform(),
+            runId = "test-run"
         ).toList()
 
         assertEquals(
@@ -250,7 +274,8 @@ class ChatRepositoryImplTest {
         val states = repository.completeChat(
             userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
             assistantMessages = emptyList(),
-            platform = googlePlatform()
+            platform = googlePlatform(),
+            runId = "test-run"
         ).toList()
 
         assertEquals(
@@ -314,17 +339,93 @@ class ChatRepositoryImplTest {
                     )
                 )
             ),
-            platform = customPlatform
+            platform = customPlatform,
+            runId = "test-run"
         ).toList()
 
         assertEquals(listOf(ApiState.Loading, ApiState.Done), states)
         assertEquals(1, openAIAPI.streamChatCompletionCalls)
     }
 
+    @Test
+    fun `complete chat executes assigned web search and persists its trace`() = runBlocking {
+        val connection = ToolConnection(
+            connectionUid = "search-1",
+            name = "Fixture search",
+            alias = "fixture_search",
+            type = ToolConnectionType.FIRECRAWL,
+            endpointUrl = "https://api.firecrawl.dev/v2/search",
+            authType = ToolConnectionAuthType.BEARER,
+            secretRef = null,
+            oauthClientId = null
+        )
+        val toolDao = SingleToolConnectionDao(
+            connection,
+            AgentToolBinding(
+                bindingUid = "binding-1",
+                profileUid = "custom-platform",
+                connectionUid = connection.connectionUid,
+                toolName = "web_search"
+            )
+        )
+        val vault = MapSecretVault(emptyMap())
+        val traceDao = RecordingToolEventDao()
+        val openAIAPI = RecordingOpenAIAPI(
+            ArrayDeque(
+                listOf(
+                    flowOf(
+                        ChatCompletionChunk(
+                            choices = listOf(
+                                Choice(
+                                    index = 0,
+                                    delta = Delta(
+                                        toolCalls = listOf(
+                                            ChatToolCallDelta(
+                                                index = 0,
+                                                id = "call_exact",
+                                                function = ChatFunctionDelta("web_search", "{\"query\":\"fixture\"}")
+                                            )
+                                        )
+                                    ),
+                                    finishReason = "tool_calls"
+                                )
+                            )
+                        )
+                    ),
+                    flowOf(ChatCompletionChunk(choices = listOf(Choice(0, Delta(content = "done"), finishReason = "stop"))))
+                )
+            )
+        )
+        val repository = createRepository(
+            openAIAPI = openAIAPI,
+            agentToolResolver = AgentToolResolver(ToolConnectionRepository(toolDao, vault), vault, NetworkClient(CIO)),
+            toolEventRecorder = ToolEventRecorder(traceDao.asDao())
+        )
+
+        val states = repository.completeChat(
+            userMessages = listOf(MessageV2(content = "Search", platformType = null)),
+            assistantMessages = emptyList(),
+            platform = customPlatform(),
+            runId = "run-web"
+        ).toList()
+
+        assertEquals(listOf(ApiState.Loading, ApiState.Success("done"), ApiState.Done), states)
+        assertEquals("web_search", openAIAPI.requests.first().tools!!.single().function.name)
+        assertEquals("call_exact", openAIAPI.requests.last().messages.takeLast(2).first().toolCalls!!.single().id)
+        val event = traceDao.events.single()
+        assertEquals("run-web", event.runId)
+        assertEquals("call_exact", event.callId)
+        assertEquals("Fixture search", event.connectionNameSnapshot)
+        assertEquals(ToolEventStatus.FAILED, event.status)
+        assertTrue(event.result.orEmpty().contains("missing credential"))
+    }
+
     private fun createRepository(
         groqAPI: GroqAPI = FakeGroqAPI(emptyFlow()),
         openAIAPI: OpenAIAPI = RecordingOpenAIAPI(),
-        googleAPI: GoogleAPI = FakeGoogleAPI()
+        googleAPI: GoogleAPI = FakeGoogleAPI(),
+        agentToolResolver: AgentToolResolver = emptyToolResolver(),
+        toolEventRecorder: ToolEventRecorder = ToolEventRecorder(proxy())
     ): ChatRepositoryImpl = ChatRepositoryImpl(
         context = ContextWrapper(null),
         chatRoomDao = proxy(),
@@ -344,8 +445,15 @@ class ChatRepositoryImplTest {
             FakeAnthropicAPI(),
             googleAPI
         ),
-        contextBuilder = ContextBuilder()
+        contextBuilder = ContextBuilder(),
+        agentToolResolver = agentToolResolver,
+        toolEventRecorder = toolEventRecorder
     )
+
+    private fun emptyToolResolver(): AgentToolResolver {
+        val vault = MapSecretVault(emptyMap())
+        return AgentToolResolver(ToolConnectionRepository(SingleToolConnectionDao(), vault), vault, NetworkClient(CIO))
+    }
 
     private fun groqPlatform(reasoning: Boolean, model: String) = PlatformV2(
         uid = "groq-platform",
@@ -415,8 +523,11 @@ class ChatRepositoryImplTest {
         }
     }
 
-    private class RecordingOpenAIAPI : OpenAIAPI {
+    private class RecordingOpenAIAPI(
+        private val chatRounds: ArrayDeque<Flow<ChatCompletionChunk>> = ArrayDeque()
+    ) : OpenAIAPI {
         var streamChatCompletionCalls = 0
+        val requests = mutableListOf<ChatCompletionRequest>()
 
         override fun streamChatCompletion(
             request: ChatCompletionRequest,
@@ -424,7 +535,8 @@ class ChatRepositoryImplTest {
             config: ProviderRequestConfig
         ): Flow<ChatCompletionChunk> {
             streamChatCompletionCalls += 1
-            return emptyFlow()
+            requests += request
+            return chatRounds.removeFirstOrNull() ?: emptyFlow()
         }
 
         override fun streamResponses(
@@ -485,5 +597,98 @@ class ChatRepositoryImplTest {
         ): UploadedProviderFile = UploadedProviderFile(id = "google-file", mimeType = mimeType)
 
         override suspend fun isFileAvailable(fileName: String, config: ProviderRequestConfig): Boolean = false
+    }
+}
+
+private class MapSecretVault(
+    private val values: Map<String, ByteArray>
+) : SecretVault {
+    override suspend fun put(secretRef: String, secret: ByteArray) = Unit
+
+    override suspend fun read(secretRef: String): ByteArray? = values[secretRef]?.copyOf()
+
+    override suspend fun delete(secretRef: String) = Unit
+}
+
+private class SingleToolConnectionDao(
+    connection: ToolConnection? = null,
+    binding: AgentToolBinding? = null
+) : ToolConnectionDao {
+    private val connections = listOfNotNull(connection)
+    private val bindings = listOfNotNull(binding)
+
+    override suspend fun listConnections(): List<ToolConnection> = connections
+
+    override suspend fun getConnection(connectionUid: String): ToolConnection? = connections.firstOrNull { it.connectionUid == connectionUid }
+
+    override suspend fun getConnectionsByUids(connectionUids: List<String>): List<ToolConnection> = connections.filter { it.connectionUid in connectionUids }
+
+    override suspend fun upsertConnection(connection: ToolConnection) = Unit
+
+    override suspend fun deleteConnectionByUid(connectionUid: String) = Unit
+
+    override suspend fun listBindingsByProfile(profileUid: String): List<AgentToolBinding> = bindings.filter { it.profileUid == profileUid }
+
+    override suspend fun insertBinding(binding: AgentToolBinding) = Unit
+
+    override suspend fun deleteConnectionToolBindingsForTypes(profileUid: String, toolName: String, connectionTypes: List<String>) = Unit
+
+    override suspend fun deleteBuiltInToolBinding(profileUid: String, toolName: String) = Unit
+
+    override suspend fun deleteConnectionBindingsForType(profileUid: String, connectionType: String) = Unit
+
+    override suspend fun listBindingsWithConnections(profileUid: String): List<AgentToolBindingWithConnection> = listBindingsByProfile(profileUid).map { row ->
+        AgentToolBindingWithConnection(row, row.connectionUid?.let { uid -> connections.firstOrNull { it.connectionUid == uid } })
+    }
+}
+
+private class RecordingToolEventDao {
+    val events = mutableListOf<ToolEvent>()
+
+    @Suppress("UNCHECKED_CAST")
+    fun asDao(): dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao {
+        val handler = InvocationHandler { _, method, args ->
+            when (method.name) {
+                "insertToolEvent" -> {
+                    events += args!![0] as ToolEvent
+                    Unit
+                }
+
+                "finishToolEvent" -> {
+                    val eventId = args!![0] as String
+                    val index = events.indexOfFirst { it.eventId == eventId && it.callId == args[1] }
+                    if (index < 0) {
+                        0
+                    } else {
+                        events[index] = events[index].copy(
+                            result = args[2] as String,
+                            resultType = args[3] as String,
+                            status = args[4] as String,
+                            isError = args[5] as Boolean,
+                            completedAt = args[6] as Long,
+                            error = args[7] as String?
+                        )
+                        1
+                    }
+                }
+
+                "getToolEventById" -> events.firstOrNull { it.eventId == args!![0] }
+
+                "cancelActiveToolEvents" -> Unit
+
+                else -> when (method.returnType) {
+                    Boolean::class.javaPrimitiveType -> false
+                    Int::class.javaPrimitiveType -> 0
+                    Long::class.javaPrimitiveType -> 0L
+                    Unit::class.java -> Unit
+                    else -> null
+                }
+            }
+        }
+        return Proxy.newProxyInstance(
+            dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao::class.java.classLoader,
+            arrayOf(dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao::class.java),
+            handler
+        ) as dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
     }
 }

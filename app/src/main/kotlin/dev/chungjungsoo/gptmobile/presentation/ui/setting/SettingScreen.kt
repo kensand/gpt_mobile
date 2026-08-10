@@ -56,6 +56,7 @@ fun SettingScreen(
     onNavigationClick: () -> Unit,
     onNavigateToAddPlatform: () -> Unit,
     onNavigateToPlatformSetting: (String) -> Unit,
+    onNavigateToToolConnections: () -> Unit,
     onNavigateToAboutPage: () -> Unit
 ) {
     val scrollState = rememberScrollState()
@@ -109,6 +110,13 @@ fun SettingScreen(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
+            )
+            SettingItem(
+                title = stringResource(R.string.web_tools),
+                description = stringResource(R.string.web_tools_description),
+                onItemClick = onNavigateToToolConnections,
+                showTrailingIcon = true,
+                showLeadingIcon = false
             )
 
             // Dynamic platform list

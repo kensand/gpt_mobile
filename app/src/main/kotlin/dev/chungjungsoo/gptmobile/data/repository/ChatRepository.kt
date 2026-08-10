@@ -9,12 +9,19 @@ import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryResult
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnResult
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
 import kotlinx.coroutines.flow.Flow
 
 interface ChatRepository {
 
-    suspend fun completeChat(userMessages: List<MessageV2>, assistantMessages: List<List<MessageV2>>, platform: PlatformV2): Flow<ApiState>
+    suspend fun completeChat(
+        userMessages: List<MessageV2>,
+        assistantMessages: List<List<MessageV2>>,
+        platform: PlatformV2,
+        runId: String
+    ): Flow<ApiState>
+    fun observeToolEvents(chatId: Int): Flow<List<ToolEvent>>
     suspend fun fetchChatList(): List<ChatRoom>
     suspend fun fetchChatListV2(): List<ChatRoomV2>
     suspend fun searchChatsV2(query: String): List<ChatRoomV2>

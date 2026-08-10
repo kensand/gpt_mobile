@@ -55,5 +55,6 @@ object ToolConnectionType {
 object ToolConnectionAuthType {
     const val NONE = "NONE"
     const val BEARER = "BEARER"
+    const val API_KEY = "API_KEY"
     const val OAUTH = "OAUTH"
 }

@@ -226,6 +226,40 @@ class AgentRunnerTest {
     }
 
     @Test
+    fun `tool definition fallback cannot execute an unexposed tool call`() = runBlocking {
+        val providerCalls = AtomicInteger()
+        val executions = AtomicInteger()
+        val session = session { tools, exchanges ->
+            when (providerCalls.getAndIncrement()) {
+                0 -> throw ToolDefinitionsRejectedException("unsupported")
+
+                1 -> flow {
+                    assertTrue(tools.isEmpty())
+                    emit(toolCall("unexpected_call"))
+                    emit(ProviderEvent.Completed)
+                }
+
+                else -> flow {
+                    assertTrue(tools.isEmpty())
+                    assertTrue(exchanges.single().results.single().isError)
+                    emit(ProviderEvent.TextDelta("chat fallback"))
+                    emit(ProviderEvent.Completed)
+                }
+            }
+        }
+        val tool = tool { callId, _ ->
+            executions.incrementAndGet()
+            AgentToolResult(callId, ToolResultContent.Text("executed"), isError = false)
+        }
+
+        val events = AgentRunner().run(session, listOf(tool)).toList()
+
+        assertEquals(0, executions.get())
+        assertTrue(events.contains(AgentRunEvent.Notice("Tools unavailable for this model.")))
+        assertTrue(events.contains(AgentRunEvent.Provider(ProviderEvent.TextDelta("chat fallback"))))
+    }
+
+    @Test
     fun `tool definition rejection never retries after a tool executes`() = runBlocking {
         val providerCalls = AtomicInteger()
         val executions = AtomicInteger()

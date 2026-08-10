@@ -2,6 +2,7 @@ package dev.chungjungsoo.gptmobile.data.network
 
 import io.ktor.client.plugins.logging.LogLevel
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -13,9 +14,14 @@ class NetworkClientTest {
     }
 
     @Test
-    fun `gemini credential header is sanitized case insensitively`() {
+    fun `sensitive provider credential headers are sanitized case insensitively`() {
+        assertTrue(NetworkClient.isSensitiveHeader("Authorization"))
+        assertTrue(NetworkClient.isSensitiveHeader("authorization"))
         assertTrue(NetworkClient.isSensitiveHeader("x-goog-api-key"))
         assertTrue(NetworkClient.isSensitiveHeader("X-Goog-Api-Key"))
+        assertTrue(NetworkClient.isSensitiveHeader("x-api-key"))
+        assertTrue(NetworkClient.isSensitiveHeader("X-API-KEY"))
+        assertFalse(NetworkClient.isSensitiveHeader("Content-Type"))
     }
 
     @Test

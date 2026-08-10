@@ -22,6 +22,7 @@ suspend fun Flow<ApiState>.handleStates(
     turnIndex: Int,
     platformIdx: Int,
     onLoadingComplete: () -> Unit,
+    onNotice: (String) -> Unit = {},
     nanoTimeProvider: () -> Long = System::nanoTime,
     currentTimeProvider: () -> Long = { System.currentTimeMillis() / 1000 },
     revisionToAppendOnSuccess: AssistantRevision? = null
@@ -42,6 +43,8 @@ suspend fun Flow<ApiState>.handleStates(
                     buffer.appendContent(chunk.textChunk)
                     buffer.publishIfDue(messageFlow, turnIndex, platformIdx)
                 }
+
+                is ApiState.Notice -> onNotice(chunk.message)
 
                 ApiState.Done -> {
                     isCompletedSuccessfully = true

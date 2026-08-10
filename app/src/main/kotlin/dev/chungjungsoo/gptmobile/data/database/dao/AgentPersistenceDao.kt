@@ -19,6 +19,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnResult
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.snapshotLatestAssistantRevision
 import java.util.UUID
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface AgentPersistenceDao {
@@ -57,6 +58,51 @@ interface AgentPersistenceDao {
 
     @Query("SELECT * FROM tool_events WHERE run_id IN (:runIds) ORDER BY run_id, sequence")
     suspend fun getToolEvents(runIds: List<String>): List<ToolEvent>
+
+    @Query("SELECT * FROM tool_events WHERE run_id = :runId ORDER BY sequence")
+    suspend fun getToolEventsForRun(runId: String): List<ToolEvent>
+
+    @Query(
+        """
+        SELECT tool_events.*
+        FROM tool_events
+        INNER JOIN agent_runs ON agent_runs.run_id = tool_events.run_id
+        WHERE agent_runs.chat_id = :chatId
+        ORDER BY agent_runs.created_at, agent_runs.run_id, tool_events.sequence
+        """
+    )
+    fun observeToolEventsForChat(chatId: Int): Flow<List<ToolEvent>>
+
+    @Query("SELECT * FROM tool_events WHERE event_id = :eventId")
+    suspend fun getToolEventById(eventId: String): ToolEvent?
+
+    @Query(
+        """
+        UPDATE tool_events
+        SET result = :result,
+            result_type = :resultType,
+            status = :status,
+            is_error = :isError,
+            completed_at = :completedAt,
+            error = :error
+        WHERE event_id = :eventId
+            AND call_id = :callId
+            AND status IN ('PENDING', 'RUNNING')
+        """
+    )
+    suspend fun finishToolEvent(
+        eventId: String,
+        callId: String,
+        result: String,
+        resultType: String,
+        status: String,
+        isError: Boolean,
+        completedAt: Long,
+        error: String?
+    ): Int
+
+    @Query("UPDATE tool_events SET status = 'CANCELED', completed_at = :completedAt WHERE run_id = :runId AND status IN ('PENDING', 'RUNNING')")
+    suspend fun cancelActiveToolEvents(runId: String, completedAt: Long)
 
     @Transaction
     suspend fun persistAgentTurn(request: PersistAgentTurnRequest): PersistAgentTurnResult {

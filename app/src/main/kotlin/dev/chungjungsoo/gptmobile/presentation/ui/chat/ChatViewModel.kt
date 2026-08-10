@@ -17,7 +17,9 @@ import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
+import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.selectRevision
@@ -35,9 +37,14 @@ import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -120,6 +127,9 @@ class ChatViewModel @Inject constructor(
     private val _groupedMessages = MutableStateFlow(GroupedMessages())
     val groupedMessages = _groupedMessages.asStateFlow()
 
+    private val _toolEventsByRun = MutableStateFlow<Map<String, List<ToolEvent>>>(emptyMap())
+    val toolEventsByRun = _toolEventsByRun.asStateFlow()
+
     // Each chat states for assistant chat messages
     // Index of the currently shown message's platform - default is 0 (first platform)
     private val _indexStates = MutableStateFlow(listOf<Int>())
@@ -144,6 +154,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch { fetchMessages() }
         fetchEnabledPlatformsInApp()
         observeStateChanges()
+        observeToolEvents()
     }
 
     fun addMessage(userMessage: MessageV2) {
@@ -526,9 +537,7 @@ class ChatViewModel @Inject constructor(
                     val platformName = message.platformType
                         ?.let { _platformsInApp.value.getPlatformName(it) }
                         ?: "Unknown"
-                    appendLine("**Assistant ($platformName):**")
-                    appendLine(message.effectiveContent())
-                    appendLine()
+                    append(formatAssistantExport(platformName, message, _toolEventsByRun.value))
                 }
             }
         }
@@ -652,12 +661,14 @@ class ChatViewModel @Inject constructor(
                 val outcome = chatRepository.completeChat(
                     contextMessages.userMessages,
                     contextMessages.assistantMessages,
-                    platform
+                    platform,
+                    runId
                 ).handleStates(
                     messageFlow = _groupedMessages,
                     turnIndex = turnIndex,
                     platformIdx = platformIndex,
-                    onLoadingComplete = {}
+                    onLoadingComplete = {},
+                    onNotice = { notice -> _attachmentNotice.update { notice } }
                 )
                 val terminal = outcome.toAgentRunTerminalUpdate()
                 chatRepository.finishAgentRun(
@@ -1055,6 +1066,21 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeToolEvents() {
+        viewModelScope.launch {
+            _chatRoom
+                .map { it.id }
+                .distinctUntilChanged()
+                .flatMapLatest { chatId ->
+                    if (chatId > 0) chatRepository.observeToolEvents(chatId) else flowOf(emptyList())
+                }
+                .collect { events ->
+                    _toolEventsByRun.update { events.groupBy(ToolEvent::runId) }
+                }
+        }
+    }
+
     private fun observeStateChanges() {
         viewModelScope.launch {
             _loadingStates.collect { states ->
@@ -1163,6 +1189,23 @@ internal fun mergePersistedAssistantRow(
         persistedByProfile[profileUid]
             ?: currentByProfile[profileUid]
             ?: createEmptyAssistantMessage(chatId, profileUid)
+    }
+}
+
+internal fun formatAssistantExport(
+    platformName: String,
+    message: MessageV2,
+    toolEventsByRun: Map<String, List<ToolEvent>>
+): String = buildString {
+    appendLine("**Assistant ($platformName):**")
+    appendLine(message.effectiveContent())
+    appendLine()
+    val trace = message.effectiveRunId()
+        ?.let(toolEventsByRun::get)
+        .orEmpty()
+    formatToolTraceMarkdown(trace).takeIf { it.isNotBlank() }?.let {
+        appendLine(it)
+        appendLine()
     }
 }
 

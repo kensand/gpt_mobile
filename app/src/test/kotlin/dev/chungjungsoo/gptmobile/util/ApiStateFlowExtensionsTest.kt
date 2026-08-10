@@ -16,6 +16,32 @@ import org.junit.Test
 class ApiStateFlowExtensionsTest {
 
     @Test
+    fun `handleStates surfaces nonterminal agent notices`() = runBlocking {
+        val notices = mutableListOf<String>()
+        val messageFlow = MutableStateFlow(
+            ChatViewModel.GroupedMessages(
+                userMessages = listOf(MessageV2(content = "Hello", platformType = null)),
+                assistantMessages = listOf(listOf(MessageV2(content = "", platformType = "platform-1")))
+            )
+        )
+
+        val outcome = flowOf(
+            ApiState.Notice("Tools unavailable for this model."),
+            ApiState.Done
+        ).handleStates(
+            messageFlow = messageFlow,
+            turnIndex = 0,
+            platformIdx = 0,
+            onLoadingComplete = {},
+            onNotice = notices::add
+        )
+
+        assertEquals(ApiStateFlowOutcome.Completed, outcome)
+        assertEquals(listOf("Tools unavailable for this model."), notices)
+        assertEquals("", messageFlow.value.assistantMessages.single().single().content)
+    }
+
+    @Test
     fun `buildAssistantErrorContent returns plain error when no content exists`() {
         assertEquals(
             "Error: Request timed out.",

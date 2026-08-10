@@ -6,6 +6,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
 import dev.chungjungsoo.gptmobile.data.context.ContextBuilder
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentRunDao
@@ -21,6 +22,7 @@ import dev.chungjungsoo.gptmobile.data.network.OpenAIAPI
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepositoryImpl
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
+import dev.chungjungsoo.gptmobile.data.repository.ToolEventRecorder
 import javax.inject.Singleton
 
 @Module
@@ -44,7 +46,9 @@ object ChatRepositoryModule {
         anthropicAPI: AnthropicAPI,
         googleAPI: GoogleAPI,
         attachmentUploadCoordinator: dev.chungjungsoo.gptmobile.data.repository.AttachmentUploadCoordinator,
-        contextBuilder: ContextBuilder
+        contextBuilder: ContextBuilder,
+        agentToolResolver: AgentToolResolver,
+        toolEventRecorder: ToolEventRecorder
     ): ChatRepository = ChatRepositoryImpl(
         context,
         chatRoomDao,
@@ -60,6 +64,8 @@ object ChatRepositoryModule {
         anthropicAPI,
         googleAPI,
         attachmentUploadCoordinator,
-        contextBuilder
+        contextBuilder,
+        agentToolResolver,
+        toolEventRecorder
     )
 }

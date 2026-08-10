@@ -9,6 +9,7 @@ import dev.chungjungsoo.gptmobile.data.database.dao.ChatPlatformModelV2Dao
 import dev.chungjungsoo.gptmobile.data.database.dao.ChatRoomV2Dao
 import dev.chungjungsoo.gptmobile.data.database.dao.MessageV2Dao
 import dev.chungjungsoo.gptmobile.data.database.dao.PlatformV2Dao
+import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentToolBinding
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevisionListConverter
@@ -48,4 +49,5 @@ abstract class ChatDatabaseV2 : RoomDatabase() {
     abstract fun chatPlatformModelDao(): ChatPlatformModelV2Dao
     abstract fun agentRunDao(): AgentRunDao
     abstract fun agentPersistenceDao(): AgentPersistenceDao
+    abstract fun toolConnectionDao(): ToolConnectionDao
 }

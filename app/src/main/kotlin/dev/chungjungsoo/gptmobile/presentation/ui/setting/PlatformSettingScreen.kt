@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,6 +32,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
@@ -46,12 +48,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.presentation.common.RadioItem
 import dev.chungjungsoo.gptmobile.presentation.common.SettingItem
 import dev.chungjungsoo.gptmobile.util.formatPlatformTimeout
 import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
@@ -70,6 +75,7 @@ fun PlatformSettingScreen(
     val platform by settingViewModel.platformState.collectAsStateWithLifecycle()
     val dialogState by settingViewModel.dialogState.collectAsStateWithLifecycle()
     val isDeleted by settingViewModel.isDeleted.collectAsStateWithLifecycle()
+    val toolBindingState by settingViewModel.toolBindingState.collectAsStateWithLifecycle()
 
     LaunchedEffect(isDeleted) {
         if (isDeleted) {
@@ -249,6 +255,24 @@ fun PlatformSettingScreen(
                     isChecked = platformData.reasoning,
                     onCheckedChange = { settingViewModel.toggleReasoning() }
                 )
+                SettingItem(
+                    modifier = Modifier.height(64.dp),
+                    title = stringResource(R.string.search_backend),
+                    description = toolBindingState.searchConnections.firstOrNull {
+                        it.connectionUid == toolBindingState.selectedSearchConnectionUid
+                    }?.name ?: stringResource(R.string.none),
+                    enabled = platformData.enabled,
+                    onItemClick = settingViewModel::openSearchBackendDialog,
+                    showTrailingIcon = true,
+                    showLeadingIcon = false
+                )
+                PreferenceSwitchWithContainer(
+                    title = stringResource(R.string.read_url),
+                    icon = ImageVector.vectorResource(id = R.drawable.ic_link),
+                    isChecked = toolBindingState.readUrlEnabled
+                ) {
+                    settingViewModel.toggleReadUrl(!toolBindingState.readUrlEnabled)
+                }
 
                 PlatformNameDialog(dialogState, platformData.name, settingViewModel)
                 APIUrlDialog(dialogState, platformData.apiUrl, settingViewModel)
@@ -260,8 +284,63 @@ fun PlatformSettingScreen(
                 TimeoutDialog(dialogState, platformData.timeout, settingViewModel)
                 GeminiSafetySettingsDialog(dialogState, platformData, settingViewModel)
                 DeletePlatformDialog(dialogState, settingViewModel)
+                SearchBackendDialog(toolBindingState, settingViewModel)
+                toolBindingState.errorMessage?.let { message ->
+                    AlertDialog(
+                        title = { Text(stringResource(R.string.error)) },
+                        text = { Text(message) },
+                        onDismissRequest = settingViewModel::clearToolError,
+                        confirmButton = {
+                            TextButton(onClick = settingViewModel::clearToolError) {
+                                Text(stringResource(R.string.close))
+                            }
+                        }
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun SearchBackendDialog(
+    toolBindingState: PlatformSettingViewModel.ToolBindingState,
+    settingViewModel: PlatformSettingViewModel
+) {
+    if (toolBindingState.isSearchBackendDialogOpen) {
+        AlertDialog(
+            title = { Text(stringResource(R.string.search_backend)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    RadioItem(
+                        modifier = Modifier.semantics { contentDescription = "Search backend None" },
+                        title = stringResource(R.string.none),
+                        description = null,
+                        value = "",
+                        selected = toolBindingState.selectedSearchConnectionUid == null
+                    ) {
+                        settingViewModel.selectSearchBackend(null)
+                    }
+                    toolBindingState.searchConnections.forEach { connection ->
+                        RadioItem(
+                            modifier = Modifier.semantics { contentDescription = "Search backend ${connection.name}" },
+                            title = connection.name,
+                            description = connection.alias,
+                            value = connection.connectionUid,
+                            selected = toolBindingState.selectedSearchConnectionUid == connection.connectionUid
+                        ) {
+                            settingViewModel.selectSearchBackend(connection.connectionUid)
+                        }
+                    }
+                }
+            },
+            onDismissRequest = settingViewModel::closeSearchBackendDialog,
+            confirmButton = {
+                TextButton(onClick = settingViewModel::closeSearchBackendDialog) {
+                    Text(stringResource(R.string.close))
+                }
+            }
+        )
     }
 }
 

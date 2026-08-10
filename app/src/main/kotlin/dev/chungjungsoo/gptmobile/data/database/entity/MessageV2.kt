@@ -78,6 +78,11 @@ fun MessageV2.effectiveThoughts(): String = revisions
     ?.thoughts
     ?: thoughts
 
+fun MessageV2.effectiveRunId(): String? = revisions
+    .getOrNull(activeRevisionIndex)
+    ?.runId
+    ?: currentRunId
+
 fun MessageV2.isEffectivelyBlank(): Boolean = effectiveContent().isBlank() && attachments.isEmpty()
 
 fun MessageV2.resetActiveRevision(): MessageV2 = copy(activeRevisionIndex = ACTIVE_REVISION_LATEST)

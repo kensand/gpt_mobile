@@ -104,6 +104,7 @@ dependencies {
     implementation(libs.ktor.content.negotiation)
     implementation(libs.ktor.core)
     implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.logging)
     implementation(libs.ktor.serialization)
 
@@ -130,6 +131,7 @@ dependencies {
 
     // Test
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -341,6 +341,7 @@ private fun AgentToolExchange.toChatMessages(): List<ChatMessage> = listOf(
 private fun dev.chungjungsoo.gptmobile.data.dto.ApiState.toProviderEvent(): ProviderEvent? = when (this) {
     is dev.chungjungsoo.gptmobile.data.dto.ApiState.Success -> ProviderEvent.TextDelta(textChunk)
     is dev.chungjungsoo.gptmobile.data.dto.ApiState.Thinking -> ProviderEvent.ThinkingDelta(thinkingChunk)
+    is dev.chungjungsoo.gptmobile.data.dto.ApiState.Notice -> null
     is dev.chungjungsoo.gptmobile.data.dto.ApiState.Error -> ProviderEvent.Failed(message)
     else -> null
 }

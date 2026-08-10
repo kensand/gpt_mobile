@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
 import java.io.File
 
@@ -92,6 +93,7 @@ fun OpponentChatBubble(
     text: String,
     thoughts: String = "",
     attachments: List<String> = emptyList(),
+    toolEvents: List<ToolEvent> = emptyList(),
     contentIdentity: Any = text,
     canEdit: Boolean = false,
     revisionIndexLabel: String? = null,
@@ -124,6 +126,12 @@ fun OpponentChatBubble(
                 isLoading = isThinking
             )
         }
+
+        ToolTraceBlock(
+            events = toolEvents,
+            modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp),
+            contentIdentity = contentIdentity
+        )
 
         Column {
             Card(

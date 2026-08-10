@@ -23,6 +23,7 @@ import dev.chungjungsoo.gptmobile.presentation.ui.setting.LicenseScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.PlatformSettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingViewModelV2
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionsScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupCompleteScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformListScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformTypeScreen
@@ -172,6 +173,7 @@ fun NavGraphBuilder.settingNavigation(navController: NavHostController) {
                         Route.PLATFORM_SETTINGS.replace("{platformUid}", platformUid)
                     )
                 },
+                onNavigateToToolConnections = { navController.navigate(Route.TOOL_CONNECTIONS) },
                 onNavigateToAboutPage = { navController.navigate(Route.ABOUT_PAGE) }
             )
         }
@@ -195,6 +197,9 @@ fun NavGraphBuilder.settingNavigation(navController: NavHostController) {
             PlatformSettingScreen(
                 onNavigationClick = { navController.navigateUp() }
             )
+        }
+        composable(Route.TOOL_CONNECTIONS) {
+            ToolConnectionsScreen(onNavigationClick = { navController.navigateUp() })
         }
         composable(Route.ABOUT_PAGE) {
             AboutScreen(

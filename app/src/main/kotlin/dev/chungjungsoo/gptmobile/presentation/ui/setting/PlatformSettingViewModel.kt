@@ -4,9 +4,15 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
+import dev.chungjungsoo.gptmobile.data.database.entity.BuiltInAgentTool
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
+import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
+import dev.chungjungsoo.gptmobile.data.security.SecretVault
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,8 +23,11 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class PlatformSettingViewModel @Inject constructor(
     private val settingRepository: SettingRepository,
+    toolConnectionDao: ToolConnectionDao,
+    secretVault: SecretVault,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+    private val toolConnectionRepository = ToolConnectionRepository(toolConnectionDao, secretVault)
 
     private val platformUid: String = checkNotNull(savedStateHandle["platformUid"])
 
@@ -31,8 +40,12 @@ class PlatformSettingViewModel @Inject constructor(
     private val _isDeleted = MutableStateFlow(false)
     val isDeleted: StateFlow<Boolean> = _isDeleted.asStateFlow()
 
+    private val _toolBindingState = MutableStateFlow(ToolBindingState())
+    val toolBindingState: StateFlow<ToolBindingState> = _toolBindingState.asStateFlow()
+
     init {
         loadPlatform()
+        loadToolBindings()
     }
 
     private fun loadPlatform() {
@@ -40,6 +53,23 @@ class PlatformSettingViewModel @Inject constructor(
             val platforms = settingRepository.fetchPlatformV2s()
             val platform = platforms.firstOrNull { it.uid == platformUid }
             _platformState.update { platform }
+        }
+    }
+
+    fun loadToolBindings() {
+        viewModelScope.launch {
+            runCatching {
+                val connections = toolConnectionRepository.listConnections().filter { it.type in WEB_SEARCH_TYPES }
+                val bindings = toolConnectionRepository.listBindingsByProfile(platformUid)
+                ToolBindingState(
+                    searchConnections = connections,
+                    selectedSearchConnectionUid = bindings.firstOrNull { it.toolName == WEB_SEARCH_TOOL }?.connectionUid,
+                    readUrlEnabled = bindings.any { it.toolName == BuiltInAgentTool.READ_URL },
+                    errorMessage = null
+                )
+            }.onSuccess { state ->
+                _toolBindingState.update { state }
+            }.onFailure(::showToolError)
         }
     }
 
@@ -178,6 +208,42 @@ class PlatformSettingViewModel @Inject constructor(
         }
     }
 
+    fun openSearchBackendDialog() = _toolBindingState.update { it.copy(isSearchBackendDialogOpen = true) }
+    fun closeSearchBackendDialog() = _toolBindingState.update { it.copy(isSearchBackendDialogOpen = false) }
+    fun clearToolError() = _toolBindingState.update { it.copy(errorMessage = null) }
+
+    fun selectSearchBackend(connectionUid: String?) {
+        viewModelScope.launch {
+            runCatching {
+                if (connectionUid == null) {
+                    toolConnectionRepository.removeWebSearchBinding(platformUid)
+                } else {
+                    toolConnectionRepository.replaceWebSearchBinding(platformUid, connectionUid)
+                }
+            }
+                .onSuccess {
+                    _toolBindingState.update {
+                        it.copy(selectedSearchConnectionUid = connectionUid, isSearchBackendDialogOpen = false, errorMessage = null)
+                    }
+                }
+                .onFailure(::showToolError)
+        }
+    }
+
+    fun toggleReadUrl(enabled: Boolean) {
+        viewModelScope.launch {
+            runCatching { toolConnectionRepository.setReadUrlBinding(platformUid, enabled) }
+                .onSuccess {
+                    _toolBindingState.update { it.copy(readUrlEnabled = enabled, errorMessage = null) }
+                }
+                .onFailure(::showToolError)
+        }
+    }
+
+    private fun showToolError(error: Throwable) {
+        _toolBindingState.update { it.copy(errorMessage = error.message ?: "Tool binding update failed.") }
+    }
+
     data class DialogState(
         val isPlatformNameDialogOpen: Boolean = false,
         val isApiUrlDialogOpen: Boolean = false,
@@ -190,4 +256,17 @@ class PlatformSettingViewModel @Inject constructor(
         val isGeminiSafetyDialogOpen: Boolean = false,
         val isDeleteDialogOpen: Boolean = false
     )
+
+    data class ToolBindingState(
+        val searchConnections: List<ToolConnection> = emptyList(),
+        val selectedSearchConnectionUid: String? = null,
+        val readUrlEnabled: Boolean = false,
+        val isSearchBackendDialogOpen: Boolean = false,
+        val errorMessage: String? = null
+    )
+
+    companion object {
+        private const val WEB_SEARCH_TOOL = "web_search"
+        private val WEB_SEARCH_TYPES = setOf(ToolConnectionType.FIRECRAWL, ToolConnectionType.PERPLEXITY, ToolConnectionType.EXA)
+    }
 }

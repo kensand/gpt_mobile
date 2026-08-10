@@ -18,6 +18,7 @@ import dev.chungjungsoo.gptmobile.data.database.dao.ChatRoomV2Dao
 import dev.chungjungsoo.gptmobile.data.database.dao.MessageDao
 import dev.chungjungsoo.gptmobile.data.database.dao.MessageV2Dao
 import dev.chungjungsoo.gptmobile.data.database.dao.PlatformV2Dao
+import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import javax.inject.Singleton
 
 @Module
@@ -31,6 +32,9 @@ object DatabaseModule {
 
     @Provides
     fun provideAgentPersistenceDao(chatDatabaseV2: ChatDatabaseV2): AgentPersistenceDao = chatDatabaseV2.agentPersistenceDao()
+
+    @Provides
+    fun provideToolConnectionDao(chatDatabaseV2: ChatDatabaseV2): ToolConnectionDao = chatDatabaseV2.toolConnectionDao()
 
     @Provides
     fun provideChatPlatformModelV2Dao(chatDatabaseV2: ChatDatabaseV2): ChatPlatformModelV2Dao = chatDatabaseV2.chatPlatformModelDao()

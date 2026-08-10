@@ -27,6 +27,7 @@ class AgentRunner(
 ) {
     fun run(session: AgentProviderSession, tools: List<AgentTool>): Flow<AgentRunEvent> = flow {
         val toolByName = tools.associateBy { it.definition.name }
+        var executableToolByName = toolByName
         var exposedDefinitions = tools.map { it.definition }
         val exchanges = mutableListOf<AgentToolExchange>()
         var rounds = 0
@@ -74,6 +75,7 @@ class AgentRunner(
                     if (exposedDefinitions.isNotEmpty() && !toolMayHaveExecuted && !retriedWithoutTools) {
                         retriedWithoutTools = true
                         exposedDefinitions = emptyList()
+                        executableToolByName = emptyMap()
                         rounds -= 1
                         emit(AgentRunEvent.Notice(TOOLS_UNAVAILABLE_MESSAGE))
                         continue
@@ -106,7 +108,7 @@ class AgentRunner(
                     calls.map { call ->
                         async {
                             semaphore.withPermit {
-                                executeBounded(call, toolByName[call.name])
+                                executeBounded(call, executableToolByName[call.name])
                             }
                         }
                     }.awaitAll()
