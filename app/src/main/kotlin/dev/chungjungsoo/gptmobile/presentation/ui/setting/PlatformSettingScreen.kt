@@ -18,6 +18,8 @@ import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -274,6 +276,15 @@ fun PlatformSettingScreen(
                     isChecked = toolBindingState.readUrlEnabled,
                     onCheckedChange = settingViewModel::toggleReadUrl
                 )
+                SettingItem(
+                    modifier = Modifier.height(64.dp),
+                    title = stringResource(R.string.mcp_tools),
+                    description = stringResource(R.string.mcp_tools_assigned, toolBindingState.selectedMcpTools.size),
+                    enabled = platformData.enabled,
+                    onItemClick = settingViewModel::openMcpToolsDialog,
+                    showTrailingIcon = true,
+                    showLeadingIcon = false
+                )
 
                 PlatformNameDialog(dialogState, platformData.name, settingViewModel)
                 APIUrlDialog(dialogState, platformData.apiUrl, settingViewModel)
@@ -286,6 +297,7 @@ fun PlatformSettingScreen(
                 GeminiSafetySettingsDialog(dialogState, platformData, settingViewModel)
                 DeletePlatformDialog(dialogState, settingViewModel)
                 SearchBackendDialog(toolBindingState, settingViewModel)
+                McpToolsDialog(toolBindingState, settingViewModel)
                 toolBindingState.errorMessage?.let { message ->
                     AlertDialog(
                         title = { Text(stringResource(R.string.error)) },
@@ -301,6 +313,72 @@ fun PlatformSettingScreen(
             }
         }
     }
+}
+
+@Composable
+private fun McpToolsDialog(
+    toolBindingState: PlatformSettingViewModel.ToolBindingState,
+    settingViewModel: PlatformSettingViewModel
+) {
+    if (!toolBindingState.isMcpToolsDialogOpen) return
+    AlertDialog(
+        title = { Text(stringResource(R.string.mcp_tools)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                when {
+                    toolBindingState.mcpConnections.isEmpty() -> Text(stringResource(R.string.no_mcp_connections))
+
+                    toolBindingState.isMcpToolsLoading -> CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .semantics { contentDescription = "Discovering MCP tools" }
+                    )
+
+                    toolBindingState.mcpToolOptions.isEmpty() -> Text(stringResource(R.string.no_mcp_tools))
+
+                    else -> toolBindingState.mcpToolOptions.forEach { option ->
+                        val selected = toolBindingState.pendingMcpTools.any {
+                            it.connectionUid == option.connectionUid && it.toolName == option.toolName
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .toggleable(
+                                    value = selected,
+                                    onValueChange = { settingViewModel.toggleMcpTool(option.connectionUid, option.toolName) }
+                                )
+                                .semantics { contentDescription = "${option.connectionName} ${option.toolName}" }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(checked = selected, onCheckedChange = null)
+                            Column(Modifier.padding(start = 8.dp)) {
+                                Text("${option.connectionName} · ${option.toolName}")
+                                Text(
+                                    option.description ?: option.modelToolName,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        onDismissRequest = settingViewModel::closeMcpToolsDialog,
+        confirmButton = {
+            TextButton(
+                enabled = !toolBindingState.isMcpToolsLoading,
+                onClick = settingViewModel::saveMcpTools
+            ) {
+                Text(stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = settingViewModel::closeMcpToolsDialog) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
 }
 
 @Composable

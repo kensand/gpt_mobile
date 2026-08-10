@@ -7,10 +7,13 @@ import dev.chungjungsoo.gptmobile.data.agent.ToolResultContent
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
 import dev.chungjungsoo.gptmobile.data.database.entity.BuiltInAgentTool
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.network.NetworkClient
 import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
 import dev.chungjungsoo.gptmobile.data.security.SecretVault
+import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
+import io.modelcontextprotocol.kotlin.sdk.types.Tool
 import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import kotlinx.serialization.json.JsonObject
@@ -26,17 +29,42 @@ data class ResolvedAgentTool(
 class AgentToolResolver @Inject constructor(
     private val toolConnectionRepository: ToolConnectionRepository,
     private val secretVault: SecretVault,
-    private val networkClient: NetworkClient
+    private val networkClient: NetworkClient,
+    private val mcpClientManager: McpClientManager,
+    private val mcpOAuthCoordinator: McpOAuthCoordinator
 ) {
+    suspend fun discoverMcpTools(connection: ToolConnection): List<Tool> {
+        val config = mcpConfig(connection)
+        return try {
+            mcpClientManager.listTools(config)
+        } catch (error: Exception) {
+            if (connection.authType != ToolConnectionAuthType.OAUTH || !error.isUnauthorized()) throw error
+            mcpClientManager.listTools(
+                mcpConfig(
+                    connection,
+                    forceOAuthRefresh = true,
+                    rejectedAuthorizationHeader = config.authorizationHeader
+                )
+            )
+        }
+    }
+
     suspend fun resolve(profileUid: String): List<ResolvedAgentTool> {
         val resolved = mutableListOf(
             CurrentDateTool().resolved(null, null, BuiltInAgentTool.CURRENT_DATE)
         )
-        toolConnectionRepository.listBindingsWithConnections(profileUid)
+        val bindings = toolConnectionRepository.listBindingsWithConnections(profileUid)
             .sortedWith(compareBy<AgentToolBindingWithConnection> { it.binding.toolName }.thenBy { it.binding.connectionUid ?: "" }.thenBy { it.binding.bindingUid })
+        bindings
+            .filterNot { it.connection?.type == ToolConnectionType.MCP }
             .forEach { binding ->
                 resolveBinding(binding)?.let { resolved += it }
             }
+        bindings.filter { it.connection?.type == ToolConnectionType.MCP }
+            .groupBy { requireNotNull(it.connection).connectionUid }
+            .toSortedMap()
+            .values
+            .forEach { mcpBindings -> resolved += resolveMcpTools(requireNotNull(mcpBindings.first().connection), mcpBindings) }
         return resolved.distinctBy { it.modelToolName }
             .sortedBy { it.modelToolName }
     }
@@ -86,6 +114,70 @@ class AgentToolResolver @Inject constructor(
         return tool.resolved(actualConnection.connectionUid, actualConnection.name, WEB_SEARCH_TOOL)
     }
 
+    private suspend fun resolveMcpTools(
+        connection: ToolConnection,
+        bindings: List<AgentToolBindingWithConnection>
+    ): List<ResolvedAgentTool> {
+        val selectedNames = bindings.map { it.binding.toolName }.toSet()
+        val remoteTools = discoverMcpTools(connection)
+        val config = mcpConfig(connection)
+        return remoteTools
+            .filter { it.name in selectedNames }
+            .map { remoteTool ->
+                val tool = McpAgentTool(
+                    definition = mcpToolDefinition(connection.alias, remoteTool),
+                    config = config,
+                    remoteToolName = remoteTool.name,
+                    clientManager = mcpClientManager
+                )
+                ResolvedAgentTool(
+                    tool = tool,
+                    connectionUid = connection.connectionUid,
+                    connectionName = connection.name,
+                    realToolName = remoteTool.name,
+                    modelToolName = tool.definition.name
+                )
+            }
+    }
+
+    private suspend fun mcpConfig(
+        connection: ToolConnection,
+        forceOAuthRefresh: Boolean = false,
+        rejectedAuthorizationHeader: String? = null
+    ): McpConnectionConfig {
+        val authorization = when (connection.authType) {
+            ToolConnectionAuthType.NONE -> null
+
+            ToolConnectionAuthType.BEARER -> readBearerHeader(connection)
+
+            ToolConnectionAuthType.OAUTH -> mcpOAuthCoordinator.authorizationHeader(
+                connection,
+                forceOAuthRefresh,
+                rejectedAuthorizationHeader
+            )
+
+            else -> throw IllegalArgumentException("Unsupported MCP authentication type.")
+        }
+        return McpConnectionConfig(
+            connectionUid = connection.connectionUid,
+            endpointUrl = connection.endpointUrl ?: throw IllegalArgumentException("MCP endpoint is required."),
+            allowCleartext = connection.allowCleartext,
+            authorizationHeader = authorization
+        )
+    }
+
+    private suspend fun readBearerHeader(connection: ToolConnection): String {
+        val secretRef = connection.secretRef ?: throw IllegalArgumentException("MCP bearer credential is missing.")
+        val bytes = secretVault.read(secretRef) ?: throw IllegalArgumentException("MCP bearer credential is missing.")
+        return try {
+            val token = bytes.decodeToString()
+            require(token.isNotBlank()) { "MCP bearer credential is missing." }
+            "Bearer $token"
+        } finally {
+            bytes.fill(0)
+        }
+    }
+
     private fun AgentTool.resolved(
         connectionUid: String?,
         connectionName: String?,
@@ -107,6 +199,18 @@ class AgentToolResolver @Inject constructor(
         )
     }
 }
+
+private class McpAgentTool(
+    override val definition: AgentToolDefinition,
+    private val config: McpConnectionConfig,
+    private val remoteToolName: String,
+    private val clientManager: McpClientManager
+) : AgentTool {
+    override suspend fun execute(callId: String, arguments: JsonObject): AgentToolResult = mapMcpToolResult(callId, clientManager.callTool(config, remoteToolName, arguments))
+}
+
+private fun Throwable.isUnauthorized(): Boolean = generateSequence(this) { it.cause }
+    .any { error -> error is StreamableHttpError && error.code == 401 }
 
 private data class SearchProvider(
     val provider: WebSearchProvider,

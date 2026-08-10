@@ -17,7 +17,10 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -155,14 +158,139 @@ class AgentToolResolverTest {
     }
 
     @Test
-    fun `orphan unknown and mcp bindings are ignored in web resolver branch`() = runBlocking {
+    fun `orphan and unknown bindings are ignored`() = runBlocking {
         val dao = ResolverFakeToolConnectionDao()
         val resolver = resolver(dao)
         dao.bind(null, binding("profile-1", "missing", "web_search"))
-        dao.bind(connection("mcp-1", ToolConnectionType.MCP, secretRef = "secret-mcp"), binding("profile-1", "mcp-1", "mcp_tool"))
         dao.bind(connection("search-1", ToolConnectionType.FIRECRAWL, secretRef = "secret-1"), binding("profile-1", "search-1", "unknown_tool"))
 
         assertEquals(listOf("current_date"), resolver.resolve("profile-1").map { it.modelToolName })
+    }
+
+    @Test
+    fun `assigned MCP tool is namespaced and executable while unassigned tools stay hidden`() = runBlocking {
+        McpClientManagerTest.McpFixtureServer().use { server ->
+            val dao = ResolverFakeToolConnectionDao()
+            val vault = ResolverFakeSecretVault()
+            val repository = ToolConnectionRepository(dao, vault)
+            val networkClient = NetworkClient(CIO)
+            val manager = McpClientManager(networkClient())
+            val resolver = AgentToolResolver(
+                repository,
+                vault,
+                networkClient,
+                manager,
+                McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+            )
+            dao.bind(
+                connection(
+                    uid = "mcp-1",
+                    type = ToolConnectionType.MCP,
+                    endpointUrl = server.url,
+                    authType = ToolConnectionAuthType.NONE,
+                    allowCleartext = true
+                ),
+                binding("profile-1", "mcp-1", "echo")
+            )
+
+            val resolved = resolver.resolve("profile-1").single()
+            val result = resolved.tool.execute("call-1", buildJsonObject { put("text", "hello") })
+
+            assertEquals("mcp__mcp-1__echo", resolved.modelToolName)
+            assertEquals("echo", resolved.realToolName)
+            assertEquals("hello", (result.content as ToolResultContent.Text).text)
+            manager.closeAll()
+            networkClient().close()
+        }
+    }
+
+    @Test
+    fun `MCP bearer binding reads vault token and authenticates discovery and call`() = runBlocking {
+        McpClientManagerTest.McpFixtureServer(acceptedAuthorization = "Bearer secret-token").use { server ->
+            val dao = ResolverFakeToolConnectionDao()
+            val vault = ResolverFakeSecretVault(mapOf("connection_mcp-1" to "secret-token".encodeToByteArray()))
+            val repository = ToolConnectionRepository(dao, vault)
+            val networkClient = NetworkClient(CIO)
+            val manager = McpClientManager(networkClient())
+            val resolver = AgentToolResolver(
+                repository,
+                vault,
+                networkClient,
+                manager,
+                McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+            )
+            dao.bind(
+                connection(
+                    uid = "mcp-1",
+                    type = ToolConnectionType.MCP,
+                    endpointUrl = server.url,
+                    secretRef = "connection_mcp-1",
+                    authType = ToolConnectionAuthType.BEARER,
+                    allowCleartext = true
+                ),
+                binding("profile-1", "mcp-1", "echo")
+            )
+
+            val tool = resolver.resolve("profile-1").single().tool
+            val result = tool.execute("call-1", buildJsonObject { put("text", "hello") })
+
+            assertEquals("hello", (result.content as ToolResultContent.Text).text)
+            assertTrue(server.authorizationHeaders.all { it == "Bearer secret-token" })
+            assertTrue(vault.lastReadBytes!!.all { it == 0.toByte() })
+            manager.closeAll()
+            networkClient().close()
+        }
+    }
+
+    @Test
+    fun `MCP OAuth 401 refreshes stored token reconnects and retries discovery once`() = runBlocking {
+        McpClientManagerTest.McpFixtureServer(acceptedAuthorization = "Bearer access-2").use { server ->
+            val dao = ResolverFakeToolConnectionDao()
+            val credential = McpOAuthCredential(
+                clientId = "client-1",
+                tokenEndpoint = server.tokenUrl,
+                resource = server.url,
+                accessToken = "access-1",
+                tokenType = "Bearer",
+                refreshToken = "refresh-1"
+            )
+            val vault = ResolverFakeSecretVault(
+                mapOf("connection_mcp-1" to NetworkClient.json.encodeToString(credential).encodeToByteArray())
+            )
+            val repository = ToolConnectionRepository(dao, vault)
+            val networkClient = NetworkClient(CIO)
+            val manager = McpClientManager(networkClient())
+            val resolver = AgentToolResolver(
+                repository,
+                vault,
+                networkClient,
+                manager,
+                McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+            )
+            dao.bind(
+                connection(
+                    uid = "mcp-1",
+                    type = ToolConnectionType.MCP,
+                    endpointUrl = server.url,
+                    secretRef = "connection_mcp-1",
+                    authType = ToolConnectionAuthType.OAUTH,
+                    allowCleartext = true
+                ),
+                binding("profile-1", "mcp-1", "echo")
+            )
+
+            val tool = resolver.resolve("profile-1").single().tool
+            val result = tool.execute("call-1", buildJsonObject { put("text", "hello") })
+            val stored = NetworkClient.json.decodeFromString<McpOAuthCredential>(vault.value("connection_mcp-1")!!.decodeToString())
+
+            assertEquals("hello", (result.content as ToolResultContent.Text).text)
+            assertEquals(1, server.refreshRequests.get())
+            assertEquals("access-2", stored.accessToken)
+            assertTrue("Bearer access-1" in server.authorizationHeaders)
+            assertEquals("Bearer access-2", server.authorizationHeaders.last())
+            manager.closeAll()
+            networkClient().close()
+        }
     }
 
     @Test
@@ -189,22 +317,36 @@ class AgentToolResolverTest {
     private fun resolver(
         dao: ResolverFakeToolConnectionDao = ResolverFakeToolConnectionDao(),
         vault: ResolverFakeSecretVault = ResolverFakeSecretVault()
-    ) = AgentToolResolver(ToolConnectionRepository(dao, vault), vault, NetworkClient(CIO))
+    ): AgentToolResolver {
+        val repository = ToolConnectionRepository(dao, vault)
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        return AgentToolResolver(
+            repository,
+            vault,
+            networkClient,
+            manager,
+            McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        )
+    }
 
     private fun connection(
         uid: String,
         type: String,
         endpointUrl: String? = "https://$uid.example/search",
-        secretRef: String? = null
+        secretRef: String? = null,
+        authType: String = ToolConnectionAuthType.BEARER,
+        allowCleartext: Boolean = false
     ) = ToolConnection(
         connectionUid = uid,
         name = "Search ${uid.substringAfterLast("-")}",
         alias = uid,
         type = type,
         endpointUrl = endpointUrl,
-        authType = ToolConnectionAuthType.BEARER,
+        authType = authType,
         secretRef = secretRef,
-        oauthClientId = null
+        oauthClientId = null,
+        allowCleartext = allowCleartext
     )
 
     private fun binding(
@@ -228,19 +370,26 @@ class AgentToolResolverTest {
 }
 
 private class ResolverFakeSecretVault(
-    private val values: Map<String, ByteArray> = emptyMap(),
+    values: Map<String, ByteArray> = emptyMap(),
     private val readError: Throwable? = null
 ) : SecretVault {
+    private val values = values.mapValues { it.value.copyOf() }.toMutableMap()
     var lastReadBytes: ByteArray? = null
 
-    override suspend fun put(secretRef: String, secret: ByteArray) = Unit
+    override suspend fun put(secretRef: String, secret: ByteArray) {
+        values[secretRef] = secret.copyOf()
+    }
 
     override suspend fun read(secretRef: String): ByteArray? {
         readError?.let { throw it }
         return values[secretRef]?.copyOf()?.also { lastReadBytes = it }
     }
 
-    override suspend fun delete(secretRef: String) = Unit
+    override suspend fun delete(secretRef: String) {
+        values.remove(secretRef)?.fill(0)
+    }
+
+    fun value(secretRef: String): ByteArray? = values[secretRef]?.copyOf()
 }
 
 private class ResolverFakeToolConnectionDao : ToolConnectionDao {

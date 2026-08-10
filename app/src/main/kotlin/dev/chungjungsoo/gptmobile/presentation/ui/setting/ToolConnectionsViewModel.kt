@@ -3,6 +3,10 @@ package dev.chungjungsoo.gptmobile.presentation.ui.setting
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpClientManager
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCoordinator
+import dev.chungjungsoo.gptmobile.data.agent.tool.mcpOAuthConnectionUid
+import dev.chungjungsoo.gptmobile.data.agent.tool.mcpOAuthRedirectUri
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
@@ -12,8 +16,11 @@ import dev.chungjungsoo.gptmobile.data.security.SecretVault
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -21,12 +28,16 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class ToolConnectionsViewModel @Inject constructor(
     toolConnectionDao: ToolConnectionDao,
-    secretVault: SecretVault
+    secretVault: SecretVault,
+    private val oauthCoordinator: McpOAuthCoordinator,
+    private val mcpClientManager: McpClientManager
 ) : ViewModel() {
     private val toolConnectionRepository = ToolConnectionRepository(toolConnectionDao, secretVault)
 
     private val _uiState = MutableStateFlow(ToolConnectionsUiState())
     val uiState: StateFlow<ToolConnectionsUiState> = _uiState.asStateFlow()
+    private val _oauthLaunches = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val oauthLaunches: SharedFlow<String> = _oauthLaunches.asSharedFlow()
 
     init {
         refresh()
@@ -34,7 +45,7 @@ class ToolConnectionsViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            runCatching { toolConnectionRepository.listConnections().filter { it.type in WEB_SEARCH_TYPES } }
+            runCatching { toolConnectionRepository.listConnections() }
                 .onSuccess { connections ->
                     _uiState.update { it.copy(connections = connections, errorMessage = null) }
                 }
@@ -44,10 +55,14 @@ class ToolConnectionsViewModel @Inject constructor(
 
     fun saveConnection(
         existing: ToolConnection?,
-        provider: WebToolProvider,
+        provider: ToolConnectionProvider,
         name: String,
         alias: String,
-        apiKey: String,
+        endpointUrl: String,
+        authType: String,
+        credential: String,
+        oauthClientId: String,
+        allowCleartext: Boolean,
         clearCredential: Boolean
     ) {
         val normalizedAlias = normalizeAlias(alias)
@@ -59,32 +74,53 @@ class ToolConnectionsViewModel @Inject constructor(
             _uiState.update { it.copy(errorMessage = "Name is required.") }
             return
         }
+        val actualEndpoint = if (provider.type == ToolConnectionType.MCP) endpointUrl.trim() else provider.endpointUrl
+        val actualAuthType = if (provider.type == ToolConnectionType.MCP) authType else provider.authType
+        if (provider.type == ToolConnectionType.MCP && !isValidMcpEndpoint(actualEndpoint, allowCleartext)) {
+            _uiState.update { it.copy(errorMessage = "MCP endpoint must be HTTP(S); cleartext HTTP requires explicit approval.") }
+            return
+        }
         viewModelScope.launch {
             val now = System.currentTimeMillis() / 1000
+            val clientId = oauthClientId.trim().takeIf { actualAuthType == ToolConnectionAuthType.OAUTH && it.isNotEmpty() }
             val connection = ToolConnection(
                 connectionUid = existing?.connectionUid ?: UUID.randomUUID().toString(),
                 name = name.trim(),
                 alias = normalizedAlias,
                 type = provider.type,
-                endpointUrl = provider.endpointUrl,
-                authType = provider.authType,
+                endpointUrl = actualEndpoint,
+                authType = actualAuthType,
                 secretRef = existing?.secretRef,
-                oauthClientId = null,
+                oauthClientId = clientId,
+                allowCleartext = provider.type == ToolConnectionType.MCP && actualEndpoint.startsWith("http://") && allowCleartext,
                 createdAt = existing?.createdAt ?: now,
                 updatedAt = now
             )
+            val metadataChanged = existing?.let {
+                it.type != connection.type ||
+                    it.endpointUrl != connection.endpointUrl ||
+                    it.authType != connection.authType ||
+                    it.oauthClientId != connection.oauthClientId
+            } == true
+            val shouldClear = clearCredential || actualAuthType == ToolConnectionAuthType.NONE || metadataChanged
+            val credentialBytes = if (actualAuthType == ToolConnectionAuthType.BEARER || actualAuthType == ToolConnectionAuthType.API_KEY) {
+                credentialInput(credential, clearCredential)
+            } else {
+                null
+            }
             runCatching {
                 val shouldClearCredential = shouldClearCredential(
                     existingType = existing?.type,
                     providerType = provider.type,
-                    apiKey = apiKey,
+                    credential = credential,
                     clearCredential = clearCredential
                 )
                 toolConnectionRepository.upsertConnection(
                     connection = connection,
-                    credential = credentialInput(apiKey, shouldClearCredential),
-                    clearCredential = shouldClearCredential
+                    credential = credentialBytes,
+                    clearCredential = (shouldClear || shouldClearCredential) && credentialBytes == null
                 )
+                mcpClientManager.close(connection.connectionUid)
             }.onSuccess {
                 refresh()
             }.onFailure(::showError)
@@ -93,7 +129,10 @@ class ToolConnectionsViewModel @Inject constructor(
 
     fun deleteConnection(connectionUid: String) {
         viewModelScope.launch {
-            runCatching { toolConnectionRepository.deleteConnection(connectionUid) }
+            runCatching {
+                mcpClientManager.close(connectionUid)
+                toolConnectionRepository.deleteConnection(connectionUid)
+            }
                 .onSuccess { refresh() }
                 .onFailure(::showError)
         }
@@ -101,23 +140,53 @@ class ToolConnectionsViewModel @Inject constructor(
 
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
+    fun startOAuth(connectionUid: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isOAuthBusy = true, errorMessage = null) }
+            runCatching { oauthCoordinator.begin(connectionUid, mcpOAuthRedirectUri(connectionUid)) }
+                .onSuccess { authorizationUri -> _oauthLaunches.emit(authorizationUri) }
+                .onFailure(::showError)
+            _uiState.update { it.copy(isOAuthBusy = false) }
+        }
+    }
+
+    fun completeOAuthCallback(callbackUri: String?) {
+        if (callbackUri == null) {
+            _uiState.update { it.copy(errorMessage = "OAuth authorization was canceled.") }
+            return
+        }
+        val connectionUid = mcpOAuthConnectionUid(callbackUri)
+        if (connectionUid == null) {
+            _uiState.update { it.copy(errorMessage = "OAuth callback URI is invalid.") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isOAuthBusy = true, errorMessage = null) }
+            runCatching { oauthCoordinator.complete(connectionUid, callbackUri) }
+                .onSuccess { refresh() }
+                .onFailure(::showError)
+            _uiState.update { it.copy(isOAuthBusy = false) }
+        }
+    }
+
     private fun showError(error: Throwable) {
         _uiState.update { it.copy(errorMessage = error.message ?: "Tool connection update failed.") }
     }
 
     data class ToolConnectionsUiState(
         val connections: List<ToolConnection> = emptyList(),
+        val isOAuthBusy: Boolean = false,
         val errorMessage: String? = null
     )
 
     companion object {
         val providers = listOf(
-            WebToolProvider("Firecrawl", ToolConnectionType.FIRECRAWL, "https://api.firecrawl.dev/v2/search", ToolConnectionAuthType.BEARER),
-            WebToolProvider("Perplexity", ToolConnectionType.PERPLEXITY, "https://api.perplexity.ai/search", ToolConnectionAuthType.BEARER),
-            WebToolProvider("Exa", ToolConnectionType.EXA, "https://api.exa.ai/search", ToolConnectionAuthType.API_KEY)
+            ToolConnectionProvider("Firecrawl", ToolConnectionType.FIRECRAWL, "https://api.firecrawl.dev/v2/search", ToolConnectionAuthType.BEARER),
+            ToolConnectionProvider("Perplexity", ToolConnectionType.PERPLEXITY, "https://api.perplexity.ai/search", ToolConnectionAuthType.BEARER),
+            ToolConnectionProvider("Exa", ToolConnectionType.EXA, "https://api.exa.ai/search", ToolConnectionAuthType.API_KEY),
+            ToolConnectionProvider("MCP server", ToolConnectionType.MCP, "", ToolConnectionAuthType.NONE)
         )
 
-        private val WEB_SEARCH_TYPES = providers.map { it.type }.toSet()
         private val aliasRegex = Regex("[a-z][a-z0-9_]{0,31}")
 
         fun normalizeAlias(alias: String): String = alias.trim().lowercase(Locale.ROOT).replace(Regex("[^a-z0-9_]"), "_")
@@ -129,13 +198,21 @@ class ToolConnectionsViewModel @Inject constructor(
         fun shouldClearCredential(
             existingType: String?,
             providerType: String,
-            apiKey: String,
+            credential: String,
             clearCredential: Boolean
-        ): Boolean = clearCredential || (existingType != null && existingType != providerType && apiKey.isBlank())
+        ): Boolean = clearCredential || (existingType != null && existingType != providerType && credential.isBlank())
+
+        fun isValidMcpEndpoint(endpointUrl: String, allowCleartext: Boolean): Boolean = runCatching {
+            val uri = java.net.URI(endpointUrl)
+            uri.host != null &&
+                uri.userInfo == null &&
+                uri.fragment == null &&
+                (uri.scheme == "https" || (uri.scheme == "http" && allowCleartext))
+        }.getOrDefault(false)
     }
 }
 
-data class WebToolProvider(
+data class ToolConnectionProvider(
     val label: String,
     val type: String,
     val endpointUrl: String,

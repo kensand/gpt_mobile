@@ -1,6 +1,10 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
 import androidx.lifecycle.SavedStateHandle
+import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpClientManager
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClient
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCoordinator
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentToolBinding
@@ -11,9 +15,12 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.dto.Platform
 import dev.chungjungsoo.gptmobile.data.dto.ThemeSetting
 import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.data.network.NetworkClient
 import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
+import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
 import dev.chungjungsoo.gptmobile.data.security.SecretVault
+import io.ktor.client.engine.cio.CIO
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -76,18 +83,70 @@ class PlatformSettingViewModelTest {
         assertEquals("search-2", viewModel.toolBindingState.value.selectedSearchConnectionUid)
     }
 
-    private fun testViewModel(dao: FakeToolConnectionDao): PlatformSettingViewModel = PlatformSettingViewModel(
-        settingRepository = FakeSettingRepository(),
-        toolConnectionDao = dao,
-        secretVault = FakeSecretVault(),
-        savedStateHandle = SavedStateHandle(mapOf("platformUid" to "profile-1"))
-    )
+    @Test
+    fun `saving MCP tool selection binds only selected server tool`() = runTest {
+        val dao = FakeToolConnectionDao(
+            connections = mutableMapOf("mcp-1" to testConnection("mcp-1", ToolConnectionType.MCP))
+        )
+        val viewModel = testViewModel(dao)
 
-    private fun testConnection(connectionUid: String): ToolConnection = ToolConnection(
+        viewModel.loadToolBindings()
+        viewModel.toggleMcpTool("mcp-1", "echo")
+        viewModel.saveMcpTools()
+
+        assertEquals(
+            listOf("mcp-1:echo"),
+            dao.listBindingsByProfile("profile-1").map { "${it.connectionUid}:${it.toolName}" }
+        )
+    }
+
+    @Test
+    fun `MCP tools named like builtins do not enable builtin bindings`() = runTest {
+        val dao = FakeToolConnectionDao(
+            connections = mutableMapOf("mcp-1" to testConnection("mcp-1", ToolConnectionType.MCP)),
+            bindings = mutableListOf(
+                AgentToolBinding("mcp-web", "profile-1", "mcp-1", "web_search"),
+                AgentToolBinding("mcp-read", "profile-1", "mcp-1", "read_url")
+            )
+        )
+        val viewModel = testViewModel(dao)
+
+        viewModel.loadToolBindings()
+
+        assertNull(viewModel.toolBindingState.value.selectedSearchConnectionUid)
+        assertFalse(viewModel.toolBindingState.value.readUrlEnabled)
+        assertEquals(setOf("web_search", "read_url"), viewModel.toolBindingState.value.selectedMcpTools.map { it.toolName }.toSet())
+    }
+
+    private fun testViewModel(dao: FakeToolConnectionDao): PlatformSettingViewModel {
+        val vault = FakeSecretVault()
+        val repository = ToolConnectionRepository(dao, vault)
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        val resolver = AgentToolResolver(
+            repository,
+            vault,
+            networkClient,
+            manager,
+            McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        )
+        return PlatformSettingViewModel(
+            settingRepository = FakeSettingRepository(),
+            toolConnectionDao = dao,
+            secretVault = vault,
+            agentToolResolver = resolver,
+            savedStateHandle = SavedStateHandle(mapOf("platformUid" to "profile-1"))
+        )
+    }
+
+    private fun testConnection(
+        connectionUid: String,
+        type: String = ToolConnectionType.FIRECRAWL
+    ): ToolConnection = ToolConnection(
         connectionUid = connectionUid,
         name = connectionUid,
         alias = connectionUid.replace("-", "_"),
-        type = ToolConnectionType.FIRECRAWL,
+        type = type,
         endpointUrl = "https://example.com",
         authType = ToolConnectionAuthType.BEARER,
         secretRef = null,
@@ -102,7 +161,7 @@ class PlatformSettingViewModelTest {
     )
 }
 
-private class FakeToolConnectionDao(
+internal class FakeToolConnectionDao(
     val connections: MutableMap<String, ToolConnection> = mutableMapOf(),
     val bindings: MutableList<AgentToolBinding> = mutableListOf()
 ) : ToolConnectionDao {
@@ -156,10 +215,18 @@ private class FakeToolConnectionDao(
     }
 }
 
-private class FakeSecretVault : SecretVault {
-    override suspend fun put(secretRef: String, secret: ByteArray) = Unit
-    override suspend fun read(secretRef: String): ByteArray? = null
-    override suspend fun delete(secretRef: String) = Unit
+internal class FakeSecretVault : SecretVault {
+    val values = mutableMapOf<String, ByteArray>()
+
+    override suspend fun put(secretRef: String, secret: ByteArray) {
+        values[secretRef] = secret.copyOf()
+    }
+
+    override suspend fun read(secretRef: String): ByteArray? = values[secretRef]?.copyOf()
+
+    override suspend fun delete(secretRef: String) {
+        values.remove(secretRef)?.fill(0)
+    }
 }
 
 private class FakeSettingRepository : SettingRepository {

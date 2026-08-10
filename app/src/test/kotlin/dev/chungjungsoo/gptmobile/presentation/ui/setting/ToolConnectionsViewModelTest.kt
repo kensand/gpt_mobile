@@ -1,15 +1,51 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
+import dev.chungjungsoo.gptmobile.data.agent.tool.MCP_OAUTH_SCHEME
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpClientManager
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClient
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClientTest
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCoordinator
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCredential
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
+import dev.chungjungsoo.gptmobile.data.network.NetworkClient
+import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
+import io.ktor.client.engine.cio.CIO
+import java.net.URI
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.util.Locale
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.decodeFromString
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ToolConnectionsViewModelTest {
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
     @Test
     fun `provider metadata records the credential transport`() {
         val providers = ToolConnectionsViewModel.providers.associateBy { it.type }
@@ -17,6 +53,7 @@ class ToolConnectionsViewModelTest {
         assertEquals(ToolConnectionAuthType.BEARER, providers.getValue(ToolConnectionType.FIRECRAWL).authType)
         assertEquals(ToolConnectionAuthType.BEARER, providers.getValue(ToolConnectionType.PERPLEXITY).authType)
         assertEquals(ToolConnectionAuthType.API_KEY, providers.getValue(ToolConnectionType.EXA).authType)
+        assertEquals(ToolConnectionAuthType.NONE, providers.getValue(ToolConnectionType.MCP).authType)
     }
 
     @Test
@@ -56,7 +93,7 @@ class ToolConnectionsViewModelTest {
             ToolConnectionsViewModel.shouldClearCredential(
                 existingType = ToolConnectionType.FIRECRAWL,
                 providerType = ToolConnectionType.EXA,
-                apiKey = " ",
+                credential = " ",
                 clearCredential = false
             )
         )
@@ -64,7 +101,7 @@ class ToolConnectionsViewModelTest {
             ToolConnectionsViewModel.shouldClearCredential(
                 existingType = ToolConnectionType.FIRECRAWL,
                 providerType = ToolConnectionType.EXA,
-                apiKey = "new-key",
+                credential = "new-key",
                 clearCredential = false
             )
         )
@@ -72,9 +109,71 @@ class ToolConnectionsViewModelTest {
             ToolConnectionsViewModel.shouldClearCredential(
                 existingType = ToolConnectionType.FIRECRAWL,
                 providerType = ToolConnectionType.FIRECRAWL,
-                apiKey = " ",
+                credential = " ",
                 clearCredential = false
             )
         )
     }
+
+    @Test
+    fun `OAuth launch and callback persist credential and refresh connection state`() = runTest {
+        McpOAuthClientTest.OAuthFixtureServer().use { server ->
+            val dao = FakeToolConnectionDao()
+            val vault = FakeSecretVault()
+            val repository = ToolConnectionRepository(dao, vault)
+            val networkClient = NetworkClient(CIO)
+            val manager = McpClientManager(networkClient())
+            val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+            dao.upsertConnection(
+                ToolConnection(
+                    connectionUid = "connection-1",
+                    name = "OAuth MCP",
+                    alias = "oauth_mcp",
+                    type = ToolConnectionType.MCP,
+                    endpointUrl = server.mcpUrl,
+                    authType = ToolConnectionAuthType.OAUTH,
+                    secretRef = null,
+                    oauthClientId = null,
+                    allowCleartext = true
+                )
+            )
+            val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+            val launch = async(start = CoroutineStart.UNDISPATCHED) { viewModel.oauthLaunches.first() }
+
+            viewModel.startOAuth("connection-1")
+            val authorizationUri = launch.await()
+            val state = URI(authorizationUri).rawQuery.formValues().getValue("state")
+            val completion = async(start = CoroutineStart.UNDISPATCHED) {
+                viewModel.uiState.first { uiState ->
+                    !uiState.isOAuthBusy && uiState.connections.any { it.connectionUid == "connection-1" && it.secretRef != null }
+                }
+            }
+            viewModel.completeOAuthCallback(
+                "$MCP_OAUTH_SCHEME://oauth/mcp/connection-1?code=auth-code&state=$state"
+            )
+            completion.await()
+
+            val saved = dao.getConnection("connection-1")!!
+            val credentialBytes = vault.read(checkNotNull(saved.secretRef))!!
+            val credential = try {
+                NetworkClient.json.decodeFromString<McpOAuthCredential>(credentialBytes.decodeToString())
+            } finally {
+                credentialBytes.fill(0)
+            }
+            assertEquals("fixture-client", saved.oauthClientId)
+            assertEquals("access-1", credential.accessToken)
+            assertNull(viewModel.uiState.value.errorMessage)
+            assertTrue(viewModel.uiState.value.connections.any { it.connectionUid == "connection-1" && it.secretRef != null })
+            manager.closeAll()
+            networkClient().close()
+        }
+    }
 }
+
+private fun String.formValues(): Map<String, String> = split('&')
+    .filter(String::isNotBlank)
+    .associate { item ->
+        val parts = item.split('=', limit = 2)
+        URLDecoder.decode(parts[0], StandardCharsets.UTF_8) to
+            URLDecoder.decode(parts.getOrElse(1) { "" }, StandardCharsets.UTF_8)
+    }

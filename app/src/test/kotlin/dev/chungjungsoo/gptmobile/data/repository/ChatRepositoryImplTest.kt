@@ -2,6 +2,9 @@ package dev.chungjungsoo.gptmobile.data.repository
 
 import android.content.ContextWrapper
 import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpClientManager
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClient
+import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCoordinator
 import dev.chungjungsoo.gptmobile.data.context.ContextBuilder
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
@@ -398,7 +401,7 @@ class ChatRepositoryImplTest {
         )
         val repository = createRepository(
             openAIAPI = openAIAPI,
-            agentToolResolver = AgentToolResolver(ToolConnectionRepository(toolDao, vault), vault, NetworkClient(CIO)),
+            agentToolResolver = toolResolver(toolDao, vault),
             toolEventRecorder = ToolEventRecorder(traceDao.asDao())
         )
 
@@ -452,7 +455,20 @@ class ChatRepositoryImplTest {
 
     private fun emptyToolResolver(): AgentToolResolver {
         val vault = MapSecretVault(emptyMap())
-        return AgentToolResolver(ToolConnectionRepository(SingleToolConnectionDao(), vault), vault, NetworkClient(CIO))
+        return toolResolver(SingleToolConnectionDao(), vault)
+    }
+
+    private fun toolResolver(toolDao: ToolConnectionDao, vault: SecretVault): AgentToolResolver {
+        val repository = ToolConnectionRepository(toolDao, vault)
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        return AgentToolResolver(
+            repository,
+            vault,
+            networkClient,
+            manager,
+            McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        )
     }
 
     private fun groqPlatform(reasoning: Boolean, model: String) = PlatformV2(

@@ -30,9 +30,15 @@ import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformTypeScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformWizardScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2
 import dev.chungjungsoo.gptmobile.presentation.ui.startscreen.StartScreen
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 @Composable
-fun SetupNavGraph(navController: NavHostController) {
+fun SetupNavGraph(
+    navController: NavHostController,
+    oauthCallbacks: Flow<String?> = emptyFlow(),
+    onLaunchOAuth: (String) -> Unit = {}
+) {
     NavHost(
         modifier = Modifier
             .fillMaxSize()
@@ -44,7 +50,7 @@ fun SetupNavGraph(navController: NavHostController) {
         migrationScreenNavigation(navController)
         startScreenNavigation(navController)
         setupNavigation(navController)
-        settingNavigation(navController)
+        settingNavigation(navController, oauthCallbacks, onLaunchOAuth)
         chatScreenNavigation(navController)
     }
 }
@@ -157,7 +163,11 @@ fun NavGraphBuilder.chatScreenNavigation(navController: NavHostController) {
     }
 }
 
-fun NavGraphBuilder.settingNavigation(navController: NavHostController) {
+fun NavGraphBuilder.settingNavigation(
+    navController: NavHostController,
+    oauthCallbacks: Flow<String?> = emptyFlow(),
+    onLaunchOAuth: (String) -> Unit = {}
+) {
     navigation(startDestination = Route.SETTINGS, route = Route.SETTING_ROUTE) {
         composable(Route.SETTINGS) {
             val parentEntry = remember(it) {
@@ -199,7 +209,11 @@ fun NavGraphBuilder.settingNavigation(navController: NavHostController) {
             )
         }
         composable(Route.TOOL_CONNECTIONS) {
-            ToolConnectionsScreen(onNavigationClick = { navController.navigateUp() })
+            ToolConnectionsScreen(
+                oauthCallbacks = oauthCallbacks,
+                onLaunchOAuth = onLaunchOAuth,
+                onNavigationClick = { navController.navigateUp() }
+            )
         }
         composable(Route.ABOUT_PAGE) {
             AboutScreen(

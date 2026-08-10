@@ -56,6 +56,7 @@ class ToolConnectionRepository internal constructor(
         val secretRef = toolConnectionDao.getConnection(connectionUid)?.secretRef
         toolConnectionDao.deleteConnectionByUid(connectionUid)
         secretRef?.let { secretVault.delete(it) }
+        secretVault.delete(mcpOAuthPendingSecretRef(connectionUid))
     }
 
     suspend fun listBindingsByProfile(profileUid: String): List<AgentToolBinding> = toolConnectionDao.listBindingsByProfile(profileUid)
@@ -168,6 +169,8 @@ class ToolConnectionRepository internal constructor(
         val WEB_SEARCH_TYPES = setOf(ToolConnectionType.FIRECRAWL, ToolConnectionType.PERPLEXITY, ToolConnectionType.EXA)
     }
 }
+
+internal fun mcpOAuthPendingSecretRef(connectionUid: String): String = "mcp_oauth_pending_$connectionUid"
 
 private fun stableBindingUid(
     profileUid: String,

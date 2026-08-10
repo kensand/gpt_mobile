@@ -21,7 +21,8 @@ data class AgentToolDefinition(
 data class AgentToolResult(
     val callId: String,
     val content: ToolResultContent,
-    val isError: Boolean
+    val isError: Boolean,
+    val traceContent: ToolResultContent? = null
 )
 
 sealed interface ToolResultContent {

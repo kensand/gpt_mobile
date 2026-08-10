@@ -138,6 +138,24 @@ class ToolEventRecorderTest {
     }
 
     @Test
+    fun finishTool_persistsTraceOnlyContentWithoutChangingModelContent() = runBlocking {
+        val event = recorder.startTool("run-1", 0, "call-trace", "image", "image", buildJsonObject {}, startedAt = 100L)
+
+        recorder.finishTool(
+            eventId = event.eventId,
+            result = AgentToolResult(
+                callId = "call-trace",
+                content = ToolResultContent.Text("safe model result"),
+                isError = false,
+                traceContent = ToolResultContent.Text("image/png omitted from model context")
+            ),
+            completedAt = 110L
+        )
+
+        assertEquals("image/png omitted from model context", dao.rows.single().result)
+    }
+
+    @Test
     fun finishTool_callIdMismatchReturnsNullAndDoesNotWrite() = runBlocking {
         val event = recorder.startTool("run-1", 0, "call-expected", "echo", "echo", buildJsonObject {}, startedAt = 100L)
 

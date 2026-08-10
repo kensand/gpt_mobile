@@ -67,7 +67,7 @@ class ToolEventRecorder @Inject constructor(
         completedAt: Long,
         error: String? = null
     ): ToolEvent? {
-        val content = result.content.serialized().forStorage()
+        val content = (result.traceContent ?: result.content).serialized().forStorage()
         val affectedRows = dao.finishToolEvent(
             eventId = eventId,
             callId = result.callId,

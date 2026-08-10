@@ -300,8 +300,9 @@
     <string name="revision_counter">Revision %1$d/%2$d</string>
     <string name="previous_revision" translatable="false">Previous revision</string>
     <string name="next_revision" translatable="false">Next revision</string>
-    <string name="web_tools">Web tools</string>
-    <string name="web_tools_description">Firecrawl, Perplexity, Exa connections</string>
+    <string name="web_tools">Tool connections</string>
+    <string name="tool_connections">Tool connections</string>
+    <string name="web_tools_description">Web search and MCP connections</string>
     <string name="add_tool_connection">Add tool connection</string>
     <string name="edit_tool_connection">Edit tool connection</string>
     <string name="delete_tool_connection">Delete tool connection</string>
@@ -313,6 +314,7 @@
     <string name="stable_alias_error">Use lowercase letters, numbers, and underscores, starting with a letter.</string>
     <string name="blank_key_preserves_credential">Credential set. Leave blank to keep it.</string>
     <string name="clear_api_key">Clear API key</string>
+    <string name="clear_saved_credential">Clear saved credential</string>
     <string name="search_backend">Search backend</string>
     <string name="search_tool_trace">Search tool trace</string>
     <string name="tool_trace_block_content_description">Tool trace block, %1$s</string>
@@ -340,4 +342,8 @@
     <string name="tool_trace_export_header">Tool calls (%1$d)</string>
     <string name="tool_trace_timing_started_at">started at</string>
     <string name="read_url">Read URL</string>
+    <string name="mcp_tools">MCP tools</string>
+    <string name="mcp_tools_assigned">%1$d assigned</string>
+    <string name="no_mcp_connections">Add an MCP connection first.</string>
+    <string name="no_mcp_tools">No tools were discovered.</string>
 </resources>
