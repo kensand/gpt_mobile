@@ -89,14 +89,73 @@ class AgentPersistenceDaoInstrumentedTest {
                 chatPlatformModels = mapOf("profile-1" to "gpt-5")
             )
         )
-        database.agentRunDao().updateStatus("run-1", AgentRunStatus.RUNNING, 200L, null, null)
+        assertEquals(1, database.agentRunDao().markRunning("run-1", 200L))
+        database.openHelper.writableDatabase.execSQL(
+            """
+            INSERT INTO tool_events (
+                event_id, run_id, sequence, call_id, connection_uid_snapshot,
+                connection_name_snapshot, tool_name, model_tool_name, arguments,
+                result, result_type, status, is_error, started_at, completed_at, error
+            ) VALUES (
+                'event-active', 'run-1', 0, 'call-active', NULL, NULL,
+                'read_url', 'read_url', '{}', NULL, NULL, 'RUNNING', 0, 201, NULL, NULL
+            )
+            """.trimIndent()
+        )
 
         val interrupted = database.agentRunDao().interruptActiveRuns(completedAt = 300L)
+        database.agentPersistenceDao().cancelInterruptedToolEvents(completedAt = 300L)
+        val lateCompletion = database.agentRunDao().finishRunning(
+            runId = "run-1",
+            status = AgentRunStatus.COMPLETED,
+            completedAt = 301L,
+            terminalError = null
+        )
 
         assertEquals(1, interrupted)
+        assertEquals(0, lateCompletion)
         assertEquals(AgentRunStatus.INTERRUPTED, database.agentRunDao().getById("run-1")?.status)
         assertEquals(300L, database.agentRunDao().getById("run-1")?.completedAt)
         assertEquals(persisted.chatRoom.id, database.agentRunDao().getById("run-1")?.chatId)
+        database.openHelper.writableDatabase.query(
+            "SELECT status, completed_at, error FROM tool_events WHERE event_id = 'event-active'"
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("CANCELED", cursor.getString(0))
+            assertEquals(300L, cursor.getLong(1))
+            assertEquals("Interrupted when the app stopped.", cursor.getString(2))
+        }
+    }
+
+    @Test
+    fun finishActiveRun_terminalizesRunningRunBeforeLateCompletion() = runBlocking {
+        database.agentPersistenceDao().persistAgentTurn(
+            PersistAgentTurnRequest(
+                chatRoom = ChatRoomV2(title = "Chat", enabledPlatform = listOf("profile-1")),
+                userMessage = MessageV2(content = "Question", platformType = null),
+                runs = listOf(AgentRunDraft("run-1", "profile-1", "OPENAI", "gpt-5")),
+                chatPlatformModels = mapOf("profile-1" to "gpt-5")
+            )
+        )
+        assertEquals(1, database.agentRunDao().markRunning("run-1", 200L))
+
+        val canceled = database.agentRunDao().finishActive(
+            runId = "run-1",
+            status = AgentRunStatus.CANCELED,
+            completedAt = 300L,
+            terminalError = null
+        )
+        val lateCompletion = database.agentRunDao().finishRunning(
+            runId = "run-1",
+            status = AgentRunStatus.COMPLETED,
+            completedAt = 301L,
+            terminalError = null
+        )
+
+        assertEquals(1, canceled)
+        assertEquals(0, lateCompletion)
+        assertEquals(AgentRunStatus.CANCELED, database.agentRunDao().getById("run-1")?.status)
+        assertEquals(300L, database.agentRunDao().getById("run-1")?.completedAt)
     }
 
     @Test

@@ -104,6 +104,18 @@ interface AgentPersistenceDao {
     @Query("UPDATE tool_events SET status = 'CANCELED', completed_at = :completedAt WHERE run_id = :runId AND status IN ('PENDING', 'RUNNING')")
     suspend fun cancelActiveToolEvents(runId: String, completedAt: Long)
 
+    @Query(
+        """
+        UPDATE tool_events
+        SET status = 'CANCELED',
+            completed_at = :completedAt,
+            error = COALESCE(error, 'Interrupted when the app stopped.')
+        WHERE status IN ('PENDING', 'RUNNING')
+            AND run_id IN (SELECT run_id FROM agent_runs WHERE status = 'INTERRUPTED')
+        """
+    )
+    suspend fun cancelInterruptedToolEvents(completedAt: Long)
+
     @Transaction
     suspend fun persistAgentTurn(request: PersistAgentTurnRequest): PersistAgentTurnResult {
         val chatRoom = if (request.chatRoom.id == 0) {

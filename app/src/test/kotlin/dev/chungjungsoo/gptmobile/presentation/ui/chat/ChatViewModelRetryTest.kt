@@ -1,6 +1,9 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.chat
 
+import dev.chungjungsoo.gptmobile.data.agent.AgentRunTerminalUpdate
+import dev.chungjungsoo.gptmobile.data.agent.toTerminalUpdate
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
@@ -27,6 +30,58 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatViewModelRetryTest {
+
+    @Test
+    fun `loading state reattaches to queued and running profile runs`() {
+        val latestRow = listOf(
+            MessageV2(id = 10, chatId = 7, content = "", platformType = "profile-1", currentRunId = "run-1"),
+            MessageV2(id = 11, chatId = 7, content = "", platformType = "profile-2", currentRunId = "run-2")
+        )
+        val runs = mapOf(
+            "run-1" to agentRun("run-1", 10, AgentRunStatus.RUNNING),
+            "run-2" to agentRun("run-2", 11, AgentRunStatus.CANCELED)
+        )
+
+        val states = loadingStatesForLatestAssistant(
+            platformCount = 2,
+            latestAssistantRow = latestRow,
+            runsById = runs,
+            activeRunIds = emptySet()
+        )
+
+        assertEquals(
+            listOf(ChatViewModel.LoadingState.Loading, ChatViewModel.LoadingState.Idle),
+            states
+        )
+        assertEquals(
+            listOf(ChatViewModel.LoadingState.Loading, ChatViewModel.LoadingState.Idle),
+            loadingStatesForLatestAssistant(
+                platformCount = 2,
+                latestAssistantRow = latestRow,
+                runsById = emptyMap(),
+                activeRunIds = setOf("run-1")
+            )
+        )
+    }
+
+    @Test
+    fun `persisted message observer rebuilds normalized comparison rows`() {
+        val grouped = groupPersistedMessages(
+            messages = listOf(
+                MessageV2(id = 1, chatId = 7, content = "First", platformType = null),
+                MessageV2(id = 2, chatId = 7, content = "Second profile", platformType = "profile-2"),
+                MessageV2(id = 3, chatId = 7, content = "First profile", platformType = "profile-1"),
+                MessageV2(id = 4, chatId = 7, content = "Again", platformType = null),
+                MessageV2(id = 5, chatId = 7, content = "Latest", platformType = "profile-1")
+            ),
+            enabledPlatformsInChat = listOf("profile-1", "profile-2"),
+            chatId = 7
+        )
+
+        assertEquals(listOf("First", "Again"), grouped.userMessages.map { it.content })
+        assertEquals(listOf("First profile", "Second profile"), grouped.assistantMessages[0].map { it.content })
+        assertEquals(listOf("Latest", ""), grouped.assistantMessages[1].map { it.content })
+    }
 
     @Test
     fun `selected profiles resolve from all configured profiles without losing slot indexes`() {
@@ -114,15 +169,15 @@ class ChatViewModelRetryTest {
     fun `agent run terminal updates preserve provider failure details`() {
         assertEquals(
             AgentRunTerminalUpdate(AgentRunStatus.COMPLETED, null),
-            ApiStateFlowOutcome.Completed.toAgentRunTerminalUpdate()
+            ApiStateFlowOutcome.Completed.toTerminalUpdate()
         )
         assertEquals(
             AgentRunTerminalUpdate(AgentRunStatus.FAILED, "provider failed"),
-            ApiStateFlowOutcome.Failed("provider failed").toAgentRunTerminalUpdate()
+            ApiStateFlowOutcome.Failed("provider failed").toTerminalUpdate()
         )
         assertEquals(
             AgentRunTerminalUpdate(AgentRunStatus.FAILED, "Provider stream ended without completion."),
-            ApiStateFlowOutcome.Incomplete.toAgentRunTerminalUpdate()
+            ApiStateFlowOutcome.Incomplete.toTerminalUpdate()
         )
     }
 
@@ -286,6 +341,17 @@ class ChatViewModelRetryTest {
         result = result,
         resultType = "TEXT",
         status = ToolEventStatus.COMPLETED
+    )
+
+    private fun agentRun(runId: String, assistantMessageId: Int, status: String) = AgentRun(
+        runId = runId,
+        chatId = 7,
+        userMessageId = 1,
+        assistantMessageId = assistantMessageId,
+        profileUid = "profile-$assistantMessageId",
+        providerSnapshot = "OPENAI",
+        modelSnapshot = "model",
+        status = status
     )
 
     @Test

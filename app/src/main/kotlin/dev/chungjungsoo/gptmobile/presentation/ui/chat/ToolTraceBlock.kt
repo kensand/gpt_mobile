@@ -64,6 +64,7 @@ fun ToolTraceBlock(
     )
     val summary = toolTraceStatusSummary(events, labels)
     val searchToolTrace = stringResource(R.string.search_tool_trace)
+    val noMatchingToolCalls = stringResource(R.string.no_matching_tool_calls)
     val traceBlockDescription = stringResource(R.string.tool_trace_block_content_description, summary)
 
     Column(
@@ -119,8 +120,15 @@ fun ToolTraceBlock(
                             .semantics { contentDescription = searchToolTrace }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    filterToolEvents(events, query).forEach { event ->
-                        ToolTraceEventCard(event, labels)
+                    val filteredEvents = filterToolEvents(events, query)
+                    if (filteredEvents.isEmpty()) {
+                        Text(
+                            text = noMatchingToolCalls,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        filteredEvents.forEach { event -> ToolTraceEventCard(event, labels) }
                     }
                 }
             }
@@ -228,10 +236,12 @@ internal fun filterToolEvents(events: List<ToolEvent>, query: String): List<Tool
             event.connectionNameSnapshot,
             event.toolName,
             event.modelToolName,
+            event.status,
             event.callId,
             event.arguments,
             event.result,
-            event.error
+            event.error,
+            timingLabel(event)
         ).any { normalizedQuery in it.lowercase(Locale.ROOT) }
     }
 }

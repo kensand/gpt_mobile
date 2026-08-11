@@ -39,13 +39,21 @@ class ToolTraceBlockTest {
             toolName = "list_events",
             error = "permission denied"
         )
+        val running = event(
+            eventId = "running",
+            sequence = 4,
+            status = ToolEventStatus.RUNNING,
+            startedAt = 100L
+        )
 
-        assertEquals(listOf("early", "late", "error"), filterToolEvents(listOf(late, error, early), "").map { it.eventId })
+        assertEquals(listOf("early", "late", "error", "running"), filterToolEvents(listOf(late, error, running, early), "").map { it.eventId })
         assertEquals(listOf("early"), filterToolEvents(listOf(late, early, error), "conn-web").map { it.eventId })
         assertEquals(listOf("early"), filterToolEvents(listOf(late, early, error), "web__search").map { it.eventId })
         assertEquals(listOf("early"), filterToolEvents(listOf(late, early, error), "weather").map { it.eventId })
         assertEquals(listOf("late"), filterToolEvents(listOf(late, early, error), "contract").map { it.eventId })
         assertEquals(listOf("error"), filterToolEvents(listOf(late, early, error), "permission").map { it.eventId })
+        assertEquals(listOf("running"), filterToolEvents(listOf(running, early), "running").map { it.eventId })
+        assertEquals(listOf("running"), filterToolEvents(listOf(running, early), "started at").map { it.eventId })
     }
 
     @Test

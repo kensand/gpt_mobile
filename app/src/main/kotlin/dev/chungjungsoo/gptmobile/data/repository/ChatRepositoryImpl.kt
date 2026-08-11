@@ -46,6 +46,7 @@ import dev.chungjungsoo.gptmobile.data.network.OpenAIAPI
 import dev.chungjungsoo.gptmobile.util.stripAssistantErrorNote
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
@@ -121,7 +122,9 @@ class ChatRepositoryImpl @Inject constructor(
                 }
             }
         } finally {
-            toolEventRecorder.cancelRun(runId, currentEpochSeconds())
+            withContext(NonCancellable) {
+                toolEventRecorder.cancelRun(runId, currentEpochSeconds())
+            }
         }
     }.catch { error ->
         emit(ApiState.Error(error.message ?: "Failed to complete chat"))
@@ -206,6 +209,10 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun fetchMessagesV2(chatId: Int): List<MessageV2> = messageV2Dao.loadMessages(chatId)
 
+    override fun observeMessagesV2(chatId: Int): Flow<List<MessageV2>> = messageV2Dao.observeMessages(chatId)
+
+    override fun observeAgentRuns(chatId: Int) = agentRunDao.observeByChatId(chatId)
+
     override fun observeToolEvents(chatId: Int): Flow<List<ToolEvent>> = toolEventRecorder.observeChat(chatId)
 
     override suspend fun fetchChatPlatformModels(chatId: Int): Map<String, String> = chatPlatformModelV2Dao.getByChatId(chatId).associate {
@@ -232,31 +239,32 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun persistAgentRetry(request: PersistAgentRetryRequest): PersistAgentRetryResult = agentPersistenceDao.persistAgentRetry(request)
 
-    override suspend fun updateAgentRunStatus(
-        runId: String,
-        status: String,
-        startedAt: Long?,
-        completedAt: Long?,
-        terminalError: String?
-    ) {
-        agentRunDao.updateStatus(runId, status, startedAt, completedAt, terminalError)
-    }
+    override suspend fun markAgentRunRunning(runId: String, startedAt: Long): Boolean = agentRunDao.markRunning(runId, startedAt) == 1
 
     override suspend fun finishAgentRun(
-        assistantMessage: MessageV2,
         runId: String,
         status: String,
-        startedAt: Long?,
-        completedAt: Long?,
+        completedAt: Long,
         terminalError: String?
-    ) = agentPersistenceDao.finishAgentRun(
-        assistantMessage,
-        runId,
-        status,
-        startedAt,
-        completedAt,
-        terminalError
-    )
+    ): Boolean = agentRunDao.finishRunning(runId, status, completedAt, terminalError) == 1
+
+    override suspend fun finishQueuedAgentRun(
+        runId: String,
+        status: String,
+        completedAt: Long,
+        terminalError: String?
+    ): Boolean = agentRunDao.finishQueued(runId, status, completedAt, terminalError) == 1
+
+    override suspend fun finishActiveAgentRun(
+        runId: String,
+        status: String,
+        completedAt: Long,
+        terminalError: String?
+    ): Boolean = agentRunDao.finishActive(runId, status, completedAt, terminalError) == 1
+
+    override suspend fun updateAgentMessage(message: MessageV2) {
+        messageV2Dao.editMessages(message)
+    }
 
     override suspend fun interruptActiveAgentRuns(completedAt: Long): Int = agentRunDao.interruptActiveRuns(completedAt)
 

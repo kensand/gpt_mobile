@@ -298,8 +298,8 @@
     <string name="at_least_one_platform_required">Add at least one platform to continue</string>
     <string name="remove">Remove</string>
     <string name="revision_counter">Revision %1$d/%2$d</string>
-    <string name="previous_revision" translatable="false">Previous revision</string>
-    <string name="next_revision" translatable="false">Next revision</string>
+    <string name="previous_revision">Previous revision</string>
+    <string name="next_revision">Next revision</string>
     <string name="web_tools">Tool connections</string>
     <string name="tool_connections">Tool connections</string>
     <string name="web_tools_description">Web search and MCP connections</string>
@@ -372,4 +372,20 @@
     <string name="oauth_client_id">OAuth client ID</string>
     <string name="preregistered_client_id_optional">Pre-registered client ID (optional)</string>
     <string name="dynamic_client_registration_hint">Leave blank to use Dynamic Client Registration when advertised.</string>
+    <string name="agent_notification_channel">Agent runs</string>
+    <string name="agent_notification_title">GPT Mobile agent is working</string>
+    <string name="cancel_agent_runs">Cancel</string>
+    <plurals name="agent_runs_active">
+        <item quantity="one">%1$d profile running</item>
+        <item quantity="other">%1$d profiles running</item>
+    </plurals>
+    <string name="retry_tools_warning">Retry may run assigned tools again.</string>
+    <string name="cancel_active_runs">Cancel active runs</string>
+    <string name="agent_run_queued">Agent run queued</string>
+    <string name="agent_run_running">Agent run in progress</string>
+    <string name="agent_run_canceled">Agent run canceled — partial response kept</string>
+    <string name="agent_run_interrupted">Agent run interrupted — tools were not replayed</string>
+    <string name="agent_run_failed">Agent run failed</string>
+    <string name="local_network_permission_required">Local network access is required for this provider or MCP connection.</string>
+    <string name="local_network_check_failed">Could not check MCP network access. Local network permission will be requested as a precaution.</string>
 </resources>

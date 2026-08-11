@@ -1,5 +1,11 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -47,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.semantics.Role
@@ -54,6 +61,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
@@ -62,6 +70,7 @@ import dev.chungjungsoo.gptmobile.presentation.common.RadioItem
 import dev.chungjungsoo.gptmobile.presentation.common.SettingItem
 import dev.chungjungsoo.gptmobile.util.formatPlatformTimeout
 import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
+import dev.chungjungsoo.gptmobile.util.requiresLocalNetworkAccess
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,6 +87,18 @@ fun PlatformSettingScreen(
     val dialogState by settingViewModel.dialogState.collectAsStateWithLifecycle()
     val isDeleted by settingViewModel.isDeleted.collectAsStateWithLifecycle()
     val toolBindingState by settingViewModel.toolBindingState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var openMcpToolsAfterPermission by remember { mutableStateOf(false) }
+    val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted && openMcpToolsAfterPermission) {
+            settingViewModel.openMcpToolsDialog()
+        } else if (!granted) {
+            Toast.makeText(context, R.string.local_network_permission_required, Toast.LENGTH_SHORT).show()
+        }
+        openMcpToolsAfterPermission = false
+    }
 
     LaunchedEffect(isDeleted) {
         if (isDeleted) {
@@ -281,7 +302,20 @@ fun PlatformSettingScreen(
                     title = stringResource(R.string.mcp_tools),
                     description = stringResource(R.string.mcp_tools_assigned, toolBindingState.selectedMcpTools.size),
                     enabled = platformData.enabled,
-                    onItemClick = settingViewModel::openMcpToolsDialog,
+                    onItemClick = {
+                        val needsPermission = toolBindingState.mcpConnections.any { connection ->
+                            connection.endpointUrl?.let(::requiresLocalNetworkAccess) == true
+                        }
+                        if (needsPermission &&
+                            Build.VERSION.SDK_INT >= 37 &&
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            openMcpToolsAfterPermission = true
+                            localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                        } else {
+                            settingViewModel.openMcpToolsDialog()
+                        }
+                    },
                     showTrailingIcon = true,
                     showLeadingIcon = false
                 )

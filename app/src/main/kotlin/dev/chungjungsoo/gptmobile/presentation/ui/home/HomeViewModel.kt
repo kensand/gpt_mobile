@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.chungjungsoo.gptmobile.data.agent.AgentRunCoordinator
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
@@ -24,7 +25,8 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
-    private val settingRepository: SettingRepository
+    private val settingRepository: SettingRepository,
+    private val agentRunCoordinator: AgentRunCoordinator
 ) : ViewModel() {
 
     companion object {
@@ -54,12 +56,18 @@ class HomeViewModel @Inject constructor(
     private val _showDeleteWarningDialog = MutableStateFlow(false)
     val showDeleteWarningDialog: StateFlow<Boolean> = _showDeleteWarningDialog.asStateFlow()
 
+    private val _activeChatIds = MutableStateFlow<Set<Int>>(emptySet())
+    val activeChatIds = _activeChatIds.asStateFlow()
+
     init {
         // Set up debounced search
         _searchQuery
             .debounce(SEARCH_DEBOUNCE_MS)
             .distinctUntilChanged()
             .onEach { query -> searchChats(query) }
+            .launchIn(viewModelScope)
+        agentRunCoordinator.activeRuns
+            .onEach { runs -> _activeChatIds.update { runs.values.mapTo(mutableSetOf()) { it.chatId } } }
             .launchIn(viewModelScope)
     }
 
@@ -120,6 +128,7 @@ class HomeViewModel @Inject constructor(
                 _chatListState.value.selectedChats[index]
             }
 
+            selectedChats.forEach { agentRunCoordinator.cancelChatAndJoin(it.id) }
             chatRepository.deleteChatsV2(selectedChats)
             _chatListState.update { it.copy(chats = chatRepository.fetchChatListV2()) }
             disableSelectionMode()
@@ -132,6 +141,7 @@ class HomeViewModel @Inject constructor(
                 _chatListState.value.selectedChats[index]
             }
             val selectedChat = selectedChats.singleOrNull() ?: return@launch
+            if (agentRunCoordinator.hasActiveRuns(selectedChat.id)) return@launch
 
             chatRepository.duplicateChatV2(selectedChat)
             _chatListState.update { it.copy(chats = chatRepository.fetchChatListV2()) }

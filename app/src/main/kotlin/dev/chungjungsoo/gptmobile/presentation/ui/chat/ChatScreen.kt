@@ -1,9 +1,11 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.chat
 
+import android.Manifest
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,17 +89,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider.getUriForFile
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
+import dev.chungjungsoo.gptmobile.util.isAssistantErrorMessage
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -121,6 +128,7 @@ fun ChatScreen(
 
     val chatRoom by chatViewModel.chatRoom.collectAsStateWithLifecycle()
     val groupedMessages by chatViewModel.groupedMessages.collectAsStateWithLifecycle()
+    val agentRunsById by chatViewModel.agentRunsById.collectAsStateWithLifecycle()
     val toolEventsByRun by chatViewModel.toolEventsByRun.collectAsStateWithLifecycle()
     val indexStates by chatViewModel.indexStates.collectAsStateWithLifecycle()
     val loadingStates by chatViewModel.loadingStates.collectAsStateWithLifecycle()
@@ -131,6 +139,7 @@ fun ChatScreen(
     val isLoaded by chatViewModel.isLoaded.collectAsStateWithLifecycle()
     val selectedAttachments by chatViewModel.selectedAttachments.collectAsStateWithLifecycle()
     val attachmentNotice by chatViewModel.attachmentNotice.collectAsStateWithLifecycle()
+    val needsLocalNetworkAccess by chatViewModel.needsLocalNetworkAccess.collectAsStateWithLifecycle()
     val appEnabledPlatforms by chatViewModel.enabledPlatformsInApp.collectAsStateWithLifecycle()
     val appAllPlatforms by chatViewModel.platformsInApp.collectAsStateWithLifecycle()
     val chatPlatformModels by chatViewModel.chatPlatformModels.collectAsStateWithLifecycle()
@@ -139,6 +148,22 @@ fun ChatScreen(
     val isIdle = loadingStates.all { it == ChatViewModel.LoadingState.Idle }
     val context = LocalContext.current
     val lastMessageIndex = groupedMessages.userMessages.lastIndex
+    var requestedNotificationPermission by remember { mutableStateOf(false) }
+    var sendAfterLocalNetworkPermission by remember { mutableStateOf(false) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { requestedNotificationPermission = true }
+    val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted && sendAfterLocalNetworkPermission) {
+            chatViewModel.askQuestion()
+            focusManager.clearFocus()
+        } else if (!granted) {
+            Toast.makeText(context, R.string.local_network_permission_required, Toast.LENGTH_SHORT).show()
+        }
+        sendAfterLocalNetworkPermission = false
+    }
 
     val scope = rememberCoroutineScope()
 
@@ -160,6 +185,16 @@ fun ChatScreen(
         attachmentNotice?.let { notice ->
             Toast.makeText(context, notice, Toast.LENGTH_SHORT).show()
             chatViewModel.consumeAttachmentNotice()
+        }
+    }
+
+    LaunchedEffect(isIdle) {
+        if (!isIdle &&
+            !requestedNotificationPermission &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -218,6 +253,7 @@ fun ChatScreen(
                             messageIndex = index,
                             message = groupedMessages.userMessages[index],
                             assistantMessages = groupedMessages.assistantMessages.getOrNull(index) ?: emptyList(),
+                            agentRunsById = agentRunsById,
                             toolEventsByRun = toolEventsByRun,
                             platformIndexState = indexStates.getOrElse(index) { 0 },
                             loadingStates = loadingStates,
@@ -249,6 +285,7 @@ fun ChatScreen(
                                 messageIndex = lastMessageIndex,
                                 message = groupedMessages.userMessages[lastMessageIndex],
                                 assistantMessages = groupedMessages.assistantMessages.getOrNull(lastMessageIndex) ?: emptyList(),
+                                agentRunsById = agentRunsById,
                                 toolEventsByRun = toolEventsByRun,
                                 platformIndexState = indexStates.getOrElse(lastMessageIndex) { 0 },
                                 loadingStates = loadingStates,
@@ -300,12 +337,22 @@ fun ChatScreen(
                 inputState = chatViewModel.question,
                 chatEnabled = canUseChat,
                 sendButtonEnabled = isIdle,
+                isRunning = !isIdle,
                 selectedAttachments = selectedAttachments,
                 onFileSelected = { filePath -> chatViewModel.addSelectedFile(filePath) },
-                onFileRemoved = { filePath -> chatViewModel.removeSelectedFile(filePath) }
+                onFileRemoved = { filePath -> chatViewModel.removeSelectedFile(filePath) },
+                onCancelButtonClick = chatViewModel::cancelActiveRuns
             ) {
-                chatViewModel.askQuestion()
-                focusManager.clearFocus()
+                if (needsLocalNetworkAccess &&
+                    Build.VERSION.SDK_INT >= 37 &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    sendAfterLocalNetworkPermission = true
+                    localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                } else {
+                    chatViewModel.askQuestion()
+                    focusManager.clearFocus()
+                }
             }
         }
 
@@ -391,6 +438,7 @@ private fun ChatMessagePair(
     messageIndex: Int,
     message: MessageV2,
     assistantMessages: List<MessageV2>,
+    agentRunsById: Map<String, AgentRun>,
     toolEventsByRun: Map<String, List<ToolEvent>>,
     platformIndexState: Int,
     loadingStates: List<ChatViewModel.LoadingState>,
@@ -413,9 +461,9 @@ private fun ChatMessagePair(
     val selectedAssistantMessage = assistantMessages.getOrNull(platformIndexState)
     val assistantContent = selectedAssistantMessage?.effectiveContent() ?: ""
     val assistantThoughts = selectedAssistantMessage?.effectiveThoughts() ?: ""
-    val toolEvents = selectedAssistantMessage?.effectiveRunId()
-        ?.let(toolEventsByRun::get)
-        .orEmpty()
+    val selectedRunId = selectedAssistantMessage?.effectiveRunId()
+    val agentRun = selectedRunId?.let(agentRunsById::get)
+    val toolEvents = selectedRunId?.let(toolEventsByRun::get).orEmpty()
     val canShowPreviousRevision = selectedAssistantMessage?.let { assistantMessage ->
         assistantMessage.revisions.isNotEmpty() &&
             assistantMessage.activeRevisionIndex < assistantMessage.revisions.lastIndex
@@ -492,11 +540,13 @@ private fun ChatMessagePair(
                 canEdit = canUseChat && isIdle,
                 canRetry = canUseChat && isActiveMessage && !isCurrentPlatformLoading,
                 isLoading = isActiveMessage && isCurrentPlatformLoading,
+                isError = agentRun?.status == AgentRunStatus.FAILED && isAssistantErrorMessage(assistantContent),
                 text = assistantContent,
                 thoughts = assistantThoughts,
                 attachments = selectedAssistantMessage?.attachments.orEmpty().map { it.filePathForDisplay },
+                agentRun = agentRun,
                 toolEvents = toolEvents,
-                contentIdentity = "$messageIndex:$selectedPlatformUid",
+                contentIdentity = "$messageIndex:$selectedPlatformUid:${selectedRunId.orEmpty()}:${selectedAssistantMessage?.activeRevisionIndex}",
                 revisionIndexLabel = selectedAssistantMessage?.let { assistantMessage ->
                     val totalRevisions = assistantMessage.revisions.size + 1
                     if (assistantMessage.activeRevisionIndex == ACTIVE_REVISION_LATEST) {
@@ -715,9 +765,11 @@ fun ChatInputBox(
     inputState: TextFieldState = rememberTextFieldState(),
     chatEnabled: Boolean = true,
     sendButtonEnabled: Boolean = true,
+    isRunning: Boolean = false,
     selectedAttachments: List<ChatAttachmentDraft> = emptyList(),
     onFileSelected: (String) -> Unit = {},
     onFileRemoved: (String) -> Unit = {},
+    onCancelButtonClick: () -> Unit = {},
     onSendButtonClick: () -> Unit = {}
 ) {
     val localStyle = LocalTextStyle.current
@@ -792,10 +844,20 @@ fun ChatInputBox(
                         }
                     }
                     IconButton(
-                        enabled = chatEnabled && sendButtonEnabled && hasQuestionText,
-                        onClick = onSendButtonClick
+                        enabled = isRunning || (chatEnabled && sendButtonEnabled && hasQuestionText),
+                        onClick = if (isRunning) onCancelButtonClick else onSendButtonClick
                     ) {
-                        Icon(imageVector = ImageVector.vectorResource(id = R.drawable.ic_send), contentDescription = stringResource(R.string.send))
+                        if (isRunning) {
+                            Icon(
+                                imageVector = Icons.Filled.Stop,
+                                contentDescription = stringResource(R.string.cancel_active_runs)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = ImageVector.vectorResource(id = R.drawable.ic_send),
+                                contentDescription = stringResource(R.string.send)
+                            )
+                        }
                     }
                 }
             }

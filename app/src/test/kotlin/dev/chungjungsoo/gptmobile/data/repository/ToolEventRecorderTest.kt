@@ -412,6 +412,8 @@ private class FakeAgentPersistenceDao : AgentPersistenceDao {
         }
     }
 
+    override suspend fun cancelInterruptedToolEvents(completedAt: Long) = Unit
+
     private fun <T> unused(): T = error("unused")
 }
 

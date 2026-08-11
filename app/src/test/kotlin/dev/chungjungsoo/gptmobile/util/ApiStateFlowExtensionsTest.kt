@@ -5,6 +5,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
 import dev.chungjungsoo.gptmobile.presentation.ui.chat.ChatViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -14,6 +15,46 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ApiStateFlowExtensionsTest {
+
+    @Test
+    fun `collectApiStateUpdates publishes provider text and thoughts without UI state`() = runBlocking {
+        val updates = mutableListOf<Pair<String, String>>()
+
+        val outcome = flowOf(
+            ApiState.Thinking("Checking"),
+            ApiState.Success("Final "),
+            ApiState.Success("answer"),
+            ApiState.Done
+        ).collectApiStateUpdates(
+            onUpdate = { content, thoughts -> updates += content to thoughts },
+            nanoTimeProvider = { 1L }
+        )
+
+        assertEquals(ApiStateFlowOutcome.Completed, outcome)
+        assertEquals("Final answer" to "Checking", updates.last())
+    }
+
+    @Test
+    fun `collectApiStateUpdates flushes partial text when canceled`() = runBlocking {
+        val updates = mutableListOf<Pair<String, String>>()
+        var wasCanceled = false
+
+        try {
+            flow {
+                emit(ApiState.Success("Partial "))
+                emit(ApiState.Success("answer"))
+                throw CancellationException("stop")
+            }.collectApiStateUpdates(
+                onUpdate = { content, thoughts -> updates += content to thoughts },
+                nanoTimeProvider = { 1L }
+            )
+        } catch (_: CancellationException) {
+            wasCanceled = true
+        }
+
+        assertTrue(wasCanceled)
+        assertEquals("Partial answer" to "", updates.last())
+    }
 
     @Test
     fun `handleStates surfaces nonterminal agent notices`() = runBlocking {

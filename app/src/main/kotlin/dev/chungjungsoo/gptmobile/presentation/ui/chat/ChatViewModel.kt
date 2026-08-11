@@ -9,7 +9,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.chungjungsoo.gptmobile.R
+import dev.chungjungsoo.gptmobile.data.agent.AgentRunCoordinator
+import dev.chungjungsoo.gptmobile.data.agent.AgentRunRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunDraft
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
@@ -27,18 +31,18 @@ import dev.chungjungsoo.gptmobile.data.database.entity.snapshotLatestAssistantRe
 import dev.chungjungsoo.gptmobile.data.repository.AttachmentUploadCoordinator
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
-import dev.chungjungsoo.gptmobile.util.ApiStateFlowOutcome
+import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
 import dev.chungjungsoo.gptmobile.util.AttachmentPayloadCache
 import dev.chungjungsoo.gptmobile.util.FileUtils
 import dev.chungjungsoo.gptmobile.util.buildAssistantErrorContent
+import dev.chungjungsoo.gptmobile.util.determineLocalNetworkAccessRequirement
 import dev.chungjungsoo.gptmobile.util.getPlatformName
-import dev.chungjungsoo.gptmobile.util.handleStates
+import dev.chungjungsoo.gptmobile.util.requiresLocalNetworkAccess
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -55,7 +59,9 @@ class ChatViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val chatRepository: ChatRepository,
     private val settingRepository: SettingRepository,
-    private val attachmentUploadCoordinator: AttachmentUploadCoordinator
+    private val attachmentUploadCoordinator: AttachmentUploadCoordinator,
+    private val agentRunCoordinator: AgentRunCoordinator,
+    private val toolConnectionRepository: ToolConnectionRepository
 ) : ViewModel() {
     sealed class LoadingState {
         data object Idle : LoadingState()
@@ -123,12 +129,18 @@ class ChatViewModel @Inject constructor(
     private val _attachmentNotice = MutableStateFlow<String?>(null)
     val attachmentNotice = _attachmentNotice.asStateFlow()
 
+    private val _needsLocalNetworkAccess = MutableStateFlow(false)
+    val needsLocalNetworkAccess = _needsLocalNetworkAccess.asStateFlow()
+
     // Chat messages currently in the chat room
     private val _groupedMessages = MutableStateFlow(GroupedMessages())
     val groupedMessages = _groupedMessages.asStateFlow()
 
     private val _toolEventsByRun = MutableStateFlow<Map<String, List<ToolEvent>>>(emptyMap())
     val toolEventsByRun = _toolEventsByRun.asStateFlow()
+
+    private val _agentRunsById = MutableStateFlow<Map<String, AgentRun>>(emptyMap())
+    val agentRunsById = _agentRunsById.asStateFlow()
 
     // Each chat states for assistant chat messages
     // Index of the currently shown message's platform - default is 0 (first platform)
@@ -153,8 +165,10 @@ class ChatViewModel @Inject constructor(
         fetchChatRoom()
         viewModelScope.launch { fetchMessages() }
         fetchEnabledPlatformsInApp()
-        observeStateChanges()
+        observePersistedMessages()
+        observeAgentRuns()
         observeToolEvents()
+        observeAgentNotices()
     }
 
     fun addMessage(userMessage: MessageV2) {
@@ -188,6 +202,10 @@ class ChatViewModel @Inject constructor(
         }
 
         sendQuestion(questionText, _selectedAttachments.value)
+    }
+
+    fun cancelActiveRuns() {
+        _chatRoom.value.id.takeIf { it > 0 }?.let(agentRunCoordinator::cancelChat)
     }
 
     override fun onCleared() {
@@ -302,12 +320,18 @@ class ChatViewModel @Inject constructor(
                     _groupedMessages.update { groupedMessages ->
                         updateAssistantSlot(groupedMessages, turnIndex, platformIndex) { persisted.assistantMessage }
                     }
-                    launchProviderRun(
-                        runId = runId,
-                        turnIndex = turnIndex,
-                        platformIndex = platformIndex,
-                        platform = platformWithChatModel,
-                        contextMessages = groupedMessagesThroughTurn(_groupedMessages.value, turnIndex)
+                    val contextMessages = groupedMessagesThroughTurn(_groupedMessages.value, turnIndex)
+                    agentRunCoordinator.start(
+                        listOf(
+                            AgentRunRequest(
+                                runId = runId,
+                                chatId = persisted.assistantMessage.chatId,
+                                assistantMessage = persisted.assistantMessage,
+                                platform = platformWithChatModel,
+                                userMessages = contextMessages.userMessages,
+                                assistantMessages = contextMessages.assistantMessages
+                            )
+                        )
                     )
                 },
                 onFailure = { error ->
@@ -624,15 +648,18 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                     val contextMessages = _groupedMessages.value
-                    platforms.forEachIndexed { runIndex, (platformIndex, platform) ->
-                        launchProviderRun(
-                            runId = runs[runIndex].runId,
-                            turnIndex = turnIndex,
-                            platformIndex = platformIndex,
-                            platform = platform,
-                            contextMessages = contextMessages
-                        )
-                    }
+                    agentRunCoordinator.start(
+                        platforms.mapIndexed { runIndex, (_, platform) ->
+                            AgentRunRequest(
+                                runId = runs[runIndex].runId,
+                                chatId = persisted.chatRoom.id,
+                                assistantMessage = persisted.assistantMessages[runIndex],
+                                platform = platform,
+                                userMessages = contextMessages.userMessages,
+                                assistantMessages = contextMessages.assistantMessages
+                            )
+                        }
+                    )
                 },
                 onFailure = { error ->
                     showPersistenceFailure(turnIndex, platforms.map { it.index }, error)
@@ -986,7 +1013,6 @@ class ChatViewModel @Inject constructor(
             if (_groupedMessages.value.assistantMessages.size != _indexStates.value.size) {
                 _indexStates.update { List(_groupedMessages.value.assistantMessages.size) { 0 } }
             }
-            _loadingStates.update { List(enabledPlatformsInChat.size) { LoadingState.Idle } }
             _isLoaded.update { true } // Finish fetching
             return
         }
@@ -1000,28 +1026,7 @@ class ChatViewModel @Inject constructor(
 
     private suspend fun fetchGroupedMessages(chatId: Int): GroupedMessages {
         val messages = chatRepository.fetchMessagesV2(chatId).sortedBy { it.createdAt }
-
-        val userMessages = mutableListOf<MessageV2>()
-        val assistantMessages = mutableListOf<MutableList<MessageV2>>()
-
-        messages.forEach { message ->
-            if (message.platformType == null) {
-                userMessages.add(message)
-                assistantMessages.add(mutableListOf())
-            } else {
-                assistantMessages.last().add(message)
-            }
-        }
-
-        val normalizedAssistantMessages = assistantMessages.map { assistantMessage ->
-            normalizeAssistantRow(
-                assistantMessages = assistantMessage,
-                enabledPlatformsInChat = enabledPlatformsInChat,
-                chatId = chatId
-            )
-        }
-
-        return GroupedMessages(userMessages, normalizedAssistantMessages)
+        return groupPersistedMessages(messages, enabledPlatformsInChat, chatId)
     }
 
     private fun fetchChatRoom() {
@@ -1040,9 +1045,29 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val allPlatforms = settingRepository.fetchPlatformV2s()
             _platformsInApp.update { allPlatforms }
-            _enabledPlatformsInApp.update { allPlatforms.filter { it.enabled } }
             initializeChatPlatformModels(allPlatforms)
+            updateLocalNetworkRequirement(allPlatforms)
+            _enabledPlatformsInApp.update { allPlatforms.filter { it.enabled } }
         }
+    }
+
+    private suspend fun updateLocalNetworkRequirement(platforms: List<PlatformV2>) {
+        val selectedProfiles = platforms.filter { it.uid in enabledPlatformsInChat }
+        val providerNeedsAccess = selectedProfiles.any { requiresLocalNetworkAccess(it.apiUrl) }
+        val requiresAccess = determineLocalNetworkAccessRequirement(
+            providerNeedsAccess = providerNeedsAccess,
+            toolNeedsAccess = {
+                enabledPlatformsInChat.any { profileUid ->
+                    toolConnectionRepository.listBindingsWithConnections(profileUid).any { binding ->
+                        binding.connection?.endpointUrl?.let(::requiresLocalNetworkAccess) == true
+                    }
+                }
+            },
+            onLookupFailure = {
+                _attachmentNotice.update { context.getString(R.string.local_network_check_failed) }
+            }
+        )
+        _needsLocalNetworkAccess.update { requiresAccess }
     }
 
     private suspend fun initializeChatPlatformModels(platforms: List<PlatformV2>) {
@@ -1067,6 +1092,77 @@ class ChatViewModel @Inject constructor(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observePersistedMessages() {
+        viewModelScope.launch {
+            _chatRoom
+                .map { it.id }
+                .distinctUntilChanged()
+                .flatMapLatest { chatId ->
+                    if (chatId > 0) {
+                        chatRepository.observeMessagesV2(chatId).map { messages -> chatId to messages }
+                    } else {
+                        flowOf(chatId to emptyList())
+                    }
+                }
+                .collect { (chatId, messages) ->
+                    if (chatId <= 0) return@collect
+                    val groupedMessages = groupPersistedMessages(messages, enabledPlatformsInChat, chatId)
+                    _groupedMessages.update { groupedMessages }
+                    _indexStates.update { current ->
+                        List(groupedMessages.assistantMessages.size) { index -> current.getOrElse(index) { 0 } }
+                    }
+                    syncLoadingStates(_agentRunsById.value.values.toList())
+                    _isLoaded.update { true }
+                }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeAgentRuns() {
+        viewModelScope.launch {
+            _chatRoom
+                .map { it.id }
+                .distinctUntilChanged()
+                .flatMapLatest { chatId ->
+                    if (chatId > 0) chatRepository.observeAgentRuns(chatId) else flowOf(emptyList())
+                }
+                .collect { runs ->
+                    _agentRunsById.update { runs.associateBy(AgentRun::runId) }
+                    syncLoadingStates(runs)
+                }
+        }
+    }
+
+    private fun observeAgentNotices() {
+        viewModelScope.launch {
+            agentRunCoordinator.notices.collect { notice ->
+                if (notice.chatId == _chatRoom.value.id) {
+                    _attachmentNotice.update { notice.message }
+                }
+            }
+        }
+        viewModelScope.launch {
+            agentRunCoordinator.activeRuns.collect {
+                syncLoadingStates(_agentRunsById.value.values.toList())
+            }
+        }
+    }
+
+    private fun syncLoadingStates(runs: List<AgentRun>) {
+        val runsById = runs.associateBy(AgentRun::runId)
+        val activeRunIds = agentRunCoordinator.activeRuns.value.keys
+        val latestAssistantRow = _groupedMessages.value.assistantMessages.lastOrNull()
+        _loadingStates.update {
+            loadingStatesForLatestAssistant(
+                platformCount = enabledPlatformsInChat.size,
+                latestAssistantRow = latestAssistantRow,
+                runsById = runsById,
+                activeRunIds = activeRunIds
+            )
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeToolEvents() {
         viewModelScope.launch {
             _chatRoom
@@ -1078,40 +1174,6 @@ class ChatViewModel @Inject constructor(
                 .collect { events ->
                     _toolEventsByRun.update { events.groupBy(ToolEvent::runId) }
                 }
-        }
-    }
-
-    private fun observeStateChanges() {
-        viewModelScope.launch {
-            _loadingStates.collect { states ->
-                if (_chatRoom.value.id != -1 &&
-                    states.all { it == LoadingState.Idle } &&
-                    (_groupedMessages.value.userMessages.isNotEmpty() && _groupedMessages.value.assistantMessages.isNotEmpty()) &&
-                    (_groupedMessages.value.userMessages.size == _groupedMessages.value.assistantMessages.size)
-                ) {
-                    val chatRoom = _chatRoom.value
-                    val groupedMessages = _groupedMessages.value
-                    val chatPlatformModels = _chatPlatformModels.value
-
-                    val savedChatRoom = withContext(Dispatchers.IO) {
-                        chatRepository.saveChat(
-                            chatRoom = chatRoom,
-                            messages = persistableMessages(groupedMessages),
-                            chatPlatformModels = chatPlatformModels
-                        )
-                    }
-                    _chatRoom.update { currentChatRoom ->
-                        if (currentChatRoom.id == chatRoom.id && chatRoom.id == 0) {
-                            savedChatRoom
-                        } else {
-                            currentChatRoom
-                        }
-                    }
-
-                    // Sync message ids
-                    fetchMessages()
-                }
-            }
         }
     }
 
@@ -1141,6 +1203,44 @@ class ChatViewModel @Inject constructor(
     }
 }
 
+internal fun loadingStatesForLatestAssistant(
+    platformCount: Int,
+    latestAssistantRow: List<MessageV2>?,
+    runsById: Map<String, AgentRun>,
+    activeRunIds: Set<String>
+): List<ChatViewModel.LoadingState> = List(platformCount) { platformIndex ->
+    val runId = latestAssistantRow?.getOrNull(platformIndex)?.currentRunId
+    val status = runId?.let(runsById::get)?.status
+    if (runId in activeRunIds || status == AgentRunStatus.QUEUED || status == AgentRunStatus.RUNNING) {
+        ChatViewModel.LoadingState.Loading
+    } else {
+        ChatViewModel.LoadingState.Idle
+    }
+}
+
+internal fun groupPersistedMessages(
+    messages: List<MessageV2>,
+    enabledPlatformsInChat: List<String>,
+    chatId: Int
+): ChatViewModel.GroupedMessages {
+    val userMessages = mutableListOf<MessageV2>()
+    val assistantMessages = mutableListOf<MutableList<MessageV2>>()
+    messages.forEach { message ->
+        if (message.platformType == null) {
+            userMessages += message
+            assistantMessages += mutableListOf<MessageV2>()
+        } else {
+            assistantMessages.lastOrNull()?.add(message)
+        }
+    }
+    return ChatViewModel.GroupedMessages(
+        userMessages = userMessages,
+        assistantMessages = assistantMessages.map { row ->
+            normalizeAssistantRow(row, enabledPlatformsInChat, chatId)
+        }
+    )
+}
+
 internal fun groupedMessagesThroughTurn(
     groupedMessages: ChatViewModel.GroupedMessages,
     turnIndex: Int
@@ -1148,8 +1248,6 @@ internal fun groupedMessagesThroughTurn(
     userMessages = groupedMessages.userMessages.take(turnIndex + 1),
     assistantMessages = groupedMessages.assistantMessages.take(turnIndex + 1)
 )
-
-internal data class AgentRunTerminalUpdate(val status: String, val error: String?)
 
 internal fun resolveSelectedPlatforms(
     selectedProfileUids: List<String>,
@@ -1208,17 +1306,6 @@ internal fun formatAssistantExport(
         appendLine(it)
         appendLine()
     }
-}
-
-internal fun ApiStateFlowOutcome.toAgentRunTerminalUpdate(): AgentRunTerminalUpdate = when (this) {
-    ApiStateFlowOutcome.Completed -> AgentRunTerminalUpdate(AgentRunStatus.COMPLETED, null)
-
-    is ApiStateFlowOutcome.Failed -> AgentRunTerminalUpdate(AgentRunStatus.FAILED, message)
-
-    ApiStateFlowOutcome.Incomplete -> AgentRunTerminalUpdate(
-        AgentRunStatus.FAILED,
-        "Provider stream ended without completion."
-    )
 }
 
 internal fun persistableMessages(groupedMessages: ChatViewModel.GroupedMessages): List<MessageV2> {

@@ -1,5 +1,11 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
@@ -46,6 +53,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -57,6 +65,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.presentation.common.RadioItem
 import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
+import dev.chungjungsoo.gptmobile.util.requiresLocalNetworkAccess
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,7 +83,20 @@ fun ToolConnectionsScreen(
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var deletingConnection by remember { mutableStateOf<ToolConnection?>(null) }
+    var pendingOAuthConnection by remember { mutableStateOf<ToolConnection?>(null) }
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
+    val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val pending = pendingOAuthConnection
+        pendingOAuthConnection = null
+        if (granted && pending != null) {
+            viewModel.startOAuth(pending.connectionUid)
+        } else if (!granted) {
+            Toast.makeText(context, R.string.local_network_permission_required, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.oauthLaunches.collect(onLaunchOAuth)
@@ -110,7 +132,18 @@ fun ToolConnectionsScreen(
                 ToolConnectionItem(
                     connection = connection,
                     onEditClick = { onEditConnectionClick(connection.connectionUid) },
-                    onOAuthClick = { viewModel.startOAuth(connection.connectionUid) },
+                    onOAuthClick = {
+                        val needsPermission = connection.endpointUrl?.let(::requiresLocalNetworkAccess) == true
+                        if (needsPermission &&
+                            Build.VERSION.SDK_INT >= 37 &&
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            pendingOAuthConnection = connection
+                            localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                        } else {
+                            viewModel.startOAuth(connection.connectionUid)
+                        }
+                    },
                     onDeleteClick = { deletingConnection = connection }
                 )
             }

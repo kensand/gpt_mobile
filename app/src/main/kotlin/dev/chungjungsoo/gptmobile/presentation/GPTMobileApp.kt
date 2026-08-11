@@ -8,6 +8,7 @@ import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.backup.SanitizedChatBackup
+import dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentRunDao
 import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
@@ -16,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 @HiltAndroidApp
@@ -29,6 +31,9 @@ class GPTMobileApp : Application() {
     lateinit var agentRunDao: AgentRunDao
 
     @Inject
+    lateinit var agentPersistenceDao: AgentPersistenceDao
+
+    @Inject
     lateinit var settingRepository: SettingRepository
 
     @Volatile
@@ -40,12 +45,10 @@ class GPTMobileApp : Application() {
     override fun onCreate() {
         SanitizedChatBackup.restoreIfPresent(this)
         super.onCreate()
-        applicationScope.launch {
-            runCatching {
-                agentRunDao.interruptActiveRuns(System.currentTimeMillis() / 1000)
-            }.onFailure { error ->
-                Log.e(TAG, "Unable to mark active agent runs as interrupted.", error)
-            }
+        runBlocking(Dispatchers.IO) {
+            val interruptedAt = System.currentTimeMillis() / 1000
+            agentRunDao.interruptActiveRuns(interruptedAt)
+            agentPersistenceDao.cancelInterruptedToolEvents(interruptedAt)
         }
         applicationScope.launch {
             secretMigrationErrors = try {
