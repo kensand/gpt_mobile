@@ -305,8 +305,13 @@
     <string name="web_tools_description">Web search and MCP connections</string>
     <string name="add_tool_connection">Add tool connection</string>
     <string name="edit_tool_connection">Edit tool connection</string>
+    <string name="save_tool_connection">Save tool connection</string>
     <string name="delete_tool_connection">Delete tool connection</string>
     <string name="delete_tool_connection_confirmation">Delete %1$s?</string>
+    <string name="tool_connection_not_found">Tool connection not found.</string>
+    <string name="tool_connection_provider_section">Provider</string>
+    <string name="tool_connection_details_section">Connection details</string>
+    <string name="tool_connection_credentials_section">Credentials</string>
     <string name="credential_set">Credential set</string>
     <string name="credential_not_set">Credential not set</string>
     <string name="stable_alias">Stable alias</string>

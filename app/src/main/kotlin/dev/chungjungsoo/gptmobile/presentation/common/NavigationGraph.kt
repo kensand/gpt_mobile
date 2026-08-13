@@ -23,6 +23,7 @@ import dev.chungjungsoo.gptmobile.presentation.ui.setting.LicenseScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.PlatformSettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingViewModelV2
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionEditorScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionsScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionsViewModel
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupCompleteScreen
@@ -210,7 +211,29 @@ fun NavGraphBuilder.settingNavigation(
             ToolConnectionsScreen(
                 viewModel = toolConnectionsViewModel,
                 onLaunchOAuth = onLaunchOAuth,
-                onNavigationClick = { navController.navigateUp() }
+                onNavigationClick = { navController.navigateUp() },
+                onAddConnectionClick = { navController.navigate(Route.ADD_TOOL_CONNECTION) },
+                onEditConnectionClick = { connectionUid ->
+                    navController.navigate(Route.EDIT_TOOL_CONNECTION.replace("{connectionUid}", connectionUid))
+                }
+            )
+        }
+        composable(Route.ADD_TOOL_CONNECTION) {
+            ToolConnectionEditorScreen(
+                viewModel = toolConnectionsViewModel,
+                onNavigationClick = { navController.navigateUp() },
+                onSaveComplete = { navController.navigateUp() }
+            )
+        }
+        composable(
+            Route.EDIT_TOOL_CONNECTION,
+            arguments = listOf(navArgument("connectionUid") { type = NavType.StringType })
+        ) {
+            ToolConnectionEditorScreen(
+                connectionUid = it.arguments?.getString("connectionUid"),
+                viewModel = toolConnectionsViewModel,
+                onNavigationClick = { navController.navigateUp() },
+                onSaveComplete = { navController.navigateUp() }
             )
         }
         composable(Route.ABOUT_PAGE) {

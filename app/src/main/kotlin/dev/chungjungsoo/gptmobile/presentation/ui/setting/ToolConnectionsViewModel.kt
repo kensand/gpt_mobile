@@ -65,7 +65,8 @@ class ToolConnectionsViewModel @Inject constructor(
         credential: String,
         oauthClientId: String,
         allowCleartext: Boolean,
-        clearCredential: Boolean
+        clearCredential: Boolean,
+        onSuccess: () -> Unit = {}
     ) {
         val normalizedAlias = normalizeAlias(alias)
         if (!isValidAlias(normalizedAlias)) {
@@ -125,6 +126,7 @@ class ToolConnectionsViewModel @Inject constructor(
                 mcpClientManager.close(connection.connectionUid)
             }.onSuccess {
                 refresh()
+                onSuccess()
             }.onFailure(::showError)
         }
     }

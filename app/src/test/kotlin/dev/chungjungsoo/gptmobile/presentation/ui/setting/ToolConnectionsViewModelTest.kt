@@ -123,6 +123,37 @@ class ToolConnectionsViewModelTest {
     }
 
     @Test
+    fun `save completion runs after persistence succeeds`() = runTest {
+        val dao = FakeToolConnectionDao()
+        val vault = FakeSecretVault()
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        val repository = ToolConnectionRepository(dao, vault)
+        val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+        var completed = false
+
+        viewModel.saveConnection(
+            existing = null,
+            provider = ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.FIRECRAWL },
+            name = "Search",
+            alias = "search",
+            endpointUrl = "",
+            authType = ToolConnectionAuthType.BEARER,
+            credential = "key",
+            oauthClientId = "",
+            allowCleartext = false,
+            clearCredential = false,
+            onSuccess = { completed = true }
+        )
+
+        assertTrue(completed)
+        assertEquals(1, dao.listConnections().size)
+        manager.closeAll()
+        networkClient().close()
+    }
+
+    @Test
     fun `OAuth launch and callback persist credential and refresh connection state`() = runTest {
         McpOAuthClientTest.OAuthFixtureServer().use { server ->
             val dao = FakeToolConnectionDao()
