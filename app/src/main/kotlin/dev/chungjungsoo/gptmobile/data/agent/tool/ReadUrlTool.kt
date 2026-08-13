@@ -10,7 +10,9 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.charset
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
 import java.io.ByteArrayOutputStream
@@ -20,6 +22,7 @@ import java.net.InetAddress
 import java.net.Proxy
 import java.net.URI
 import java.net.UnknownHostException
+import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
@@ -58,7 +61,7 @@ class ReadUrlTool(
             throw exception
         } catch (exception: ReadUrlException) {
             error(callId, "Read URL failed: ${exception.message}.")
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
             error(callId, "Read URL failed: request failed.")
         }
     }
@@ -86,7 +89,7 @@ class ReadUrlTool(
                 val contentType = response.headers[HttpHeaders.ContentType].orEmpty()
                 if (!isTextContent(contentType)) throw ReadUrlException("binary content rejected")
                 val bytes = readBounded(response)
-                val rawText = bytes.toString(StandardCharsets.UTF_8)
+                val rawText = bytes.toString(contentType.charsetOrUtf8())
                 val text = if (isHtmlContent(contentType)) htmlToText(rawText) else rawText
                 return AgentToolResult(
                     callId = callId,
@@ -165,10 +168,14 @@ class ReadUrlTool(
         return runCatching { URI(value) }.getOrNull()?.takeIf { it.isAllowedUrl() }
     }
 
+    private fun String.charsetOrUtf8(): Charset = runCatching { ContentType.parse(this).charset() }
+        .getOrNull()
+        ?: StandardCharsets.UTF_8
+
     private fun parseResolvedRedirect(base: URI, location: String): URI {
         val next = try {
             base.resolve(URI(location))
-        } catch (exception: Exception) {
+        } catch (ignored: Exception) {
             throw ReadUrlException("malformed redirect URL")
         }
         if (!next.isAllowedUrl()) throw ReadUrlException("malformed redirect URL")
@@ -183,7 +190,7 @@ class ReadUrlTool(
         return try {
             toURL()
             true
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
             false
         }
     }

@@ -55,21 +55,23 @@ fun ToolTraceBlock(
 ) {
     if (events.isEmpty()) return
 
+    val labels = toolTraceLabels()
     var isExpanded by remember(contentIdentity) { mutableStateOf(false) }
     var query by remember(contentIdentity) { mutableStateOf("") }
     val rotationAngle by animateFloatAsState(
         targetValue = if (isExpanded) 180f else 0f,
         label = "tool trace rotation"
     )
-    val summary = toolTraceStatusSummary(events)
+    val summary = toolTraceStatusSummary(events, labels)
     val searchToolTrace = stringResource(R.string.search_tool_trace)
+    val traceBlockDescription = stringResource(R.string.tool_trace_block_content_description, summary)
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .semantics { contentDescription = "Tool trace block, $summary" }
+            .semantics { contentDescription = traceBlockDescription }
     ) {
         Row(
             modifier = Modifier
@@ -77,7 +79,7 @@ fun ToolTraceBlock(
                 .clickable { isExpanded = !isExpanded }
                 .semantics {
                     role = Role.Button
-                    contentDescription = if (isExpanded) "Collapse tool trace" else "Expand tool trace"
+                    contentDescription = if (isExpanded) labels.collapseToolTrace else labels.expandToolTrace
                 }
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -90,7 +92,7 @@ fun ToolTraceBlock(
             )
             Icon(
                 imageVector = Icons.Rounded.KeyboardArrowDown,
-                contentDescription = if (isExpanded) "Collapse" else "Expand",
+                contentDescription = if (isExpanded) labels.collapse else labels.expand,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.rotate(rotationAngle)
             )
@@ -118,7 +120,7 @@ fun ToolTraceBlock(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     filterToolEvents(events, query).forEach { event ->
-                        ToolTraceEventCard(event)
+                        ToolTraceEventCard(event, labels)
                     }
                 }
             }
@@ -127,13 +129,45 @@ fun ToolTraceBlock(
 }
 
 @Composable
-private fun ToolTraceEventCard(event: ToolEvent) {
+private fun toolTraceLabels(): ToolTraceLabels = ToolTraceLabels(
+    expandToolTrace = stringResource(R.string.tool_trace_expand_content_description),
+    collapseToolTrace = stringResource(R.string.tool_trace_collapse_content_description),
+    expand = stringResource(R.string.tool_trace_expand),
+    collapse = stringResource(R.string.tool_trace_collapse),
+    call = stringResource(R.string.tool_trace_call_singular),
+    calls = stringResource(R.string.tool_trace_call_plural),
+    running = stringResource(R.string.tool_trace_status_running),
+    failed = stringResource(R.string.tool_trace_status_failed),
+    completedWithErrors = stringResource(R.string.tool_trace_status_completed_with_errors),
+    canceled = stringResource(R.string.tool_trace_status_canceled),
+    completed = stringResource(R.string.tool_trace_status_completed),
+    status = stringResource(R.string.tool_trace_status),
+    callId = stringResource(R.string.tool_trace_call_id),
+    connection = stringResource(R.string.tool_trace_connection),
+    tool = stringResource(R.string.tool_trace_tool),
+    modelTool = stringResource(R.string.tool_trace_model_tool),
+    timing = stringResource(R.string.tool_trace_timing),
+    error = stringResource(R.string.tool_trace_error),
+    arguments = stringResource(R.string.tool_trace_arguments),
+    result = stringResource(R.string.tool_trace_result),
+    exportHeader = ToolTraceLabels.Default.exportHeader,
+    startedAt = stringResource(R.string.tool_trace_timing_started_at)
+)
+
+@Composable
+private fun ToolTraceEventCard(event: ToolEvent, labels: ToolTraceLabels) {
+    val callDescription = stringResource(
+        R.string.tool_trace_call_content_description,
+        event.callId,
+        event.status.lowercase(Locale.ROOT)
+    )
+
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp)
-            .semantics { contentDescription = "Tool call ${event.callId}, ${event.status.lowercase(Locale.ROOT)}" }
+            .semantics { contentDescription = callDescription }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
@@ -142,15 +176,15 @@ private fun ToolTraceEventCard(event: ToolEvent) {
                 color = MaterialTheme.colorScheme.onSurface
             )
             if (event.modelToolName != event.toolName) {
-                ToolTraceLine("Model tool", event.modelToolName)
+                ToolTraceLine(labels.modelTool, event.modelToolName)
             }
-            ToolTraceLine("Status", event.status)
-            ToolTraceLine("Call ID", event.callId)
-            connectionLabel(event)?.let { ToolTraceLine("Connection", it) }
-            timingLabel(event)?.let { ToolTraceLine("Timing", it) }
-            event.error?.takeIf { it.isNotBlank() }?.let { ToolTraceLine("Error", boundedText(it)) }
-            ToolTraceBlockText("Arguments", event.arguments)
-            event.result?.takeIf { it.isNotBlank() }?.let { ToolTraceBlockText("Result", it) }
+            ToolTraceLine(labels.status, event.status)
+            ToolTraceLine(labels.callId, event.callId)
+            connectionLabel(event)?.let { ToolTraceLine(labels.connection, it) }
+            timingLabel(event, labels)?.let { ToolTraceLine(labels.timing, it) }
+            event.error?.takeIf { it.isNotBlank() }?.let { ToolTraceLine(labels.error, boundedText(it)) }
+            ToolTraceBlockText(labels.arguments, event.arguments)
+            event.result?.takeIf { it.isNotBlank() }?.let { ToolTraceBlockText(labels.result, it) }
         }
     }
 }
@@ -202,21 +236,21 @@ internal fun filterToolEvents(events: List<ToolEvent>, query: String): List<Tool
     }
 }
 
-internal fun toolTraceStatusSummary(events: List<ToolEvent>): String {
+internal fun toolTraceStatusSummary(events: List<ToolEvent>, labels: ToolTraceLabels = ToolTraceLabels.Default): String {
     val count = events.size
-    val noun = if (count == 1) "tool call" else "tool calls"
+    val noun = if (count == 1) labels.call else labels.calls
     if (events.isEmpty()) return "0 $noun"
 
     val hasActive = events.any { it.status == ToolEventStatus.RUNNING || it.status == ToolEventStatus.PENDING }
     val failed = events.count { it.status == ToolEventStatus.FAILED || it.isError }
     val completed = events.count { it.status == ToolEventStatus.COMPLETED && !it.isError }
     val status = when {
-        hasActive -> "running"
-        failed == events.size -> "failed"
-        failed > 0 && completed > 0 -> "completed with errors"
-        failed > 0 -> "failed"
-        events.any { it.status == ToolEventStatus.CANCELED } -> "canceled"
-        else -> "completed"
+        hasActive -> labels.running
+        failed == events.size -> labels.failed
+        failed > 0 && completed > 0 -> labels.completedWithErrors
+        failed > 0 -> labels.failed
+        events.any { it.status == ToolEventStatus.CANCELED } -> labels.canceled
+        else -> labels.completed
     }
     return "$count $noun - $status"
 }
@@ -227,23 +261,26 @@ internal fun formatToolDuration(event: ToolEvent): String? {
     return "${(completedAt - startedAt).coerceAtLeast(0)} s"
 }
 
-internal fun formatToolTraceMarkdown(events: List<ToolEvent>): String {
+internal fun formatToolTraceMarkdown(
+    events: List<ToolEvent>,
+    labels: ToolTraceLabels = ToolTraceLabels.Default
+): String {
     if (events.isEmpty()) return ""
 
     return buildString {
-        appendLine("## Tool calls (${events.size})")
+        appendLine("## ${labels.exportHeader(events.size)}")
         filterToolEvents(events, "").forEach { event ->
             appendLine()
             appendLine("### ${event.sequence + 1}. ${event.toolName}")
-            appendLine("- Status: ${event.status}")
-            appendLine("- Call ID: ${event.callId}")
-            connectionLabel(event)?.let { appendLine("- Connection: $it") }
-            appendLine("- Tool: ${event.toolName}")
-            if (event.modelToolName != event.toolName) appendLine("- Model tool: ${event.modelToolName}")
-            timingLabel(event)?.let { appendLine("- Timing: $it") }
-            event.error?.takeIf { it.isNotBlank() }?.let { appendLine("- Error: ${boundedText(it)}") }
-            appendIndentedBlock("Arguments", event.arguments)
-            event.result?.takeIf { it.isNotBlank() }?.let { appendIndentedBlock("Result", it) }
+            appendLine("- ${labels.status}: ${event.status}")
+            appendLine("- ${labels.callId}: ${event.callId}")
+            connectionLabel(event)?.let { appendLine("- ${labels.connection}: $it") }
+            appendLine("- ${labels.tool}: ${event.toolName}")
+            if (event.modelToolName != event.toolName) appendLine("- ${labels.modelTool}: ${event.modelToolName}")
+            timingLabel(event, labels)?.let { appendLine("- ${labels.timing}: $it") }
+            event.error?.takeIf { it.isNotBlank() }?.let { appendLine("- ${labels.error}: ${boundedText(it)}") }
+            appendIndentedBlock(labels.arguments, event.arguments)
+            event.result?.takeIf { it.isNotBlank() }?.let { appendIndentedBlock(labels.result, it) }
         }
     }.trimEnd()
 }
@@ -255,12 +292,12 @@ private fun StringBuilder.appendIndentedBlock(label: String, value: String) {
     }
 }
 
-private fun timingLabel(event: ToolEvent): String? {
+private fun timingLabel(event: ToolEvent, labels: ToolTraceLabels): String? {
     val startedAt = event.startedAt
     val completedAt = event.completedAt
     return when {
         startedAt != null && completedAt != null -> "${Instant.ofEpochSecond(startedAt)} - ${Instant.ofEpochSecond(completedAt)} (${formatToolDuration(event)})"
-        startedAt != null -> "started at ${Instant.ofEpochSecond(startedAt)}"
+        startedAt != null -> "${labels.startedAt} ${Instant.ofEpochSecond(startedAt)}"
         else -> null
     }
 }
@@ -280,4 +317,56 @@ private fun boundedText(value: String): String {
     val normalized = value.replace("\r\n", "\n").replace('\r', '\n')
     if (normalized.length <= TOOL_TRACE_TEXT_LIMIT) return normalized
     return normalized.take(TOOL_TRACE_TEXT_LIMIT) + "..."
+}
+
+data class ToolTraceLabels(
+    val expandToolTrace: String,
+    val collapseToolTrace: String,
+    val expand: String,
+    val collapse: String,
+    val call: String,
+    val calls: String,
+    val running: String,
+    val failed: String,
+    val completedWithErrors: String,
+    val canceled: String,
+    val completed: String,
+    val status: String,
+    val callId: String,
+    val connection: String,
+    val tool: String,
+    val modelTool: String,
+    val timing: String,
+    val error: String,
+    val arguments: String,
+    val result: String,
+    val exportHeader: (Int) -> String,
+    val startedAt: String
+) {
+    companion object {
+        val Default = ToolTraceLabels(
+            expandToolTrace = "Expand tool trace",
+            collapseToolTrace = "Collapse tool trace",
+            expand = "Expand",
+            collapse = "Collapse",
+            call = "tool call",
+            calls = "tool calls",
+            running = "running",
+            failed = "failed",
+            completedWithErrors = "completed with errors",
+            canceled = "canceled",
+            completed = "completed",
+            status = "Status",
+            callId = "Call ID",
+            connection = "Connection",
+            tool = "Tool",
+            modelTool = "Model tool",
+            timing = "Timing",
+            error = "Error",
+            arguments = "Arguments",
+            result = "Result",
+            exportHeader = { count -> "Tool calls ($count)" },
+            startedAt = "started at"
+        )
+    }
 }

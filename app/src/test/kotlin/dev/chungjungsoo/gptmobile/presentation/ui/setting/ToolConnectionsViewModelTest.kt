@@ -49,4 +49,32 @@ class ToolConnectionsViewModelTest {
         assertEquals("new-key", ToolConnectionsViewModel.credentialInput(" new-key ", clearCredential = false)?.decodeToString())
         assertNull(ToolConnectionsViewModel.credentialInput("new-key", clearCredential = true))
     }
+
+    @Test
+    fun `provider change with blank credential clears old credential`() {
+        assertTrue(
+            ToolConnectionsViewModel.shouldClearCredential(
+                existingType = ToolConnectionType.FIRECRAWL,
+                providerType = ToolConnectionType.EXA,
+                apiKey = " ",
+                clearCredential = false
+            )
+        )
+        assertFalse(
+            ToolConnectionsViewModel.shouldClearCredential(
+                existingType = ToolConnectionType.FIRECRAWL,
+                providerType = ToolConnectionType.EXA,
+                apiKey = "new-key",
+                clearCredential = false
+            )
+        )
+        assertFalse(
+            ToolConnectionsViewModel.shouldClearCredential(
+                existingType = ToolConnectionType.FIRECRAWL,
+                providerType = ToolConnectionType.FIRECRAWL,
+                apiKey = " ",
+                clearCredential = false
+            )
+        )
+    }
 }

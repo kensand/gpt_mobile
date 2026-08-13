@@ -118,6 +118,24 @@ class ReadUrlToolTest {
     }
 
     @Test
+    fun `declared charset decodes text with UTF-8 fallback`() = runBlocking {
+        val latin1 = server { exchange ->
+            exchange.respond(200, "text/plain; charset=iso-8859-1", byteArrayOf(0xE9.toByte()))
+        }
+        val fallback = server { exchange ->
+            exchange.respond(200, "text/plain", "한글".toByteArray(Charsets.UTF_8))
+        }
+
+        val latin1Result = tool(allowTestLoopback = true).execute("call-1", args(latin1.url("fixture.test", "/latin1")))
+        val fallbackResult = tool(allowTestLoopback = true).execute("call-2", args(fallback.url("fixture.test", "/utf8")))
+
+        assertEquals(false, latin1Result.isError)
+        assertEquals("é", latin1Result.text())
+        assertEquals(false, fallbackResult.isError)
+        assertEquals("한글", fallbackResult.text())
+    }
+
+    @Test
     fun `redirect validates second host`() = runBlocking {
         val server = server { exchange ->
             exchange.respond(302, "text/plain", "", "Location" to "http://private.test/secret")
@@ -172,15 +190,15 @@ class ReadUrlToolTest {
     @Test
     fun `UTF-8 output cap does not split code points`() = runBlocking {
         val server = server { exchange ->
-            exchange.respond(200, "text/plain; charset=utf-8", "😀".repeat(20 * 1024))
+            exchange.respond(200, "text/plain; charset=utf-8", "a".repeat(65524) + "😀".repeat(4))
         }
 
         val result = tool(allowTestLoopback = true).execute("call-1", args(server.url("fixture.test", "/emoji")))
 
         val text = result.text()
         assertEquals(false, result.isError)
-        assertEquals(64 * 1024, text.toByteArray(Charsets.UTF_8).size)
-        assertEquals(16 * 1024, text.codePointCount(0, text.length))
+        assertEquals(65524 + 4 * 3, text.toByteArray(Charsets.UTF_8).size)
+        assertEquals("a".repeat(65524) + "😀".repeat(3), text)
     }
 
     @Test
@@ -231,12 +249,18 @@ class ReadUrlToolTest {
         contentType: String,
         body: String,
         vararg headers: Pair<String, String>
+    ) = respond(status, contentType, body.toByteArray(Charsets.UTF_8), *headers)
+
+    private fun HttpExchange.respond(
+        status: Int,
+        contentType: String,
+        body: ByteArray,
+        vararg headers: Pair<String, String>
     ) {
         responseHeaders.add("Content-Type", contentType)
         headers.forEach { (name, value) -> responseHeaders.add(name, value) }
-        val bytes = body.toByteArray(Charsets.UTF_8)
-        sendResponseHeaders(status, bytes.size.toLong())
-        responseBody.use { it.write(bytes) }
+        sendResponseHeaders(status, body.size.toLong())
+        responseBody.use { it.write(body) }
     }
 
     private fun dns(host: String, vararg addresses: String): Dns = dns(host to addresses.toList())

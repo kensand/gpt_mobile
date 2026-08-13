@@ -94,8 +94,7 @@ class ToolEventRecorder @Inject constructor(
     }
 
     fun observeChat(chatId: Int): Flow<List<ToolEvent>> {
-        if (chatId == 0) return flowOf(emptyList())
-        require(chatId > 0)
+        if (chatId <= 0) return flowOf(emptyList())
         return dao.observeToolEventsForChat(chatId)
     }
 

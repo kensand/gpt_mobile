@@ -80,7 +80,8 @@ interface ToolConnectionDao {
 
     @Transaction
     suspend fun replaceWebSearchBinding(binding: AgentToolBinding) {
-        deleteConnectionToolBindingsForTypes(binding.profileUid, binding.toolName, WEB_SEARCH_TYPES)
+        require(binding.toolName == WEB_SEARCH_TOOL)
+        deleteConnectionToolBindingsForTypes(binding.profileUid, WEB_SEARCH_TOOL, WEB_SEARCH_TYPES)
         insertBinding(binding)
     }
 
@@ -91,7 +92,8 @@ interface ToolConnectionDao {
 
     @Transaction
     suspend fun replaceReadUrlBinding(binding: AgentToolBinding) {
-        deleteBuiltInToolBinding(binding.profileUid, binding.toolName)
+        require(binding.toolName == BuiltInAgentTool.READ_URL)
+        deleteBuiltInToolBinding(binding.profileUid, BuiltInAgentTool.READ_URL)
         insertBinding(binding)
     }
 

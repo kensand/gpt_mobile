@@ -74,10 +74,16 @@ class ToolConnectionsViewModel @Inject constructor(
                 updatedAt = now
             )
             runCatching {
+                val shouldClearCredential = shouldClearCredential(
+                    existingType = existing?.type,
+                    providerType = provider.type,
+                    apiKey = apiKey,
+                    clearCredential = clearCredential
+                )
                 toolConnectionRepository.upsertConnection(
                     connection = connection,
-                    credential = credentialInput(apiKey, clearCredential),
-                    clearCredential = clearCredential
+                    credential = credentialInput(apiKey, shouldClearCredential),
+                    clearCredential = shouldClearCredential
                 )
             }.onSuccess {
                 refresh()
@@ -119,6 +125,13 @@ class ToolConnectionsViewModel @Inject constructor(
         fun isValidAlias(alias: String): Boolean = aliasRegex.matches(alias)
 
         fun credentialInput(apiKey: String, clearCredential: Boolean): ByteArray? = apiKey.trim().takeIf { it.isNotEmpty() && !clearCredential }?.encodeToByteArray()
+
+        fun shouldClearCredential(
+            existingType: String?,
+            providerType: String,
+            apiKey: String,
+            clearCredential: Boolean
+        ): Boolean = clearCredential || (existingType != null && existingType != providerType && apiKey.isBlank())
     }
 }
 

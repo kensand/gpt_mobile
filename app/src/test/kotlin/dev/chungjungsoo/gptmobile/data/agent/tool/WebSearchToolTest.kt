@@ -28,11 +28,13 @@ import org.junit.Test
 class WebSearchToolTest {
 
     private val servers = mutableListOf<HttpServer>()
+    private val networkClients = mutableListOf<NetworkClient>()
     private val clock = Clock.fixed(Instant.parse("2026-08-01T12:00:00Z"), ZoneOffset.UTC)
 
     @After
     fun stopServers() {
         servers.forEach { it.stop(0) }
+        networkClients.forEach { it().close() }
     }
 
     @Test
@@ -291,11 +293,15 @@ class WebSearchToolTest {
         assertEquals("Web search failed: missing required result fields.", (result.content as ToolResultContent.Text).text)
     }
 
-    private fun tool(provider: WebSearchProvider, endpointUrl: String): WebSearchTool = WebSearchTool(
-        config = WebSearchProviderConfig(provider, "${provider.name.lowercase()}-key", endpointUrl),
-        networkClient = NetworkClient(CIO),
-        clock = clock
-    )
+    private fun tool(provider: WebSearchProvider, endpointUrl: String): WebSearchTool {
+        val networkClient = NetworkClient(CIO)
+        networkClients += networkClient
+        return WebSearchTool(
+            config = WebSearchProviderConfig(provider, "${provider.name.lowercase()}-key", endpointUrl),
+            networkClient = networkClient,
+            clock = clock
+        )
+    }
 
     private fun arguments(): JsonObject = buildJsonObject {
         put("query", "latest kotlin")

@@ -517,7 +517,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun exportChat(): Pair<String, String> {
+    fun exportChat(toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default): Pair<String, String> {
         // Build the chat history in Markdown format
         val chatHistoryMarkdown = buildString {
             appendLine("# Chat Export: \"${chatRoom.value.title}\"")
@@ -537,7 +537,7 @@ class ChatViewModel @Inject constructor(
                     val platformName = message.platformType
                         ?.let { _platformsInApp.value.getPlatformName(it) }
                         ?: "Unknown"
-                    append(formatAssistantExport(platformName, message, _toolEventsByRun.value))
+                    append(formatAssistantExport(platformName, message, _toolEventsByRun.value, toolTraceLabels))
                 }
             }
         }
@@ -1195,7 +1195,8 @@ internal fun mergePersistedAssistantRow(
 internal fun formatAssistantExport(
     platformName: String,
     message: MessageV2,
-    toolEventsByRun: Map<String, List<ToolEvent>>
+    toolEventsByRun: Map<String, List<ToolEvent>>,
+    toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default
 ): String = buildString {
     appendLine("**Assistant ($platformName):**")
     appendLine(message.effectiveContent())
@@ -1203,7 +1204,7 @@ internal fun formatAssistantExport(
     val trace = message.effectiveRunId()
         ?.let(toolEventsByRun::get)
         .orEmpty()
-    formatToolTraceMarkdown(trace).takeIf { it.isNotBlank() }?.let {
+    formatToolTraceMarkdown(trace, toolTraceLabels).takeIf { it.isNotBlank() }?.let {
         appendLine(it)
         appendLine()
     }

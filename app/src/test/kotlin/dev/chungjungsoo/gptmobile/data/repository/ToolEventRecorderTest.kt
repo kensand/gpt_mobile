@@ -277,6 +277,14 @@ class ToolEventRecorderTest {
         assertEquals(emptyList<Int>(), dao.observedChatIds)
     }
 
+    @Test
+    fun observeChat_negativeChatIdEmitsEmptyListWithoutQueryingDao() = runBlocking {
+        dao.observedToolEvents.value = listOf(event("event-1", "run-1", 0, ToolEventStatus.RUNNING))
+
+        assertEquals(emptyList<ToolEvent>(), recorder.observeChat(-1).first())
+        assertEquals(emptyList<Int>(), dao.observedChatIds)
+    }
+
     private fun event(
         eventId: String,
         runId: String,
@@ -330,6 +338,13 @@ private class FakeAgentPersistenceDao : AgentPersistenceDao {
     override suspend fun persistAgentRetry(request: PersistAgentRetryRequest): PersistAgentRetryResult = unused()
     override suspend fun duplicateChatWithHistory(sourceChatId: Int, title: String, timestamp: Long): ChatRoomV2 = unused()
     override suspend fun updateMessage(message: MessageV2) = unused<Unit>()
+    override suspend fun updateRunStatus(
+        runId: String,
+        status: String,
+        startedAt: Long?,
+        completedAt: Long?,
+        terminalError: String?
+    ) = unused<Unit>()
 
     override suspend fun getToolEventsForRun(runId: String): List<ToolEvent> = rows
         .filter { it.runId == runId }

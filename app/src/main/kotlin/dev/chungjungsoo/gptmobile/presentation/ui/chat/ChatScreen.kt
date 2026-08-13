@@ -661,7 +661,7 @@ fun ChatBubbleDropdownMenu(
 
 private fun exportChat(context: Context, chatViewModel: ChatViewModel) {
     try {
-        val (fileName, fileContent) = chatViewModel.exportChat()
+        val (fileName, fileContent) = chatViewModel.exportChat(context.toolTraceLabels())
         val file = File(context.getExternalFilesDir(null), fileName)
         file.writeText(fileContent)
         val uri = getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -683,6 +683,31 @@ private fun exportChat(context: Context, chatViewModel: ChatViewModel) {
         Toast.makeText(context, "Failed to export chat", Toast.LENGTH_SHORT).show()
     }
 }
+
+private fun Context.toolTraceLabels(): ToolTraceLabels = ToolTraceLabels(
+    expandToolTrace = getString(R.string.tool_trace_expand_content_description),
+    collapseToolTrace = getString(R.string.tool_trace_collapse_content_description),
+    expand = getString(R.string.tool_trace_expand),
+    collapse = getString(R.string.tool_trace_collapse),
+    call = getString(R.string.tool_trace_call_singular),
+    calls = getString(R.string.tool_trace_call_plural),
+    running = getString(R.string.tool_trace_status_running),
+    failed = getString(R.string.tool_trace_status_failed),
+    completedWithErrors = getString(R.string.tool_trace_status_completed_with_errors),
+    canceled = getString(R.string.tool_trace_status_canceled),
+    completed = getString(R.string.tool_trace_status_completed),
+    status = getString(R.string.tool_trace_status),
+    callId = getString(R.string.tool_trace_call_id),
+    connection = getString(R.string.tool_trace_connection),
+    tool = getString(R.string.tool_trace_tool),
+    modelTool = getString(R.string.tool_trace_model_tool),
+    timing = getString(R.string.tool_trace_timing),
+    error = getString(R.string.tool_trace_error),
+    arguments = getString(R.string.tool_trace_arguments),
+    result = getString(R.string.tool_trace_result),
+    exportHeader = { count -> getString(R.string.tool_trace_export_header, count) },
+    startedAt = getString(R.string.tool_trace_timing_started_at)
+)
 
 @Preview
 @Composable
