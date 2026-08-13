@@ -22,7 +22,15 @@ class LocalNetworkAccessTest {
     fun `public and malformed URLs do not request local network permission`() {
         assertFalse(requiresLocalNetworkAccess("https://api.openai.com/v1"))
         assertFalse(requiresLocalNetworkAccess("https://mcp.example.com"))
+        assertFalse(requiresLocalNetworkAccess("https://fea.example.com"))
+        assertFalse(requiresLocalNetworkAccess("https://fd.example.com"))
         assertFalse(requiresLocalNetworkAccess("not a URL"))
+    }
+
+    @Test
+    fun `private IPv6 literals require Android local network permission`() {
+        assertTrue(requiresLocalNetworkAccess("http://[fe80::1]:8080/mcp"))
+        assertTrue(requiresLocalNetworkAccess("http://[fd00::1]:8080/mcp"))
     }
 
     @Test

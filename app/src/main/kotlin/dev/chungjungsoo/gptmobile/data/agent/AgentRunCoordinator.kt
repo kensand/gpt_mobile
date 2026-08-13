@@ -21,12 +21,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -119,11 +119,9 @@ class AgentRunCoordinator @Inject constructor(
         val runIds = _activeRuns.value.values
             .filter { it.chatId == chatId }
             .mapTo(mutableSetOf(), ActiveAgentRun::runId)
-        val chatJobs = runIds.mapNotNull(jobs::get)
         withContext(NonCancellable) {
             terminalizeAndCancel(runIds, isInterrupted = false)
         }
-        chatJobs.joinAll()
     }
 
     fun hasActiveRuns(chatId: Int): Boolean = _activeRuns.value.values.any { it.chatId == chatId }
@@ -140,16 +138,15 @@ class AgentRunCoordinator @Inject constructor(
         if (isInterrupted) interruptingRunIds += runIds
         val completedAt = currentEpochSeconds()
         runIds.forEach { runId ->
-            try {
-                chatRepository.finishActiveAgentRun(
-                    runId = runId,
-                    status = if (isInterrupted) AgentRunStatus.INTERRUPTED else AgentRunStatus.CANCELED,
-                    completedAt = completedAt,
-                    terminalError = if (isInterrupted) "Foreground agent service stopped." else null
-                )
-            } catch (_: Exception) {
-            } finally {
-                jobs[runId]?.cancel()
+            runCatching {
+                cancelAndJoinAgentRun(jobs[runId]) {
+                    chatRepository.finishActiveAgentRun(
+                        runId = runId,
+                        status = if (isInterrupted) AgentRunStatus.INTERRUPTED else AgentRunStatus.CANCELED,
+                        completedAt = completedAt,
+                        terminalError = if (isInterrupted) "Foreground agent service stopped." else null
+                    )
+                }
             }
         }
     }
@@ -286,6 +283,11 @@ internal suspend fun commitTerminalAgentRun(
     if (!finishRun()) return@withContext false
     persistMessage()
     true
+}
+
+internal suspend fun cancelAndJoinAgentRun(job: Job?, finishActiveRun: suspend () -> Unit) {
+    job?.cancelAndJoin()
+    finishActiveRun()
 }
 
 private fun currentEpochSeconds(): Long = System.currentTimeMillis() / 1000

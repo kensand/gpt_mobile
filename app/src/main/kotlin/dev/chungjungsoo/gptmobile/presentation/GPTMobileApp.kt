@@ -17,7 +17,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 @HiltAndroidApp
@@ -45,17 +44,15 @@ class GPTMobileApp : Application() {
     override fun onCreate() {
         SanitizedChatBackup.restoreIfPresent(this)
         super.onCreate()
-        runBlocking(Dispatchers.IO) {
-            val interruptedAt = System.currentTimeMillis() / 1000
-            agentRunDao.interruptActiveRuns(interruptedAt)
-            agentPersistenceDao.cancelInterruptedToolEvents(interruptedAt)
-        }
         applicationScope.launch {
-            secretMigrationErrors = try {
-                settingRepository.migrateSecrets()
-            } catch (error: Exception) {
-                listOf(SecretMigrationError("startup", error.message ?: "Credential migration failed."))
-            }
+            secretMigrationErrors = runStartupMaintenance(
+                interruptPersistedWork = {
+                    val interruptedAt = System.currentTimeMillis() / 1000
+                    agentRunDao.interruptActiveRuns(interruptedAt)
+                    agentPersistenceDao.cancelInterruptedToolEvents(interruptedAt)
+                },
+                migrateSecrets = settingRepository::migrateSecrets
+            )
             if (secretMigrationErrors.isNotEmpty()) {
                 runCatching {
                     withContext(Dispatchers.Main) {
@@ -74,5 +71,17 @@ class GPTMobileApp : Application() {
 
     private companion object {
         const val TAG = "GPTMobileApp"
+    }
+}
+
+internal suspend fun runStartupMaintenance(
+    interruptPersistedWork: suspend () -> Unit,
+    migrateSecrets: suspend () -> List<SecretMigrationError>
+): List<SecretMigrationError> {
+    interruptPersistedWork()
+    return try {
+        migrateSecrets()
+    } catch (error: Exception) {
+        listOf(SecretMigrationError("startup", error.message ?: "Credential migration failed."))
     }
 }

@@ -380,6 +380,7 @@
         <item quantity="other">%1$d profiles running</item>
     </plurals>
     <string name="retry_tools_warning">Retry may run assigned tools again.</string>
+    <string name="no_matching_tool_calls">No matching tool calls.</string>
     <string name="cancel_active_runs">Cancel active runs</string>
     <string name="agent_run_queued">Agent run queued</string>
     <string name="agent_run_running">Agent run in progress</string>

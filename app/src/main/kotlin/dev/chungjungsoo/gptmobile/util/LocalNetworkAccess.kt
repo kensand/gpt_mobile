@@ -24,6 +24,7 @@ internal fun requiresLocalNetworkAccess(url: String): Boolean {
             (first == 192 && second == 168) ||
             (first == 100 && second in 64..127)
     }
+    if (':' !in host) return false
 
     return host == "::1" ||
         host.startsWith("fe8") ||
