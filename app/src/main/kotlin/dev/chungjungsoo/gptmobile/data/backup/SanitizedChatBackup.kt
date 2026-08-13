@@ -20,6 +20,7 @@ class SanitizedChatBackupAgent : BackupAgent() {
     override fun onRestore(data: BackupDataInput, appVersionCode: Int, newState: ParcelFileDescriptor) = Unit
 
     override fun onFullBackup(data: FullBackupDataOutput) {
+        if (!SanitizedChatBackup.deleteStagedFile(this)) return
         super.onFullBackup(data)
         val source = getDatabasePath(DATABASE_NAME)
         if (!source.exists()) return
@@ -72,6 +73,11 @@ object SanitizedChatBackup {
         SQLiteDatabase.openDatabase(destination.path, null, SQLiteDatabase.OPEN_READWRITE).use { database ->
             database.execSQL("UPDATE platform_v2 SET token = NULL")
         }
+    }
+
+    internal fun deleteStagedFile(context: Context): Boolean {
+        val staged = stagedFile(context)
+        return !staged.exists() || staged.delete()
     }
 
     internal fun stagedFile(context: Context): File = File(context.filesDir, STAGED_PATH)

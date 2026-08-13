@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -40,5 +41,21 @@ class SanitizedChatBackupInstrumentedTest {
         }
         source.delete()
         destination.delete()
+    }
+
+    @Test
+    fun deleteStagedFile_removesPreviousCopyAndReportsFailure() {
+        val staged = SanitizedChatBackup.stagedFile(context)
+        staged.parentFile?.mkdirs()
+        staged.writeText("stale")
+
+        assertTrue(SanitizedChatBackup.deleteStagedFile(context))
+        assertFalse(staged.exists())
+
+        staged.mkdirs()
+        File(staged, "blocked").writeText("stale")
+        assertFalse(SanitizedChatBackup.deleteStagedFile(context))
+        File(staged, "blocked").delete()
+        staged.delete()
     }
 }

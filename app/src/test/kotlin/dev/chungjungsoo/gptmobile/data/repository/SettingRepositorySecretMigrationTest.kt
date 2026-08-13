@@ -192,6 +192,8 @@ class SettingRepositorySecretMigrationTest {
             dao.platforms.single().copy(token = "replacement-secret", secretRef = null)
         )
 
+        assertNull(dao.platforms.single().token)
+        assertEquals("profile_profile-1", dao.platforms.single().secretRef)
         assertNull(vault.values[oldSecretRef])
         assertEquals("replacement-secret", vault.values.getValue("profile_profile-1").decodeToString())
     }

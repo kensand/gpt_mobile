@@ -54,12 +54,16 @@ class GPTMobileApp : Application() {
                 listOf(SecretMigrationError("startup", error.message ?: "Credential migration failed."))
             }
             if (secretMigrationErrors.isNotEmpty()) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@GPTMobileApp,
-                        R.string.credential_migration_warning,
-                        Toast.LENGTH_LONG
-                    ).show()
+                runCatching {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            this@GPTMobileApp,
+                            R.string.credential_migration_warning,
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }.onFailure { error ->
+                    Log.e(TAG, "Unable to show credential migration warning.", error)
                 }
             }
         }
