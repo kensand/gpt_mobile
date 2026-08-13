@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -255,6 +256,21 @@ class ChatViewModelRetryTest {
         assertTrue(markdown.contains("old result"))
         assertFalse(markdown.contains("Latest"))
         assertFalse(markdown.contains("new result"))
+    }
+
+    @Test
+    fun `selected revision without a run does not inherit the latest trace`() {
+        val message = MessageV2(
+            content = "Latest",
+            revisions = listOf(AssistantRevision(content = "Legacy", createdAt = 100L)),
+            activeRevisionIndex = 0,
+            platformType = "platform-1",
+            currentRunId = "run-new"
+        )
+        val traces = mapOf("run-new" to listOf(toolEvent("new-event", "new result")))
+
+        assertNull(message.effectiveRunId())
+        assertFalse(formatAssistantExport("OpenAI", message, traces).contains("new result"))
     }
 
     private fun toolEvent(eventId: String, result: String) = ToolEvent(

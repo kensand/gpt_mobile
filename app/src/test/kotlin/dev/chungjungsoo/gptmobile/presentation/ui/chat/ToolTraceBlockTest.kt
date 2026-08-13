@@ -2,6 +2,7 @@ package dev.chungjungsoo.gptmobile.presentation.ui.chat
 
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventStatus
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -45,6 +46,18 @@ class ToolTraceBlockTest {
         assertEquals(listOf("early"), filterToolEvents(listOf(late, early, error), "weather").map { it.eventId })
         assertEquals(listOf("late"), filterToolEvents(listOf(late, early, error), "contract").map { it.eventId })
         assertEquals(listOf("error"), filterToolEvents(listOf(late, early, error), "permission").map { it.eventId })
+    }
+
+    @Test
+    fun filterToolEvents_matchesAsciiIdentifiersIndependentlyOfDeviceLocale() {
+        val originalLocale = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+
+            assertEquals(listOf("file"), filterToolEvents(listOf(event("file", toolName = "FILE_INDEX")), "file_index").map { it.eventId })
+        } finally {
+            Locale.setDefault(originalLocale)
+        }
     }
 
     @Test

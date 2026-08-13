@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -38,9 +39,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventStatus
 import java.time.Instant
+import java.util.Locale
 
 private const val TOOL_TRACE_TEXT_LIMIT = 1024
 
@@ -59,6 +62,7 @@ fun ToolTraceBlock(
         label = "tool trace rotation"
     )
     val summary = toolTraceStatusSummary(events)
+    val searchToolTrace = stringResource(R.string.search_tool_trace)
 
     Column(
         modifier = modifier
@@ -106,11 +110,11 @@ fun ToolTraceBlock(
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
-                        label = { Text("Search tool trace") },
+                        label = { Text(searchToolTrace) },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .semantics { contentDescription = "Search tool trace" }
+                            .semantics { contentDescription = searchToolTrace }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     filterToolEvents(events, query).forEach { event ->
@@ -129,7 +133,7 @@ private fun ToolTraceEventCard(event: ToolEvent) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp)
-            .semantics { contentDescription = "Tool call ${event.callId}, ${event.status.lowercase()}" }
+            .semantics { contentDescription = "Tool call ${event.callId}, ${event.status.lowercase(Locale.ROOT)}" }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
@@ -181,7 +185,7 @@ private fun ToolTraceBlockText(label: String, value: String) {
 
 internal fun filterToolEvents(events: List<ToolEvent>, query: String): List<ToolEvent> {
     val ordered = events.sortedBy { it.sequence }
-    val normalizedQuery = query.trim().lowercase()
+    val normalizedQuery = query.trim().lowercase(Locale.ROOT)
     if (normalizedQuery.isEmpty()) return ordered
 
     return ordered.filter { event ->
@@ -194,7 +198,7 @@ internal fun filterToolEvents(events: List<ToolEvent>, query: String): List<Tool
             event.arguments,
             event.result,
             event.error
-        ).any { normalizedQuery in it.lowercase() }
+        ).any { normalizedQuery in it.lowercase(Locale.ROOT) }
     }
 }
 

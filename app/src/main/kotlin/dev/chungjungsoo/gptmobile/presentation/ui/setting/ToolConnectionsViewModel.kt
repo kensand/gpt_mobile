@@ -9,6 +9,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
 import dev.chungjungsoo.gptmobile.data.security.SecretVault
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -113,7 +114,7 @@ class ToolConnectionsViewModel @Inject constructor(
         private val WEB_SEARCH_TYPES = providers.map { it.type }.toSet()
         private val aliasRegex = Regex("[a-z][a-z0-9_]{0,31}")
 
-        fun normalizeAlias(alias: String): String = alias.trim().lowercase().replace(Regex("[^a-z0-9_]"), "_")
+        fun normalizeAlias(alias: String): String = alias.trim().lowercase(Locale.ROOT).replace(Regex("[^a-z0-9_]"), "_")
 
         fun isValidAlias(alias: String): Boolean = aliasRegex.matches(alias)
 

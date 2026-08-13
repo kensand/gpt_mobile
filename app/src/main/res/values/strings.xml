@@ -314,5 +314,6 @@
     <string name="blank_key_preserves_credential">Credential set. Leave blank to keep it.</string>
     <string name="clear_api_key">Clear API key</string>
     <string name="search_backend">Search backend</string>
+    <string name="search_tool_trace">Search tool trace</string>
     <string name="read_url">Read URL</string>
 </resources>
