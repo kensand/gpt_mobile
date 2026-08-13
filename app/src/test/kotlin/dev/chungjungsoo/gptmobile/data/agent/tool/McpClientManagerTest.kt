@@ -93,8 +93,10 @@ class McpClientManagerTest {
 
     internal class McpFixtureServer(
         private val paginateTools: Boolean = false,
-        private val acceptedAuthorization: String? = null
+        acceptedAuthorization: String? = null
     ) : AutoCloseable {
+        @Volatile
+        var acceptedAuthorization: String? = acceptedAuthorization
         val methods = CopyOnWriteArrayList<String>()
         val sessionHeaders = CopyOnWriteArrayList<String?>()
         val authorizationHeaders = CopyOnWriteArrayList<String>()

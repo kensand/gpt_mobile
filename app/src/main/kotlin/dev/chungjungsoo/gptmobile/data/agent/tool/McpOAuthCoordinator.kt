@@ -128,6 +128,8 @@ fun mcpOAuthConnectionUid(callbackUri: String): String? = runCatching { URI(call
     ?.substringAfterLast('/')
     ?.takeIf(MCP_CONNECTION_UID_PATTERN::matches)
 
+fun isMcpOAuthCallbackUri(callbackUri: String?): Boolean = callbackUri?.let(::mcpOAuthConnectionUid) != null
+
 const val MCP_OAUTH_SCHEME = "dev.chungjungsoo.gptmobile"
 const val MCP_OAUTH_HOST = "oauth"
 

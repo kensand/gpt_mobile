@@ -18,25 +18,23 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
-import dev.chungjungsoo.gptmobile.data.agent.tool.MCP_OAUTH_HOST
 import dev.chungjungsoo.gptmobile.data.agent.tool.MCP_OAUTH_SCHEME
+import dev.chungjungsoo.gptmobile.data.agent.tool.isMcpOAuthCallbackUri
 import dev.chungjungsoo.gptmobile.presentation.common.LocalDynamicTheme
 import dev.chungjungsoo.gptmobile.presentation.common.LocalThemeMode
 import dev.chungjungsoo.gptmobile.presentation.common.Route
 import dev.chungjungsoo.gptmobile.presentation.common.SetupNavGraph
 import dev.chungjungsoo.gptmobile.presentation.common.ThemeSettingProvider
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.receiveAsFlow
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionsViewModel
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val mainViewModel: MainViewModel by viewModels()
+    private val toolConnectionsViewModel: ToolConnectionsViewModel by viewModels()
     private lateinit var authTabLauncher: ActivityResultLauncher<Intent>
-    private val oauthCallbackChannel = Channel<String?>(Channel.BUFFERED)
-    private val oauthCallbacks = oauthCallbackChannel.receiveAsFlow()
     private var lastOAuthCallback: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,19 +63,19 @@ class MainActivity : ComponentActivity() {
                 ) {
                     SetupNavGraph(
                         navController = navController,
-                        oauthCallbacks = oauthCallbacks,
+                        toolConnectionsViewModel = toolConnectionsViewModel,
                         onLaunchOAuth = ::launchOAuth
                     )
                 }
             }
         }
-        intent?.data?.toString()?.takeIf { it.startsWith("$MCP_OAUTH_SCHEME://$MCP_OAUTH_HOST/mcp/") }?.let(::dispatchOAuthCallback)
+        dispatchOAuthIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.data?.toString()?.let(::dispatchOAuthCallback)
+        dispatchOAuthIntent(intent)
     }
 
     private fun launchOAuth(authorizationUri: String) {
@@ -92,8 +90,12 @@ class MainActivity : ComponentActivity() {
     private fun dispatchOAuthCallback(callbackUri: String?) {
         if (callbackUri != null && callbackUri == lastOAuthCallback) return
         lastOAuthCallback = callbackUri
-        oauthCallbackChannel.trySend(callbackUri)
+        toolConnectionsViewModel.completeOAuthCallback(callbackUri)
     }
+
+    private fun dispatchOAuthIntent(intent: Intent?) = intent?.data?.toString()
+        ?.takeIf(::isMcpOAuthCallbackUri)
+        ?.let(::dispatchOAuthCallback)
 
     private fun NavHostController.checkForExistingSettings() {
         lifecycleScope.launch {

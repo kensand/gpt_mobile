@@ -16,6 +16,7 @@ import dev.chungjungsoo.gptmobile.data.security.SecretVault
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -38,6 +39,7 @@ class ToolConnectionsViewModel @Inject constructor(
     val uiState: StateFlow<ToolConnectionsUiState> = _uiState.asStateFlow()
     private val _oauthLaunches = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val oauthLaunches: SharedFlow<String> = _oauthLaunches.asSharedFlow()
+    private var oauthStartJob: Job? = null
 
     init {
         refresh()
@@ -92,7 +94,7 @@ class ToolConnectionsViewModel @Inject constructor(
                 authType = actualAuthType,
                 secretRef = existing?.secretRef,
                 oauthClientId = clientId,
-                allowCleartext = provider.type == ToolConnectionType.MCP && actualEndpoint.startsWith("http://") && allowCleartext,
+                allowCleartext = provider.type == ToolConnectionType.MCP && actualEndpoint.startsWith("http://", ignoreCase = true) && allowCleartext,
                 createdAt = existing?.createdAt ?: now,
                 updatedAt = now
             )
@@ -141,7 +143,8 @@ class ToolConnectionsViewModel @Inject constructor(
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
     fun startOAuth(connectionUid: String) {
-        viewModelScope.launch {
+        if (oauthStartJob?.isActive == true) return
+        oauthStartJob = viewModelScope.launch {
             _uiState.update { it.copy(isOAuthBusy = true, errorMessage = null) }
             runCatching { oauthCoordinator.begin(connectionUid, mcpOAuthRedirectUri(connectionUid)) }
                 .onSuccess { authorizationUri -> _oauthLaunches.emit(authorizationUri) }
@@ -207,7 +210,7 @@ class ToolConnectionsViewModel @Inject constructor(
             uri.host != null &&
                 uri.userInfo == null &&
                 uri.fragment == null &&
-                (uri.scheme == "https" || (uri.scheme == "http" && allowCleartext))
+                (uri.scheme.equals("https", ignoreCase = true) || (uri.scheme.equals("http", ignoreCase = true) && allowCleartext))
         }.getOrDefault(false)
     }
 }

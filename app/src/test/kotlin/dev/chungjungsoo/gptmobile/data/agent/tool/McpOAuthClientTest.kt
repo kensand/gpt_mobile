@@ -11,14 +11,24 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URI
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class McpOAuthClientTest {
+    @Test
+    fun `callback filter accepts only MCP OAuth redirect URIs`() {
+        assertTrue(isMcpOAuthCallbackUri("dev.chungjungsoo.gptmobile://oauth/mcp/connection-1?code=code&state=state"))
+        assertFalse(isMcpOAuthCallbackUri("dev.chungjungsoo.gptmobile://oauth/other/connection-1"))
+        assertFalse(isMcpOAuthCallbackUri("https://example.com/mcp/connection-1"))
+        assertFalse(isMcpOAuthCallbackUri(null))
+    }
+
     @Test
     fun `discovers registers completes PKCE and refreshes public client`() = runBlocking {
         OAuthFixtureServer().use { server ->
@@ -109,6 +119,7 @@ class McpOAuthClientTest {
 
     internal class OAuthFixtureServer : AutoCloseable {
         val tokenForms = CopyOnWriteArrayList<Map<String, String>>()
+        val protectedResourceRequests = AtomicInteger()
         private val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
         private val baseUrl = "http://127.0.0.1:${server.address.port}"
 
@@ -123,6 +134,7 @@ class McpOAuthClientTest {
         val mcpUrl: String get() = "$baseUrl/mcp"
 
         private fun protectedResource(exchange: HttpExchange) {
+            protectedResourceRequests.incrementAndGet()
             exchange.responseHeaders.add(
                 "WWW-Authenticate",
                 "Bearer resource_metadata=\"$baseUrl/.well-known/oauth-protected-resource/mcp\""

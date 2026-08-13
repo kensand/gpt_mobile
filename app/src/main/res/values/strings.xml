@@ -346,4 +346,25 @@
     <string name="mcp_tools_assigned">%1$d assigned</string>
     <string name="no_mcp_connections">Add an MCP connection first.</string>
     <string name="no_mcp_tools">No tools were discovered.</string>
+    <string name="public_access">Public</string>
+    <string name="oauth_not_connected">OAuth not connected</string>
+    <string name="oauth_connected">OAuth connected</string>
+    <string name="connect">Connect</string>
+    <string name="reconnect">Reconnect</string>
+    <string name="connect_with_oauth">Connect %1$s with OAuth</string>
+    <string name="edit_named_connection">Edit %1$s</string>
+    <string name="delete_named_connection">Delete %1$s</string>
+    <string name="provider_option">Provider %1$s</string>
+    <string name="streamable_http" translatable="false">Streamable HTTP</string>
+    <string name="connection_name">Connection name</string>
+    <string name="mcp_endpoint_error">Use an HTTP(S) MCP endpoint. Approve cleartext HTTP below.</string>
+    <string name="authentication">Authentication</string>
+    <string name="bearer_token">Bearer token</string>
+    <string name="oauth_pkce" translatable="false">OAuth 2.1 / PKCE</string>
+    <string name="mcp_authentication">MCP authentication %1$s</string>
+    <string name="allow_cleartext_mcp_endpoint">Allow cleartext MCP endpoint</string>
+    <string name="cleartext_mcp_warning">Allow unencrypted HTTP. Credentials and tool data could be intercepted.</string>
+    <string name="oauth_client_id">OAuth client ID</string>
+    <string name="preregistered_client_id_optional">Pre-registered client ID (optional)</string>
+    <string name="dynamic_client_registration_hint">Leave blank to use Dynamic Client Registration when advertised.</string>
 </resources>

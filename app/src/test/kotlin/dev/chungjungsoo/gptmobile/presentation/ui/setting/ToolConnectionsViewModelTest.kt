@@ -116,6 +116,13 @@ class ToolConnectionsViewModelTest {
     }
 
     @Test
+    fun `MCP endpoint schemes are case insensitive`() {
+        assertTrue(ToolConnectionsViewModel.isValidMcpEndpoint("HTTPS://example.com/mcp", allowCleartext = false))
+        assertTrue(ToolConnectionsViewModel.isValidMcpEndpoint("HTTP://example.com/mcp", allowCleartext = true))
+        assertFalse(ToolConnectionsViewModel.isValidMcpEndpoint("HTTP://example.com/mcp", allowCleartext = false))
+    }
+
+    @Test
     fun `OAuth launch and callback persist credential and refresh connection state`() = runTest {
         McpOAuthClientTest.OAuthFixtureServer().use { server ->
             val dao = FakeToolConnectionDao()
@@ -164,6 +171,41 @@ class ToolConnectionsViewModelTest {
             assertEquals("access-1", credential.accessToken)
             assertNull(viewModel.uiState.value.errorMessage)
             assertTrue(viewModel.uiState.value.connections.any { it.connectionUid == "connection-1" && it.secretRef != null })
+            manager.closeAll()
+            networkClient().close()
+        }
+    }
+
+    @Test
+    fun `OAuth launch is single flight`() = runTest {
+        McpOAuthClientTest.OAuthFixtureServer().use { server ->
+            val dao = FakeToolConnectionDao()
+            val vault = FakeSecretVault()
+            val repository = ToolConnectionRepository(dao, vault)
+            val networkClient = NetworkClient(CIO)
+            val manager = McpClientManager(networkClient())
+            val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+            dao.upsertConnection(
+                ToolConnection(
+                    connectionUid = "connection-1",
+                    name = "OAuth MCP",
+                    alias = "oauth_mcp",
+                    type = ToolConnectionType.MCP,
+                    endpointUrl = server.mcpUrl,
+                    authType = ToolConnectionAuthType.OAUTH,
+                    secretRef = null,
+                    oauthClientId = null,
+                    allowCleartext = true
+                )
+            )
+            val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+            val launch = async(start = CoroutineStart.UNDISPATCHED) { viewModel.oauthLaunches.first() }
+
+            viewModel.startOAuth("connection-1")
+            viewModel.startOAuth("connection-1")
+            launch.await()
+
+            assertEquals(1, server.protectedResourceRequests.get())
             manager.closeAll()
             networkClient().close()
         }

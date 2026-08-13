@@ -24,19 +24,17 @@ import dev.chungjungsoo.gptmobile.presentation.ui.setting.PlatformSettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingViewModelV2
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionsScreen
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionsViewModel
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupCompleteScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformListScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformTypeScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformWizardScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2
 import dev.chungjungsoo.gptmobile.presentation.ui.startscreen.StartScreen
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
-
 @Composable
 fun SetupNavGraph(
     navController: NavHostController,
-    oauthCallbacks: Flow<String?> = emptyFlow(),
+    toolConnectionsViewModel: ToolConnectionsViewModel,
     onLaunchOAuth: (String) -> Unit = {}
 ) {
     NavHost(
@@ -50,7 +48,7 @@ fun SetupNavGraph(
         migrationScreenNavigation(navController)
         startScreenNavigation(navController)
         setupNavigation(navController)
-        settingNavigation(navController, oauthCallbacks, onLaunchOAuth)
+        settingNavigation(navController, toolConnectionsViewModel, onLaunchOAuth)
         chatScreenNavigation(navController)
     }
 }
@@ -165,7 +163,7 @@ fun NavGraphBuilder.chatScreenNavigation(navController: NavHostController) {
 
 fun NavGraphBuilder.settingNavigation(
     navController: NavHostController,
-    oauthCallbacks: Flow<String?> = emptyFlow(),
+    toolConnectionsViewModel: ToolConnectionsViewModel,
     onLaunchOAuth: (String) -> Unit = {}
 ) {
     navigation(startDestination = Route.SETTINGS, route = Route.SETTING_ROUTE) {
@@ -210,7 +208,7 @@ fun NavGraphBuilder.settingNavigation(
         }
         composable(Route.TOOL_CONNECTIONS) {
             ToolConnectionsScreen(
-                oauthCallbacks = oauthCallbacks,
+                viewModel = toolConnectionsViewModel,
                 onLaunchOAuth = onLaunchOAuth,
                 onNavigationClick = { navController.navigateUp() }
             )

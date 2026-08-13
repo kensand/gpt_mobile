@@ -58,15 +58,11 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.presentation.common.RadioItem
 import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ToolConnectionsScreen(
     modifier: Modifier = Modifier,
     viewModel: ToolConnectionsViewModel = hiltViewModel(),
-    oauthCallbacks: Flow<String?> = emptyFlow(),
     onLaunchOAuth: (String) -> Unit = {},
     onNavigationClick: () -> Unit
 ) {
@@ -83,10 +79,6 @@ fun ToolConnectionsScreen(
     LaunchedEffect(viewModel) {
         viewModel.oauthLaunches.collect(onLaunchOAuth)
     }
-    LaunchedEffect(viewModel, oauthCallbacks) {
-        oauthCallbacks.collect(viewModel::completeOAuthCallback)
-    }
-
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -154,13 +146,14 @@ fun ToolConnectionsScreen(
     }
 
     deletingConnection?.let { connection ->
+        val deleteDescription = stringResource(R.string.delete_named_connection, connection.name)
         AlertDialog(
             title = { Text(stringResource(R.string.delete_tool_connection)) },
             text = { Text(stringResource(R.string.delete_tool_connection_confirmation, connection.name)) },
             onDismissRequest = { deletingConnection = null },
             confirmButton = {
                 TextButton(
-                    modifier = Modifier.semantics { contentDescription = "Delete ${connection.name}" },
+                    modifier = Modifier.semantics { contentDescription = deleteDescription },
                     onClick = {
                         viewModel.deleteConnection(connection.connectionUid)
                         deletingConnection = null
@@ -213,9 +206,7 @@ private fun ToolConnectionsTopBar(
         },
         navigationIcon = {
             IconButton(
-                modifier = Modifier
-                    .padding(4.dp)
-                    .semantics { contentDescription = "Navigate back from Tool connections" },
+                modifier = Modifier.padding(4.dp),
                 onClick = onNavigationClick
             ) {
                 Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.go_back))
@@ -223,7 +214,6 @@ private fun ToolConnectionsTopBar(
         },
         actions = {
             IconButton(
-                modifier = Modifier.semantics { contentDescription = "Add tool connection" },
                 onClick = onAddClick
             ) {
                 Icon(imageVector = Icons.Filled.Add, contentDescription = stringResource(R.string.add_tool_connection))
@@ -240,22 +230,24 @@ private fun ToolConnectionItem(
     onOAuthClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
+    val editDescription = stringResource(R.string.edit_named_connection, connection.name)
+    val deleteDescription = stringResource(R.string.delete_named_connection, connection.name)
+    val connectDescription = stringResource(R.string.connect_with_oauth, connection.name)
+    val credentialStatus = when {
+        connection.authType == ToolConnectionAuthType.NONE -> stringResource(R.string.public_access)
+        connection.authType == ToolConnectionAuthType.OAUTH && connection.secretRef == null -> stringResource(R.string.oauth_not_connected)
+        connection.authType == ToolConnectionAuthType.OAUTH -> stringResource(R.string.oauth_connected)
+        connection.secretRef == null -> stringResource(R.string.credential_not_set)
+        else -> stringResource(R.string.credential_set)
+    }
     ListItem(
         modifier = Modifier
             .fillMaxWidth()
-            .semantics { contentDescription = "Edit ${connection.name}" },
+            .semantics { contentDescription = editDescription },
         headlineContent = { Text(connection.name, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Text(
-                text = "${providerLabel(connection.type)} • ${connection.alias} • ${connection.endpointUrl.orEmpty()} • ${
-                    when {
-                        connection.authType == ToolConnectionAuthType.NONE -> "Public"
-                        connection.authType == ToolConnectionAuthType.OAUTH && connection.secretRef == null -> "OAuth not connected"
-                        connection.authType == ToolConnectionAuthType.OAUTH -> "OAuth connected"
-                        connection.secretRef == null -> stringResource(R.string.credential_not_set)
-                        else -> stringResource(R.string.credential_set)
-                    }
-                }",
+                text = "${providerLabel(connection.type)} • ${connection.alias} • ${connection.endpointUrl.orEmpty()} • $credentialStatus",
                 overflow = TextOverflow.Ellipsis
             )
         },
@@ -263,20 +255,20 @@ private fun ToolConnectionItem(
             Row {
                 if (connection.type == ToolConnectionType.MCP && connection.authType == ToolConnectionAuthType.OAUTH) {
                     TextButton(
-                        modifier = Modifier.semantics { contentDescription = "Connect ${connection.name} with OAuth" },
+                        modifier = Modifier.semantics { contentDescription = connectDescription },
                         onClick = onOAuthClick
                     ) {
-                        Text(if (connection.secretRef == null) "Connect" else "Reconnect")
+                        Text(stringResource(if (connection.secretRef == null) R.string.connect else R.string.reconnect))
                     }
                 }
                 TextButton(
-                    modifier = Modifier.semantics { contentDescription = "Edit ${connection.name}" },
+                    modifier = Modifier.semantics { contentDescription = editDescription },
                     onClick = onEditClick
                 ) {
                     Text(stringResource(R.string.edit))
                 }
                 IconButton(
-                    modifier = Modifier.semantics { contentDescription = "Delete ${connection.name}" },
+                    modifier = Modifier.semantics { contentDescription = deleteDescription },
                     onClick = onDeleteClick
                 ) {
                     Icon(imageVector = Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
@@ -310,6 +302,13 @@ private fun ToolConnectionDialog(
     val isAliasInvalid = alias.isNotBlank() && !ToolConnectionsViewModel.isValidAlias(normalizedAlias)
     val aliasDescription = stringResource(R.string.stable_alias_description)
     val aliasError = stringResource(R.string.stable_alias_error)
+    val streamableHttp = stringResource(R.string.streamable_http)
+    val connectionName = stringResource(R.string.connection_name)
+    val stableAlias = stringResource(R.string.stable_alias)
+    val apiKey = stringResource(R.string.api_key)
+    val bearerToken = stringResource(R.string.bearer_token)
+    val clearCredentialDescription = stringResource(R.string.clear_saved_credential)
+    val allowCleartextDescription = stringResource(R.string.allow_cleartext_mcp_endpoint)
     val isMcp = provider.type == ToolConnectionType.MCP
     val actualEndpoint = if (isMcp) endpoint else provider.endpointUrl
     val isEndpointValid = !isMcp || ToolConnectionsViewModel.isValidMcpEndpoint(actualEndpoint, allowCleartext)
@@ -323,10 +322,11 @@ private fun ToolConnectionDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 ToolConnectionsViewModel.providers.forEach { option ->
+                    val providerDescription = stringResource(R.string.provider_option, option.label)
                     RadioItem(
-                        modifier = Modifier.semantics { contentDescription = "Provider ${option.label}" },
+                        modifier = Modifier.semantics { contentDescription = providerDescription },
                         title = option.label,
-                        description = option.endpointUrl.ifBlank { "Streamable HTTP" },
+                        description = option.endpointUrl.ifBlank { streamableHttp },
                         value = option.type,
                         selected = provider.type == option.type
                     ) {
@@ -348,7 +348,7 @@ private fun ToolConnectionDialog(
                 OutlinedTextField(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .semantics { contentDescription = "Connection name" },
+                        .semantics { contentDescription = connectionName },
                     value = name,
                     onValueChange = { name = it },
                     label = { Text(stringResource(R.string.name)) },
@@ -359,7 +359,7 @@ private fun ToolConnectionDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .semantics {
-                            contentDescription = "Stable alias"
+                            contentDescription = stableAlias
                             if (isAliasInvalid) error(aliasError)
                         },
                     value = alias,
@@ -378,38 +378,39 @@ private fun ToolConnectionDialog(
                     label = { Text(stringResource(R.string.api_url)) },
                     isError = !isEndpointValid,
                     supportingText = if (isMcp && !isEndpointValid) {
-                        { Text("Use an HTTP(S) MCP endpoint. Approve cleartext HTTP below.") }
+                        { Text(stringResource(R.string.mcp_endpoint_error)) }
                     } else {
                         null
                     },
                     singleLine = true
                 )
                 if (isMcp) {
-                    Text("Authentication", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+                    Text(stringResource(R.string.authentication), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
                     listOf(
-                        ToolConnectionAuthType.NONE to "Public",
-                        ToolConnectionAuthType.BEARER to "Bearer token",
-                        ToolConnectionAuthType.OAUTH to "OAuth 2.1 / PKCE"
+                        ToolConnectionAuthType.NONE to stringResource(R.string.public_access),
+                        ToolConnectionAuthType.BEARER to bearerToken,
+                        ToolConnectionAuthType.OAUTH to stringResource(R.string.oauth_pkce)
                     ).forEach { (value, label) ->
+                        val authDescription = stringResource(R.string.mcp_authentication, label)
                         RadioItem(
-                            modifier = Modifier.semantics { contentDescription = "MCP authentication $label" },
+                            modifier = Modifier.semantics { contentDescription = authDescription },
                             title = label,
                             description = null,
                             value = value,
                             selected = authType == value
                         ) { authType = value }
                     }
-                    if (actualEndpoint.startsWith("http://")) {
+                    if (actualEndpoint.startsWith("http://", ignoreCase = true)) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .semantics { contentDescription = "Allow cleartext MCP endpoint" }
+                                .semantics { contentDescription = allowCleartextDescription }
                                 .padding(top = 8.dp)
                         ) {
                             Checkbox(checked = allowCleartext, onCheckedChange = { allowCleartext = it })
                             Text(
                                 modifier = Modifier.padding(top = 12.dp),
-                                text = "Allow unencrypted HTTP. Credentials and tool data could be intercepted."
+                                text = stringResource(R.string.cleartext_mcp_warning)
                             )
                         }
                     }
@@ -418,10 +419,10 @@ private fun ToolConnectionDialog(
                     OutlinedTextField(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .semantics { contentDescription = if (isMcp) "Bearer token" else "API key" },
+                            .semantics { contentDescription = if (isMcp) bearerToken else apiKey },
                         value = credential,
                         onValueChange = { credential = it },
-                        label = { Text(if (isMcp) "Bearer token" else stringResource(R.string.api_key)) },
+                        label = { Text(if (isMcp) bearerToken else apiKey) },
                         supportingText = {
                             Text(
                                 if (connection?.secretRef == null) {
@@ -437,14 +438,15 @@ private fun ToolConnectionDialog(
                     )
                 }
                 if (isMcp && authType == ToolConnectionAuthType.OAUTH) {
+                    val oauthClientIdDescription = stringResource(R.string.oauth_client_id)
                     OutlinedTextField(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .semantics { contentDescription = "OAuth client ID" },
+                            .semantics { contentDescription = oauthClientIdDescription },
                         value = oauthClientId,
                         onValueChange = { oauthClientId = it },
-                        label = { Text("Pre-registered client ID (optional)") },
-                        supportingText = { Text("Leave blank to use Dynamic Client Registration when advertised.") },
+                        label = { Text(stringResource(R.string.preregistered_client_id_optional)) },
+                        supportingText = { Text(stringResource(R.string.dynamic_client_registration_hint)) },
                         singleLine = true
                     )
                 }
@@ -452,7 +454,7 @@ private fun ToolConnectionDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .semantics { contentDescription = "Clear saved credential" }
+                            .semantics { contentDescription = clearCredentialDescription }
                             .padding(top = 8.dp)
                     ) {
                         Checkbox(

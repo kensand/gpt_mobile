@@ -243,8 +243,8 @@ class AgentToolResolverTest {
     }
 
     @Test
-    fun `MCP OAuth 401 refreshes stored token reconnects and retries discovery once`() = runBlocking {
-        McpClientManagerTest.McpFixtureServer(acceptedAuthorization = "Bearer access-2").use { server ->
+    fun `MCP OAuth 401 refreshes stored token reconnects and retries tool call once`() = runBlocking {
+        McpClientManagerTest.McpFixtureServer(acceptedAuthorization = "Bearer access-1").use { server ->
             val dao = ResolverFakeToolConnectionDao()
             val credential = McpOAuthCredential(
                 clientId = "client-1",
@@ -280,6 +280,7 @@ class AgentToolResolverTest {
             )
 
             val tool = resolver.resolve("profile-1").single().tool
+            server.acceptedAuthorization = "Bearer access-2"
             val result = tool.execute("call-1", buildJsonObject { put("text", "hello") })
             val stored = NetworkClient.json.decodeFromString<McpOAuthCredential>(vault.value("connection_mcp-1")!!.decodeToString())
 
@@ -288,6 +289,38 @@ class AgentToolResolverTest {
             assertEquals("access-2", stored.accessToken)
             assertTrue("Bearer access-1" in server.authorizationHeaders)
             assertEquals("Bearer access-2", server.authorizationHeaders.last())
+            manager.closeAll()
+            networkClient().close()
+        }
+    }
+
+    @Test
+    fun `one unavailable MCP connection does not hide tools from healthy connections`() = runBlocking {
+        McpClientManagerTest.McpFixtureServer().use { server ->
+            val dao = ResolverFakeToolConnectionDao()
+            val vault = ResolverFakeSecretVault()
+            val repository = ToolConnectionRepository(dao, vault)
+            val networkClient = NetworkClient(CIO)
+            val manager = McpClientManager(networkClient())
+            val resolver = AgentToolResolver(
+                repository,
+                vault,
+                networkClient,
+                manager,
+                McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+            )
+            dao.bind(
+                connection("mcp-bad", ToolConnectionType.MCP, endpointUrl = "not-a-url", authType = ToolConnectionAuthType.NONE),
+                binding("profile-1", "mcp-bad", "echo")
+            )
+            dao.bind(
+                connection("mcp-good", ToolConnectionType.MCP, endpointUrl = server.url, authType = ToolConnectionAuthType.NONE, allowCleartext = true),
+                binding("profile-1", "mcp-good", "echo")
+            )
+
+            val resolved = resolver.resolve("profile-1")
+
+            assertEquals(listOf("mcp__mcp-good__echo"), resolved.map { it.modelToolName })
             manager.closeAll()
             networkClient().close()
         }

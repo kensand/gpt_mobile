@@ -16,6 +16,7 @@ import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
 import io.modelcontextprotocol.kotlin.sdk.types.Tool
 import java.nio.charset.StandardCharsets
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 
 data class ResolvedAgentTool(
@@ -64,7 +65,14 @@ class AgentToolResolver @Inject constructor(
             .groupBy { requireNotNull(it.connection).connectionUid }
             .toSortedMap()
             .values
-            .forEach { mcpBindings -> resolved += resolveMcpTools(requireNotNull(mcpBindings.first().connection), mcpBindings) }
+            .forEach { mcpBindings ->
+                try {
+                    resolved += resolveMcpTools(requireNotNull(mcpBindings.first().connection), mcpBindings)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                }
+            }
         return resolved.distinctBy { it.modelToolName }
             .sortedBy { it.modelToolName }
     }
@@ -120,13 +128,13 @@ class AgentToolResolver @Inject constructor(
     ): List<ResolvedAgentTool> {
         val selectedNames = bindings.map { it.binding.toolName }.toSet()
         val remoteTools = discoverMcpTools(connection)
-        val config = mcpConfig(connection)
         return remoteTools
             .filter { it.name in selectedNames }
             .map { remoteTool ->
                 val tool = McpAgentTool(
                     definition = mcpToolDefinition(connection.alias, remoteTool),
-                    config = config,
+                    authType = connection.authType,
+                    config = { forceRefresh, rejectedHeader -> mcpConfig(connection, forceRefresh, rejectedHeader) },
                     remoteToolName = remoteTool.name,
                     clientManager = mcpClientManager
                 )
@@ -202,11 +210,25 @@ class AgentToolResolver @Inject constructor(
 
 private class McpAgentTool(
     override val definition: AgentToolDefinition,
-    private val config: McpConnectionConfig,
+    private val authType: String,
+    private val config: suspend (Boolean, String?) -> McpConnectionConfig,
     private val remoteToolName: String,
     private val clientManager: McpClientManager
 ) : AgentTool {
-    override suspend fun execute(callId: String, arguments: JsonObject): AgentToolResult = mapMcpToolResult(callId, clientManager.callTool(config, remoteToolName, arguments))
+    override suspend fun execute(callId: String, arguments: JsonObject): AgentToolResult {
+        val initialConfig = config(false, null)
+        val result = try {
+            clientManager.callTool(initialConfig, remoteToolName, arguments)
+        } catch (error: Exception) {
+            if (authType != ToolConnectionAuthType.OAUTH || !error.isUnauthorized()) throw error
+            clientManager.callTool(
+                config(true, initialConfig.authorizationHeader),
+                remoteToolName,
+                arguments
+            )
+        }
+        return mapMcpToolResult(callId, result)
+    }
 }
 
 private fun Throwable.isUnauthorized(): Boolean = generateSequence(this) { it.cause }
