@@ -137,6 +137,42 @@ class ChatRepositoryImplTest {
         )
         assertEquals(1, groqAPI.streamCalls)
         assertEquals(0, openAIAPI.streamChatCompletionCalls)
+        assertEquals(8_192, groqAPI.lastRequest?.maxCompletionTokens)
+    }
+
+    @Test
+    fun `groq token limit reports failure instead of completing with only thinking`() = runBlocking {
+        val groqAPI = FakeGroqAPI(
+            flowOf(
+                GroqChatCompletionChunk(
+                    choices = listOf(
+                        GroqChoice(
+                            index = 0,
+                            delta = GroqDelta(reasoning = "Still reasoning"),
+                            finishReason = "length"
+                        )
+                    )
+                )
+            )
+        )
+        val repository = createRepository(groqAPI = groqAPI)
+
+        val states = repository.completeChat(
+            userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
+            assistantMessages = emptyList(),
+            platform = groqPlatform(reasoning = true, model = "qwen/qwen3.6-27b"),
+            runId = "test-run"
+        ).toList()
+
+        assertEquals(
+            listOf(
+                ApiState.Loading,
+                ApiState.Thinking("Still reasoning"),
+                ApiState.Error("Groq reached the model output limit before producing a final answer."),
+                ApiState.Done
+            ),
+            states
+        )
     }
 
     @Test

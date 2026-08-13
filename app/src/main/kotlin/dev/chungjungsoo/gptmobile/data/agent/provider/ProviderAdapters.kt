@@ -153,12 +153,17 @@ class OpenAICompatibleAdapter @Inject constructor(
                             ).forEach { state ->
                                 state.toProviderEvent()?.let { emit(it) }
                             }
-                            assembler.accept(
-                                content = null,
-                                reasoning = null,
-                                toolCalls = choice.delta?.toolCalls,
-                                finishReason = choice.finishReason
-                            ).forEach { emit(it) }
+                            if (choice.finishReason == "length") {
+                                failed = true
+                                emit(ProviderEvent.Failed(GROQ_OUTPUT_LIMIT_MESSAGE))
+                            } else {
+                                assembler.accept(
+                                    content = null,
+                                    reasoning = null,
+                                    toolCalls = choice.delta?.toolCalls,
+                                    finishReason = choice.finishReason
+                                ).forEach { emit(it) }
+                            }
                         }
                     }
                     reasoningParser.flush().forEach { state ->
@@ -436,6 +441,7 @@ private fun createGroqChatCompletionRequest(
         stream = platform.stream,
         temperature = platform.temperature,
         topP = platform.topP,
+        maxCompletionTokens = if (platform.reasoning) 8_192 else null,
         reasoningEffort = if (platform.reasoning && isGptOssModel) "medium" else null,
         reasoningFormat = when {
             platform.reasoning && !isGptOssModel -> "parsed"
@@ -449,3 +455,6 @@ private fun createGroqChatCompletionRequest(
         }
     )
 }
+
+private const val GROQ_OUTPUT_LIMIT_MESSAGE =
+    "Groq reached the model output limit before producing a final answer."
