@@ -420,6 +420,11 @@ private fun ToolConnectionForm(
 ) {
     val normalizedAlias = ToolConnectionsViewModel.normalizeAlias(alias)
     val isAliasInvalid = alias.isNotBlank() && !ToolConnectionsViewModel.isValidAlias(normalizedAlias)
+    val blankCredentialPreserves = connection?.secretRef != null &&
+        connection.type == provider.type &&
+        connection.endpointUrl == endpoint &&
+        connection.authType == authType &&
+        (authType != ToolConnectionAuthType.OAUTH || connection.oauthClientId == oauthClientId.trim().takeIf(String::isNotEmpty))
     val aliasDescription = stringResource(R.string.stable_alias_description)
     val aliasError = stringResource(R.string.stable_alias_error)
     val streamableHttp = stringResource(R.string.streamable_http)
@@ -546,8 +551,10 @@ private fun ToolConnectionForm(
                     Text(
                         if (connection?.secretRef == null) {
                             stringResource(R.string.credential_not_set)
-                        } else {
+                        } else if (blankCredentialPreserves) {
                             stringResource(R.string.blank_key_preserves_credential)
+                        } else {
+                            stringResource(R.string.credential_not_set)
                         }
                     )
                 },

@@ -15,7 +15,11 @@ import java.net.URI
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 
 class McpConnectionConfig(
@@ -36,6 +40,7 @@ class McpClientManager internal constructor(
 
     // ponytail: one global lock serializes session setup only; use per-connection locks if startup contention becomes measurable.
     private val sessions = mutableMapOf<String, Session>()
+    private val inFlight = mutableMapOf<String, InFlight>()
 
     suspend fun listTools(config: McpConnectionConfig): List<Tool> = withSession(config) { client ->
         val tools = mutableListOf<Tool>()
@@ -82,6 +87,9 @@ class McpClientManager internal constructor(
         val session = session(config)
         return try {
             block(session.client)
+        } catch (error: CancellationException) {
+            withContext(NonCancellable) { invalidate(config.connectionUid, session) }
+            throw error
         } catch (error: Exception) {
             invalidate(config.connectionUid, session)
             throw error
@@ -90,24 +98,52 @@ class McpClientManager internal constructor(
 
     private suspend fun session(config: McpConnectionConfig): Session {
         val key = config.validatedKey()
-        mutex.lock()
-        try {
-            sessions[config.connectionUid]?.takeIf { it.key == key }?.let { return it }
-            sessions.remove(config.connectionUid)?.let { previous -> runCatching { previous.client.close() } }
-
-            val transport = StreamableHttpClientTransport(httpClient, config.endpointUrl) {
-                config.authorizationHeader?.let { header(HttpHeaders.Authorization, it) }
-            }
-            val client = Client(Implementation(name = CLIENT_NAME, version = CLIENT_VERSION))
+        while (true) {
+            val created = CompletableDeferred<Session>()
+            var stale: Session? = null
+            var awaiting: CompletableDeferred<Session>? = null
+            mutex.lock()
             try {
-                client.connect(transport)
-            } catch (error: Exception) {
-                runCatching { client.close() }
-                throw error
+                sessions[config.connectionUid]?.takeIf { it.key == key }?.let { return it }
+                inFlight[config.connectionUid]?.let { existing ->
+                    awaiting = existing.deferred
+                } ?: run {
+                    stale = sessions.remove(config.connectionUid)
+                    inFlight[config.connectionUid] = InFlight(key, created)
+                }
+            } finally {
+                mutex.unlock()
             }
-            return Session(key, client).also { sessions[config.connectionUid] = it }
-        } finally {
-            mutex.unlock()
+            awaiting?.await()
+            if (awaiting != null) continue
+            withContext(NonCancellable) { stale?.let { runCatching { it.client.close() } } }
+
+            val result = runCatching {
+                val transport = StreamableHttpClientTransport(httpClient, config.endpointUrl) {
+                    config.authorizationHeader?.let { header(HttpHeaders.Authorization, it) }
+                }
+                val client = Client(Implementation(name = CLIENT_NAME, version = CLIENT_VERSION))
+                try {
+                    client.connect(transport)
+                    Session(key, client)
+                } catch (error: Exception) {
+                    withContext(NonCancellable) { runCatching { client.close() } }
+                    throw error
+                }
+            }
+            withContext(NonCancellable) {
+                mutex.lock()
+                try {
+                    if (inFlight[config.connectionUid]?.deferred === created) {
+                        inFlight.remove(config.connectionUid)
+                        result.getOrNull()?.let { sessions[config.connectionUid] = it }
+                    }
+                } finally {
+                    mutex.unlock()
+                }
+                result.fold(created::complete, created::completeExceptionally)
+            }
+            return result.getOrThrow()
         }
     }
 
@@ -118,7 +154,7 @@ class McpClientManager internal constructor(
         } finally {
             mutex.unlock()
         }
-        removed?.let { runCatching { it.client.close() } }
+        withContext(NonCancellable) { removed?.let { runCatching { it.client.close() } } }
     }
 
     private suspend fun takeSession(connectionUid: String): Session? {
@@ -139,6 +175,7 @@ class McpClientManager internal constructor(
         require(scheme == "https" || scheme == "http") { "MCP endpoint must use HTTP or HTTPS." }
         require(!uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null) { "MCP endpoint URL is invalid." }
         require(scheme != "http" || allowCleartext) { "Cleartext MCP requires explicit user approval." }
+        require(authorizationHeader == null || authorizationHeader.isNotBlank()) { "MCP authorization header is required." }
         require(authorizationHeader?.contains('\r') != true && authorizationHeader?.contains('\n') != true) {
             "MCP authorization header is invalid."
         }
@@ -149,6 +186,7 @@ class McpClientManager internal constructor(
     }
 
     private data class Session(val key: String, val client: Client)
+    private data class InFlight(val key: String, val deferred: CompletableDeferred<Session>)
 
     private companion object {
         const val CLIENT_NAME = "gpt-mobile"

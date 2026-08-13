@@ -118,6 +118,21 @@ class PlatformSettingViewModelTest {
         assertEquals(setOf("web_search", "read_url"), viewModel.toolBindingState.value.selectedMcpTools.map { it.toolName }.toSet())
     }
 
+    @Test
+    fun `closing MCP tools dialog cancels discovery loading state`() = runTest {
+        val dao = FakeToolConnectionDao(
+            connections = mutableMapOf("mcp-1" to testConnection("mcp-1", ToolConnectionType.MCP))
+        )
+        val viewModel = testViewModel(dao)
+
+        viewModel.loadToolBindings()
+        viewModel.openMcpToolsDialog()
+        viewModel.closeMcpToolsDialog()
+
+        assertFalse(viewModel.toolBindingState.value.isMcpToolsDialogOpen)
+        assertFalse(viewModel.toolBindingState.value.isMcpToolsLoading)
+    }
+
     private fun testViewModel(dao: FakeToolConnectionDao): PlatformSettingViewModel {
         val vault = FakeSecretVault()
         val repository = ToolConnectionRepository(dao, vault)

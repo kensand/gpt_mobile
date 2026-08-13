@@ -83,7 +83,11 @@ class MainActivity : ComponentActivity() {
         try {
             AuthTabIntent.Builder().build().launch(authTabLauncher, uri, MCP_OAUTH_SCHEME)
         } catch (_: ActivityNotFoundException) {
-            CustomTabsIntent.Builder().build().launchUrl(this, uri)
+            try {
+                CustomTabsIntent.Builder().build().launchUrl(this, uri)
+            } catch (_: ActivityNotFoundException) {
+                toolConnectionsViewModel.failOAuthLaunch()
+            }
         }
     }
 

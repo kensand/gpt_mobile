@@ -17,6 +17,8 @@ import dev.chungjungsoo.gptmobile.data.repository.ToolBindingSelection
 import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
 import dev.chungjungsoo.gptmobile.data.security.SecretVault
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -49,6 +51,7 @@ class PlatformSettingViewModel @Inject constructor(
 
     private val _toolBindingState = MutableStateFlow(ToolBindingState())
     val toolBindingState: StateFlow<ToolBindingState> = _toolBindingState.asStateFlow()
+    private var mcpDiscoveryJob: Job? = null
 
     init {
         loadPlatform()
@@ -258,6 +261,7 @@ class PlatformSettingViewModel @Inject constructor(
     }
 
     fun openMcpToolsDialog() {
+        mcpDiscoveryJob?.cancel()
         val connections = _toolBindingState.value.mcpConnections
         _toolBindingState.update {
             it.copy(
@@ -268,37 +272,52 @@ class PlatformSettingViewModel @Inject constructor(
                 errorMessage = null
             )
         }
-        viewModelScope.launch {
-            val results = coroutineScope {
-                connections.map { connection ->
-                    async { connection to runCatching { agentToolResolver.discoverMcpTools(connection) } }
-                }.awaitAll()
-            }
-            val options = results.flatMap { (connection, result) ->
-                result.getOrDefault(emptyList()).map { tool ->
-                    McpToolOption(
-                        connectionUid = connection.connectionUid,
-                        connectionName = connection.name,
-                        toolName = tool.name,
-                        modelToolName = namespaceMcpToolName(connection.alias, tool.name),
-                        description = tool.description
+        mcpDiscoveryJob = viewModelScope.launch {
+            try {
+                val results = coroutineScope {
+                    connections.map { connection ->
+                        async { connection to discoverMcpTools(connection) }
+                    }.awaitAll()
+                }
+                val options = results.flatMap { (connection, result) ->
+                    result.getOrDefault(emptyList()).map { tool ->
+                        McpToolOption(
+                            connectionUid = connection.connectionUid,
+                            connectionName = connection.name,
+                            toolName = tool.name,
+                            modelToolName = namespaceMcpToolName(connection.alias, tool.name),
+                            description = tool.description
+                        )
+                    }
+                }.sortedWith(compareBy<McpToolOption> { it.connectionName }.thenBy { it.toolName })
+                val failures = results.mapNotNull { (connection, result) ->
+                    result.exceptionOrNull()?.let { "${connection.name}: ${it.message ?: "discovery failed"}" }
+                }
+                _toolBindingState.update {
+                    it.copy(
+                        isMcpToolsLoading = false,
+                        mcpToolOptions = options,
+                        errorMessage = failures.takeIf(List<String>::isNotEmpty)?.joinToString("\n")
                     )
                 }
-            }.sortedWith(compareBy<McpToolOption> { it.connectionName }.thenBy { it.toolName })
-            val failures = results.mapNotNull { (connection, result) ->
-                result.exceptionOrNull()?.let { "${connection.name}: ${it.message ?: "discovery failed"}" }
-            }
-            _toolBindingState.update {
-                it.copy(
-                    isMcpToolsLoading = false,
-                    mcpToolOptions = options,
-                    errorMessage = failures.takeIf(List<String>::isNotEmpty)?.joinToString("\n")
-                )
+            } catch (error: CancellationException) {
+                throw error
             }
         }
     }
 
-    fun closeMcpToolsDialog() = _toolBindingState.update { it.copy(isMcpToolsDialogOpen = false) }
+    fun closeMcpToolsDialog() {
+        mcpDiscoveryJob?.cancel()
+        _toolBindingState.update { it.copy(isMcpToolsDialogOpen = false, isMcpToolsLoading = false) }
+    }
+
+    private suspend fun discoverMcpTools(connection: ToolConnection) = try {
+        Result.success(agentToolResolver.discoverMcpTools(connection))
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
 
     fun toggleMcpTool(connectionUid: String, toolName: String) {
         val selection = ToolBindingSelection(connectionUid, toolName)

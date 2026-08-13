@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -154,7 +155,66 @@ class ToolConnectionsViewModelTest {
     }
 
     @Test
-    fun `OAuth launch and callback persist credential and refresh connection state`() = runTest {
+    fun `browser launch failure surfaces OAuth error`() = runTest {
+        val dao = FakeToolConnectionDao()
+        val vault = FakeSecretVault()
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        val repository = ToolConnectionRepository(dao, vault)
+        val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+
+        viewModel.failOAuthLaunch()
+
+        assertFalse(viewModel.uiState.value.isOAuthBusy)
+        assertTrue(viewModel.uiState.value.errorMessage!!.contains("browser"))
+        manager.closeAll()
+        networkClient().close()
+    }
+
+    @Test
+    fun `blank credential is cleared when saved metadata changes`() = runTest {
+        val dao = FakeToolConnectionDao()
+        val vault = FakeSecretVault()
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        val repository = ToolConnectionRepository(dao, vault)
+        val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        val existing = ToolConnection(
+            connectionUid = "search-1",
+            name = "Search",
+            alias = "search",
+            type = ToolConnectionType.FIRECRAWL,
+            endpointUrl = "https://api.firecrawl.dev/v2/search",
+            authType = ToolConnectionAuthType.BEARER,
+            secretRef = "connection_search-1",
+            oauthClientId = null
+        )
+        dao.upsertConnection(existing)
+        vault.put("connection_search-1", "old-key".encodeToByteArray())
+        val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+
+        viewModel.saveConnection(
+            existing = existing,
+            provider = ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.PERPLEXITY },
+            name = "Search",
+            alias = "search",
+            endpointUrl = "",
+            authType = ToolConnectionAuthType.BEARER,
+            credential = " ",
+            oauthClientId = "",
+            allowCleartext = false,
+            clearCredential = false
+        )
+
+        assertNull(dao.getConnection("search-1")!!.secretRef)
+        assertNull(vault.read("connection_search-1"))
+        manager.closeAll()
+        networkClient().close()
+    }
+
+    @Test
+    fun `OAuth launch and callback persist credential and refresh connection state`() = runBlocking {
         McpOAuthClientTest.OAuthFixtureServer().use { server ->
             val dao = FakeToolConnectionDao()
             val vault = FakeSecretVault()
@@ -208,7 +268,7 @@ class ToolConnectionsViewModelTest {
     }
 
     @Test
-    fun `OAuth launch is single flight`() = runTest {
+    fun `OAuth launch is single flight`() = runBlocking {
         McpOAuthClientTest.OAuthFixtureServer().use { server ->
             val dao = FakeToolConnectionDao()
             val vault = FakeSecretVault()
@@ -235,6 +295,7 @@ class ToolConnectionsViewModelTest {
             viewModel.startOAuth("connection-1")
             viewModel.startOAuth("connection-1")
             launch.await()
+            viewModel.uiState.first { !it.isOAuthBusy }
 
             assertEquals(1, server.protectedResourceRequests.get())
             manager.closeAll()

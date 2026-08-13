@@ -193,7 +193,7 @@ class AgentToolResolverTest {
                 binding("profile-1", "mcp-1", "echo")
             )
 
-            val resolved = resolver.resolve("profile-1").single()
+            val resolved = resolver.resolve("profile-1").single { it.connectionUid == "mcp-1" }
             val result = resolved.tool.execute("call-1", buildJsonObject { put("text", "hello") })
 
             assertEquals("mcp__mcp-1__echo", resolved.modelToolName)
@@ -231,7 +231,7 @@ class AgentToolResolverTest {
                 binding("profile-1", "mcp-1", "echo")
             )
 
-            val tool = resolver.resolve("profile-1").single().tool
+            val tool = resolver.resolve("profile-1").single { it.connectionUid == "mcp-1" }.tool
             val result = tool.execute("call-1", buildJsonObject { put("text", "hello") })
 
             assertEquals("hello", (result.content as ToolResultContent.Text).text)
@@ -240,6 +240,27 @@ class AgentToolResolverTest {
             manager.closeAll()
             networkClient().close()
         }
+    }
+
+    @Test
+    fun `MCP bearer binding rejects blank stored token before authorization header is built`() = runBlocking {
+        val dao = ResolverFakeToolConnectionDao()
+        val vault = ResolverFakeSecretVault(mapOf("connection_mcp-1" to " ".encodeToByteArray()))
+        val resolver = resolver(dao, vault)
+        dao.bind(
+            connection(
+                uid = "mcp-1",
+                type = ToolConnectionType.MCP,
+                endpointUrl = "https://example.com/mcp",
+                secretRef = "connection_mcp-1",
+                authType = ToolConnectionAuthType.BEARER
+            ),
+            binding("profile-1", "mcp-1", "echo")
+        )
+
+        val resolved = resolver.resolve("profile-1")
+
+        assertEquals(listOf("current_date"), resolved.map { it.modelToolName })
     }
 
     @Test
@@ -279,7 +300,7 @@ class AgentToolResolverTest {
                 binding("profile-1", "mcp-1", "echo")
             )
 
-            val tool = resolver.resolve("profile-1").single().tool
+            val tool = resolver.resolve("profile-1").single { it.connectionUid == "mcp-1" }.tool
             server.acceptedAuthorization = "Bearer access-2"
             val result = tool.execute("call-1", buildJsonObject { put("text", "hello") })
             val stored = NetworkClient.json.decodeFromString<McpOAuthCredential>(vault.value("connection_mcp-1")!!.decodeToString())
@@ -320,7 +341,7 @@ class AgentToolResolverTest {
 
             val resolved = resolver.resolve("profile-1")
 
-            assertEquals(listOf("mcp__mcp-good__echo"), resolved.map { it.modelToolName })
+            assertEquals(listOf("current_date", "mcp__mcp-good__echo"), resolved.map { it.modelToolName })
             manager.closeAll()
             networkClient().close()
         }

@@ -123,8 +123,8 @@ class ToolConnectionsViewModel @Inject constructor(
                     credential = credentialBytes,
                     clearCredential = (shouldClear || shouldClearCredential) && credentialBytes == null
                 )
-                mcpClientManager.close(connection.connectionUid)
             }.onSuccess {
+                runCatching { mcpClientManager.close(connection.connectionUid) }
                 refresh()
                 onSuccess()
             }.onFailure(::showError)
@@ -172,6 +172,10 @@ class ToolConnectionsViewModel @Inject constructor(
                 .onFailure(::showError)
             _uiState.update { it.copy(isOAuthBusy = false) }
         }
+    }
+
+    fun failOAuthLaunch(message: String = "No browser is available for OAuth authorization.") {
+        _uiState.update { it.copy(isOAuthBusy = false, errorMessage = message) }
     }
 
     private fun showError(error: Throwable) {

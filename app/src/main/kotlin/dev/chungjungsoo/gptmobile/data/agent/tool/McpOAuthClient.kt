@@ -24,6 +24,8 @@ import java.security.SecureRandom
 import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -76,20 +78,28 @@ class McpOAuthException(message: String, cause: Throwable? = null) : Exception(m
 class McpOAuthClient internal constructor(
     private val httpClient: HttpClient,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
-    private val randomBytes: (Int) -> ByteArray = { size -> ByteArray(size).also(SecureRandom()::nextBytes) }
+    private val randomBytes: (Int) -> ByteArray = { size -> ByteArray(size).also(SecureRandom()::nextBytes) },
+    private val discoveryTimeoutMillis: Long = DEFAULT_DISCOVERY_TIMEOUT_MILLIS
 ) {
     @Inject
     constructor(networkClient: NetworkClient) : this(networkClient())
 
     suspend fun discover(resourceUrl: String, allowCleartext: Boolean): McpOAuthDiscovery {
         val resourceUri = resourceUrl.validatedUrl(allowCleartext, "MCP resource")
-        val challenge = httpClient.get(resourceUrl) { accept(ContentType.Application.Json) }
+        val challenge = discovering("OAuth challenge") {
+            httpClient.get(resourceUrl) { accept(ContentType.Application.Json) }
+        }
         val advertisedMetadata = if (challenge.status == HttpStatusCode.Unauthorized) {
             challenge.headers[HttpHeaders.WWWAuthenticate]?.resourceMetadataUrl()
         } else {
             null
         }
-        challenge.readBoundedBody()
+        discovering("OAuth challenge") { challenge.readBoundedBody() }
+        advertisedMetadata?.validatedUrl(allowCleartext, "OAuth protected-resource metadata")?.let { metadataUri ->
+            if (!metadataUri.sameOrigin(resourceUri)) {
+                throw McpOAuthException("OAuth protected-resource metadata must use the MCP resource same origin.")
+            }
+        }
         val resourceMetadata = firstMetadata(
             buildList {
                 advertisedMetadata?.let(::add)
@@ -100,7 +110,10 @@ class McpOAuthClient internal constructor(
             "OAuth protected-resource metadata"
         )
         val resource = resourceMetadata.requiredString("resource")
-        resource.validatedUrl(allowCleartext, "OAuth resource")
+        val discoveredResource = resource.validatedUrl(allowCleartext, "OAuth resource")
+        if (!discoveredResource.sameOrigin(resourceUri)) {
+            throw McpOAuthException("OAuth resource must use the MCP resource same origin.")
+        }
         val authorizationServer = resourceMetadata.requiredStringList("authorization_servers").firstOrNull()
             ?: throw McpOAuthException("OAuth protected-resource metadata has no authorization server.")
         val issuerUri = authorizationServer.validatedUrl(allowCleartext, "OAuth issuer")
@@ -298,7 +311,9 @@ class McpOAuthClient internal constructor(
     ): JsonObject {
         candidates.forEach { candidate ->
             candidate.validatedUrl(allowCleartext, label)
-            val response = runCatching { httpClient.get(candidate) { accept(ContentType.Application.Json) } }.getOrNull()
+            val response = runCatching {
+                discovering(label) { httpClient.get(candidate) { accept(ContentType.Application.Json) } }
+            }.getOrNull()
             if (response != null && response.status.value in 200..299) {
                 return response.successfulJson(label)
             }
@@ -307,10 +322,16 @@ class McpOAuthClient internal constructor(
         throw McpOAuthException("$label could not be discovered.")
     }
 
+    private suspend fun <T> discovering(label: String, block: suspend () -> T): T = try {
+        withTimeout(discoveryTimeoutMillis) { block() }
+    } catch (error: TimeoutCancellationException) {
+        throw McpOAuthException("$label timed out while discovering.", error)
+    }
+
     private suspend fun HttpResponse.successfulJson(label: String): JsonObject {
         if (status.value !in 200..299) throw McpOAuthException("$label failed with HTTP ${status.value}.")
         return try {
-            NetworkClient.json.parseToJsonElement(readBoundedBody().decodeToString()) as? JsonObject
+            NetworkClient.json.parseToJsonElement(discovering(label) { readBoundedBody() }.decodeToString()) as? JsonObject
                 ?: throw McpOAuthException("$label returned invalid JSON.")
         } catch (error: McpOAuthException) {
             throw error
@@ -362,6 +383,17 @@ private fun URI.wellKnown(name: String, suffixPath: String): String = URI(
     null
 ).toString()
 
+private fun URI.sameOrigin(other: URI): Boolean = scheme.equals(other.scheme, ignoreCase = true) &&
+    host.equals(other.host, ignoreCase = true) &&
+    effectivePort() == other.effectivePort()
+
+private fun URI.effectivePort(): Int = when {
+    port != -1 -> port
+    scheme.equals("https", ignoreCase = true) -> 443
+    scheme.equals("http", ignoreCase = true) -> 80
+    else -> -1
+}
+
 private fun String.resourceMetadataUrl(): String? = RESOURCE_METADATA_PATTERN.find(this)?.groupValues?.get(1)?.ifBlank { null }
 
 private fun JsonObject.requiredString(name: String): String = string(name)
@@ -411,3 +443,4 @@ private const val MAX_SCOPES = 32
 private const val MAX_SCOPE_ITEM_LENGTH = 256
 private const val MAX_OAUTH_RESPONSE_BYTES = 64 * 1024
 private const val MAX_EXPIRES_IN_SECONDS = 10L * 365 * 24 * 60 * 60
+private const val DEFAULT_DISCOVERY_TIMEOUT_MILLIS = 10_000L

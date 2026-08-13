@@ -178,8 +178,9 @@ class AgentToolResolver @Inject constructor(
         val secretRef = connection.secretRef ?: throw IllegalArgumentException("MCP bearer credential is missing.")
         val bytes = secretVault.read(secretRef) ?: throw IllegalArgumentException("MCP bearer credential is missing.")
         return try {
-            val token = bytes.decodeToString()
-            require(token.isNotBlank()) { "MCP bearer credential is missing." }
+            val token = bytes.decodeToString().trim()
+            require(token.isNotEmpty()) { "MCP bearer credential is missing." }
+            require('\r' !in token && '\n' !in token) { "MCP bearer credential is invalid." }
             "Bearer $token"
         } finally {
             bytes.fill(0)
@@ -219,6 +220,8 @@ private class McpAgentTool(
         val initialConfig = config(false, null)
         val result = try {
             clientManager.callTool(initialConfig, remoteToolName, arguments)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             if (authType != ToolConnectionAuthType.OAUTH || !error.isUnauthorized()) throw error
             clientManager.callTool(

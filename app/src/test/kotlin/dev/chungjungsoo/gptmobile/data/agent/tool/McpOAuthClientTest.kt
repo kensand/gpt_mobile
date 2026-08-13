@@ -117,6 +117,36 @@ class McpOAuthClientTest {
         }
     }
 
+    @Test
+    fun `challenge discovery times out instead of hanging authorization`() = runBlocking {
+        HangingChallengeServer().use { server ->
+            val httpClient = HttpClient(CIO) { expectSuccess = false }
+            val client = McpOAuthClient(httpClient, discoveryTimeoutMillis = 50)
+
+            val error = runCatching { client.discover(server.mcpUrl, allowCleartext = true) }.exceptionOrNull()
+
+            assertTrue(error is McpOAuthException)
+            assertTrue(error!!.message!!.contains("timed out"))
+            httpClient.close()
+        }
+    }
+
+    @Test
+    fun `advertised resource metadata must stay on the MCP resource origin`() = runBlocking {
+        OAuthFixtureServer().use { metadataServer ->
+            CrossOriginMetadataServer(metadataServer).use { server ->
+                val httpClient = HttpClient(CIO) { expectSuccess = false }
+                val client = McpOAuthClient(httpClient)
+
+                val error = runCatching { client.discover(server.mcpUrl, allowCleartext = true) }.exceptionOrNull()
+
+                assertTrue(error is McpOAuthException)
+                assertTrue(error!!.message!!.contains("same origin"))
+                httpClient.close()
+            }
+        }
+    }
+
     internal class OAuthFixtureServer : AutoCloseable {
         val tokenForms = CopyOnWriteArrayList<Map<String, String>>()
         val protectedResourceRequests = AtomicInteger()
@@ -173,6 +203,43 @@ class McpOAuthClientTest {
             exchange.responseBody.use { it.write(bytes) }
             exchange.close()
         }
+
+        override fun close() {
+            server.stop(0)
+        }
+    }
+
+    private class HangingChallengeServer : AutoCloseable {
+        private val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0).apply {
+            createContext("/mcp") { exchange ->
+                Thread.sleep(2_000)
+                exchange.sendResponseHeaders(401, -1)
+                exchange.close()
+            }
+            start()
+        }
+        val mcpUrl: String = "http://127.0.0.1:${server.address.port}/mcp"
+
+        override fun close() {
+            server.stop(0)
+        }
+    }
+
+    private class CrossOriginMetadataServer(
+        metadataServer: OAuthFixtureServer
+    ) : AutoCloseable {
+        private val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0).apply {
+            createContext("/mcp") { exchange ->
+                exchange.responseHeaders.add(
+                    "WWW-Authenticate",
+                    "Bearer resource_metadata=\"${metadataServer.mcpUrl.replace("/mcp", "/.well-known/oauth-protected-resource/mcp")}\""
+                )
+                exchange.sendResponseHeaders(401, -1)
+                exchange.close()
+            }
+            start()
+        }
+        val mcpUrl: String = "http://127.0.0.1:${server.address.port}/mcp"
 
         override fun close() {
             server.stop(0)

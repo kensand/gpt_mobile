@@ -10,8 +10,12 @@ import io.ktor.serialization.kotlinx.json.json
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -83,6 +87,40 @@ class McpClientManagerTest {
             manager.closeAll()
             client.close()
         }
+    }
+
+    @Test
+    fun `connects independent sessions without holding the global lock`() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val startCount = AtomicInteger()
+        SlowInitializeMcpFixtureServer(started, startCount).use { first ->
+            SlowInitializeMcpFixtureServer(started, startCount).use { second ->
+                val client = testClient()
+                val manager = McpClientManager(client)
+
+                val one = async { manager.listTools(McpConnectionConfig("connection-1", first.url, allowCleartext = true)) }
+                val two = async { manager.listTools(McpConnectionConfig("connection-2", second.url, allowCleartext = true)) }
+
+                withTimeout(2_000) { started.await() }
+                assertEquals(listOf("echo"), one.await().map { it.name })
+                assertEquals(listOf("echo"), two.await().map { it.name })
+                manager.closeAll()
+                client.close()
+            }
+        }
+    }
+
+    @Test
+    fun `rejects blank authorization header before opening a session`() = runBlocking {
+        val client = testClient()
+        val manager = McpClientManager(client)
+
+        val error = runCatching {
+            manager.listTools(McpConnectionConfig("connection-1", "https://example.com/mcp", allowCleartext = false, authorizationHeader = " "))
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        client.close()
     }
 
     private fun testClient(): HttpClient = HttpClient(CIO) {
@@ -181,6 +219,52 @@ class McpClientManagerTest {
         }
 
         private fun toolList(name: String, nextCursor: String? = null): String = """{"tools":[{"name":"$name","description":"Echo text","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]${nextCursor?.let { ",\"nextCursor\":\"$it\"" }.orEmpty()}}"""
+    }
+
+    private class SlowInitializeMcpFixtureServer(
+        private val started: CompletableDeferred<Unit>,
+        private val startCount: AtomicInteger
+    ) : AutoCloseable {
+        private val executor = Executors.newCachedThreadPool()
+        private val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0).apply {
+            executor = this@SlowInitializeMcpFixtureServer.executor
+            createContext("/mcp", ::handle)
+            start()
+        }
+        val url: String = "http://127.0.0.1:${server.address.port}/mcp"
+
+        private fun handle(exchange: HttpExchange) {
+            try {
+                val request = JSON.parseToJsonElement(exchange.requestBody.bufferedReader().readText()).let { it as JsonObject }
+                val method = request["method"]?.jsonPrimitive?.content.orEmpty()
+                if (method == "notifications/initialized") {
+                    exchange.sendResponseHeaders(202, -1)
+                    return
+                }
+                if (method == "initialize") {
+                    if (startCount.incrementAndGet() == 2) started.complete(Unit)
+                    Thread.sleep(250)
+                    exchange.responseHeaders.add("Mcp-Session-Id", "session-${server.address.port}")
+                    respond(exchange, """{"jsonrpc":"2.0","id":${request["id"]},"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"1"}}}""")
+                    return
+                }
+                respond(exchange, """{"jsonrpc":"2.0","id":${request["id"]},"result":{"tools":[{"name":"echo","description":"Echo text","inputSchema":{"type":"object"}}]}}""")
+            } finally {
+                exchange.close()
+            }
+        }
+
+        override fun close() {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+
+        private fun respond(exchange: HttpExchange, body: String) {
+            val bytes = body.toByteArray()
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
     }
 
     private companion object {
