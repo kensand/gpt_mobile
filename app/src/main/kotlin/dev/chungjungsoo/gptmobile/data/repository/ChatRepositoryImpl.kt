@@ -839,6 +839,22 @@ class ChatRepositoryImpl @Inject constructor(
         agentRunDao.updateStatus(runId, status, startedAt, completedAt, terminalError)
     }
 
+    override suspend fun finishAgentRun(
+        assistantMessage: MessageV2,
+        runId: String,
+        status: String,
+        startedAt: Long?,
+        completedAt: Long?,
+        terminalError: String?
+    ) = agentPersistenceDao.finishAgentRun(
+        assistantMessage,
+        runId,
+        status,
+        startedAt,
+        completedAt,
+        terminalError
+    )
+
     override suspend fun interruptActiveAgentRuns(completedAt: Long): Int = agentRunDao.interruptActiveRuns(completedAt)
 
     override suspend fun migrateToChatRoomV2MessageV2() {

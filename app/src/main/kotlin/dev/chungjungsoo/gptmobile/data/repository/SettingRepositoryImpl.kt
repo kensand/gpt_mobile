@@ -160,7 +160,7 @@ class SettingRepositoryImpl @Inject constructor(
             ?: platform.id.takeIf { it > 0 }?.let { platformV2Dao.getPlatform(it)?.secretRef }
         val securedPlatform = securePlatform(platform)
         platformV2Dao.editPlatform(securedPlatform)
-        if (securedPlatform.secretRef == null) {
+        if (previousSecretRef != securedPlatform.secretRef) {
             previousSecretRef?.let { secretVault.delete(it) }
         }
     }

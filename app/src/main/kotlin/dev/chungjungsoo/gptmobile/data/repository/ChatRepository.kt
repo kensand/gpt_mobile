@@ -31,6 +31,14 @@ interface ChatRepository {
         completedAt: Long?,
         terminalError: String?
     )
+    suspend fun finishAgentRun(
+        assistantMessage: MessageV2,
+        runId: String,
+        status: String,
+        startedAt: Long?,
+        completedAt: Long?,
+        terminalError: String?
+    )
     suspend fun interruptActiveAgentRuns(completedAt: Long): Int
     suspend fun migrateToChatRoomV2MessageV2()
     fun generateDefaultChatTitle(messages: List<MessageV2>): String?

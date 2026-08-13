@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import androidx.room.Upsert
+import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatPlatformModelV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
@@ -140,9 +141,11 @@ interface AgentPersistenceDao {
         val assistantMessage = request.assistantMessage.copy(
             content = "",
             thoughts = "",
+            attachments = emptyList(),
             revisions = previousRevision
                 ?.let { listOf(it) + request.assistantMessage.revisions }
                 ?: request.assistantMessage.revisions,
+            activeRevisionIndex = ACTIVE_REVISION_LATEST,
             currentRunId = request.run.runId,
             createdAt = request.run.createdAt
         )
@@ -161,6 +164,31 @@ interface AgentPersistenceDao {
         insertRun(run)
         return PersistAgentRetryResult(assistantMessage, run)
     }
+
+    @Transaction
+    suspend fun finishAgentRun(
+        assistantMessage: MessageV2,
+        runId: String,
+        status: String,
+        startedAt: Long?,
+        completedAt: Long?,
+        terminalError: String?
+    ) {
+        updateMessage(assistantMessage)
+        updateRunStatus(runId, status, startedAt, completedAt, terminalError)
+    }
+
+    @Query(
+        "UPDATE agent_runs SET status = :status, started_at = :startedAt, " +
+            "completed_at = :completedAt, terminal_error = :terminalError WHERE run_id = :runId"
+    )
+    suspend fun updateRunStatus(
+        runId: String,
+        status: String,
+        startedAt: Long?,
+        completedAt: Long?,
+        terminalError: String?
+    )
 
     @Transaction
     suspend fun duplicateChatWithHistory(

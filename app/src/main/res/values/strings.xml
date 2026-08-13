@@ -98,7 +98,7 @@
     <string name="google_brand_text" translatable="false">Powered by Gemini</string>
     <string name="token_not_set">Token not set</string>
     <string name="token_set">Token is set as %s*****</string>
-    <string name="credential_migration_warning">Some API keys could not be secured. Reopen provider settings to recover them.</string>
+    <string name="credential_migration_warning">Some API keys could not be secured. Reopen platform settings to recover them.</string>
     <string name="not_set">Not set</string>
     <string name="close">Close</string>
     <string name="delete">Delete</string>

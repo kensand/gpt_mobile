@@ -12,9 +12,11 @@
     <application
         android:name=".presentation.GPTMobileApp"
         android:allowBackup="true"
+        android:backupAgent=".data.backup.SanitizedChatBackupAgent"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="@xml/backup_rules"
+        android:fullBackupOnly="true"
         android:icon="@mipmap/ic_gpt_mobile"
         android:label="@string/app_name"
         android:supportsRtl="true"

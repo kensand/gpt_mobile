@@ -1,5 +1,6 @@
 package dev.chungjungsoo.gptmobile.data.database
 
+import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.chungjungsoo.gptmobile.data.ModelConstants
@@ -12,6 +13,12 @@ import dev.chungjungsoo.gptmobile.data.model.ClientType
 import java.io.File
 
 object ChatDatabaseV2Migrations {
+
+    val AGENT_TOOL_BINDING_CALLBACK = object : RoomDatabase.Callback() {
+        override fun onOpen(db: SupportSQLiteDatabase) {
+            installAgentToolBindingConstraints(db)
+        }
+    }
 
     val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
@@ -278,6 +285,7 @@ object ChatDatabaseV2Migrations {
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_tool_bindings_profile_uid` ON `agent_tool_bindings` (`profile_uid`)")
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_tool_bindings_connection_uid` ON `agent_tool_bindings` (`connection_uid`)")
             db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_agent_tool_bindings_profile_uid_connection_uid_tool_name` ON `agent_tool_bindings` (`profile_uid`, `connection_uid`, `tool_name`)")
+            installAgentToolBindingConstraints(db)
             db.execSQL(
                 """
                 CREATE TABLE IF NOT EXISTS `agent_runs` (
@@ -331,6 +339,40 @@ object ChatDatabaseV2Migrations {
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_tool_events_run_id` ON `tool_events` (`run_id`)")
             db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_tool_events_run_id_sequence` ON `tool_events` (`run_id`, `sequence`)")
         }
+    }
+
+    private fun installAgentToolBindingConstraints(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TRIGGER IF NOT EXISTS `agent_tool_bindings_builtin_insert_unique`
+            BEFORE INSERT ON `agent_tool_bindings`
+            WHEN NEW.`connection_uid` IS NULL AND EXISTS (
+                SELECT 1 FROM `agent_tool_bindings`
+                WHERE `profile_uid` = NEW.`profile_uid`
+                  AND `connection_uid` IS NULL
+                  AND `tool_name` = NEW.`tool_name`
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'duplicate built-in tool binding');
+            END
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TRIGGER IF NOT EXISTS `agent_tool_bindings_builtin_update_unique`
+            BEFORE UPDATE ON `agent_tool_bindings`
+            WHEN NEW.`connection_uid` IS NULL AND EXISTS (
+                SELECT 1 FROM `agent_tool_bindings`
+                WHERE `profile_uid` = NEW.`profile_uid`
+                  AND `connection_uid` IS NULL
+                  AND `tool_name` = NEW.`tool_name`
+                  AND `binding_uid` != OLD.`binding_uid`
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'duplicate built-in tool binding');
+            END
+            """.trimIndent()
+        )
     }
 
     internal fun legacyFilesToAttachmentsJson(filesValue: String): String {

@@ -2,6 +2,7 @@ package dev.chungjungsoo.gptmobile.data.security
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -85,7 +86,16 @@ class AndroidSecretVault private constructor(
                     val (iv, ciphertext) = decodeRecord(record)
                     try {
                         val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
-                        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+                        val key = getExistingKey() ?: run {
+                            atomicFile.delete()
+                            return@withLock null
+                        }
+                        try {
+                            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+                        } catch (_: KeyPermanentlyInvalidatedException) {
+                            atomicFile.delete()
+                            return@withLock null
+                        }
                         cipher.bindTo(secretRef)
                         cipher.doFinal(ciphertext).also { plaintext ->
                             if (plaintext.size > MAX_SECRET_BYTES) {
@@ -131,6 +141,10 @@ class AndroidSecretVault private constructor(
             generateKey()
         }
     }
+
+    private fun getExistingKey(): SecretKey? = KeyStore.getInstance(KEYSTORE_PROVIDER)
+        .apply { load(null) }
+        .getKey(keyAlias, null) as? SecretKey
 
     private fun writeRecord(secretRef: String, iv: ByteArray, ciphertext: ByteArray) {
         if (iv.size !in MIN_IV_BYTES..MAX_IV_BYTES || ciphertext.size !in MIN_CIPHERTEXT_BYTES..MAX_CIPHERTEXT_BYTES) {

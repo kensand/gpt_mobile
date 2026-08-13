@@ -1,15 +1,18 @@
 package dev.chungjungsoo.gptmobile.data.database
 
+import android.database.sqlite.SQLiteConstraintException
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunDraft
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -28,7 +31,7 @@ class AgentPersistenceDaoInstrumentedTest {
         database = Room.inMemoryDatabaseBuilder(
             InstrumentationRegistry.getInstrumentation().targetContext,
             ChatDatabaseV2::class.java
-        ).build()
+        ).addCallback(ChatDatabaseV2Migrations.AGENT_TOOL_BINDING_CALLBACK).build()
     }
 
     @After
@@ -108,7 +111,10 @@ class AgentPersistenceDaoInstrumentedTest {
         )
         val firstAnswer = persisted.assistantMessages.single().copy(
             content = "First answer",
-            thoughts = "First thoughts"
+            thoughts = "First thoughts",
+            attachments = listOf(ChatAttachment("/tmp/stale.txt", "/tmp/stale.txt", "stale.txt", "text/plain", 1)),
+            revisions = listOf(AssistantRevision(content = "Older answer", createdAt = 90L)),
+            activeRevisionIndex = 0
         )
         database.messageDao().editMessages(firstAnswer)
         database.agentRunDao().updateStatus("run-1", AgentRunStatus.COMPLETED, 200L, 250L, null)
@@ -123,12 +129,33 @@ class AgentPersistenceDaoInstrumentedTest {
 
         assertEquals(firstAnswer.id, retried.assistantMessage.id)
         assertEquals("", retried.assistantMessage.content)
+        assertEquals(emptyList<ChatAttachment>(), retried.assistantMessage.attachments)
+        assertEquals(-1, retried.assistantMessage.activeRevisionIndex)
         assertEquals("run-2", retried.assistantMessage.currentRunId)
-        assertEquals("First answer", retried.assistantMessage.revisions.single().content)
-        assertEquals("run-1", retried.assistantMessage.revisions.single().runId)
+        assertEquals("First answer", retried.assistantMessage.revisions.first().content)
+        assertEquals("run-1", retried.assistantMessage.revisions.first().runId)
         assertEquals(AgentRunStatus.COMPLETED, database.agentRunDao().getById("run-1")?.status)
         assertEquals(AgentRunStatus.QUEUED, database.agentRunDao().getById("run-2")?.status)
         assertEquals(firstAnswer.id, database.agentRunDao().getById("run-2")?.assistantMessageId)
+    }
+
+    @Test
+    fun finishAgentRun_persistsAssistantAndTerminalStatusTogether() = runBlocking {
+        val persisted = persistTurn(newChat(), "Question", "run-1", 100L)
+        database.agentRunDao().updateStatus("run-1", AgentRunStatus.RUNNING, 101L, null, null)
+        val answer = persisted.assistantMessages.single().copy(content = "Final answer", thoughts = "Reasoning")
+
+        database.agentPersistenceDao().finishAgentRun(
+            assistantMessage = answer,
+            runId = "run-1",
+            status = AgentRunStatus.COMPLETED,
+            startedAt = 101L,
+            completedAt = 102L,
+            terminalError = null
+        )
+
+        assertEquals("Final answer", database.messageDao().loadMessages(persisted.chatRoom.id).first { it.id == answer.id }.content)
+        assertEquals(AgentRunStatus.COMPLETED, database.agentRunDao().getById("run-1")?.status)
     }
 
     @Test
@@ -243,6 +270,26 @@ class AgentPersistenceDaoInstrumentedTest {
             assertEquals(0, cursor.getInt(0))
         }
         assertEquals(emptyList<PlatformV2>(), database.platformDao().getPlatforms())
+    }
+
+    @Test
+    fun builtInToolBinding_rejectsDuplicateProfileAndTool() {
+        database.openHelper.writableDatabase.execSQL(
+            "INSERT INTO agent_tool_bindings (binding_uid, profile_uid, connection_uid, tool_name, created_at) " +
+                "VALUES ('binding-1', 'profile-1', NULL, 'read_url', 1)"
+        )
+
+        var error: Throwable? = null
+        try {
+            database.openHelper.writableDatabase.execSQL(
+                "INSERT INTO agent_tool_bindings (binding_uid, profile_uid, connection_uid, tool_name, created_at) " +
+                    "VALUES ('binding-2', 'profile-1', NULL, 'read_url', 2)"
+            )
+        } catch (thrown: Throwable) {
+            error = thrown
+        }
+
+        assertTrue(error is SQLiteConstraintException)
     }
 
     private suspend fun persistTurn(

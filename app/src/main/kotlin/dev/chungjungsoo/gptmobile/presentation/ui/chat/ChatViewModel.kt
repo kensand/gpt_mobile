@@ -660,12 +660,13 @@ class ChatViewModel @Inject constructor(
                     onLoadingComplete = {}
                 )
                 val terminal = outcome.toAgentRunTerminalUpdate()
-                chatRepository.updateAgentRunStatus(
-                    runId,
-                    terminal.status,
-                    startedAt,
-                    currentTimeStamp,
-                    terminal.error
+                chatRepository.finishAgentRun(
+                    assistantMessage = _groupedMessages.value.assistantMessages[turnIndex][platformIndex],
+                    runId = runId,
+                    status = terminal.status,
+                    startedAt = startedAt,
+                    completedAt = currentTimeStamp,
+                    terminalError = terminal.error
                 )
             } catch (error: CancellationException) {
                 withContext(NonCancellable) {
@@ -697,13 +698,16 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                 }
-                chatRepository.updateAgentRunStatus(
-                    runId,
-                    AgentRunStatus.FAILED,
-                    startedAt,
-                    currentTimeStamp,
-                    message
-                )
+                runCatching {
+                    chatRepository.finishAgentRun(
+                        assistantMessage = _groupedMessages.value.assistantMessages[turnIndex][platformIndex],
+                        runId = runId,
+                        status = AgentRunStatus.FAILED,
+                        startedAt = startedAt,
+                        completedAt = currentTimeStamp,
+                        terminalError = message
+                    )
+                }
             } finally {
                 _loadingStates.update { states ->
                     states.toMutableList().apply { this[platformIndex] = LoadingState.Idle }

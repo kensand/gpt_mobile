@@ -177,6 +177,25 @@ class SettingRepositorySecretMigrationTest {
         assertNull(vault.values[oldSecretRef])
     }
 
+    @Test
+    fun `replacing a migrated profile credential deletes its old vault record`() = runBlocking {
+        val oldSecretRef = "room_profile_1"
+        val dao = FakePlatformV2Dao(
+            mutableListOf(testPlatform(token = null).copy(id = 1, secretRef = oldSecretRef))
+        )
+        val vault = FakeSecretVault().apply {
+            values[oldSecretRef] = "old-secret".encodeToByteArray()
+        }
+        val repository = createRepository(dao, vault)
+
+        repository.updatePlatformV2(
+            dao.platforms.single().copy(token = "replacement-secret", secretRef = null)
+        )
+
+        assertNull(vault.values[oldSecretRef])
+        assertEquals("replacement-secret", vault.values.getValue("profile_profile-1").decodeToString())
+    }
+
     private fun createRepository(
         dao: FakePlatformV2Dao,
         vault: FakeSecretVault,

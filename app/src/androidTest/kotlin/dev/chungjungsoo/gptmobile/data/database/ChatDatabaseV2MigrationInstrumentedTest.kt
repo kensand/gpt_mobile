@@ -163,6 +163,20 @@ class ChatDatabaseV2MigrationInstrumentedTest {
                 assertEquals(0, cursor.getInt(0))
             }
         }
+        database.execSQL(
+            "INSERT INTO agent_tool_bindings (binding_uid, profile_uid, connection_uid, tool_name, created_at) " +
+                "VALUES ('binding-1', 'profile-1', NULL, 'read_url', 1)"
+        )
+        var duplicateRejected = false
+        try {
+            database.execSQL(
+                "INSERT INTO agent_tool_bindings (binding_uid, profile_uid, connection_uid, tool_name, created_at) " +
+                    "VALUES ('binding-2', 'profile-1', NULL, 'read_url', 2)"
+            )
+        } catch (_: android.database.sqlite.SQLiteConstraintException) {
+            duplicateRejected = true
+        }
+        assertTrue(duplicateRejected)
         database.close()
     }
 
