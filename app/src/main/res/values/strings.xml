@@ -374,6 +374,8 @@
     <string name="dynamic_client_registration_hint">Leave blank to use Dynamic Client Registration when advertised.</string>
     <string name="agent_notification_channel">Agent runs</string>
     <string name="agent_notification_title">GPT Mobile agent is working</string>
+    <string name="agent_completion_notification_title">GPT Mobile agent finished</string>
+    <string name="agent_completion_notification_text">Tap to view the response.</string>
     <string name="cancel_agent_runs">Cancel</string>
     <plurals name="agent_runs_active">
         <item quantity="one">%1$d profile running</item>

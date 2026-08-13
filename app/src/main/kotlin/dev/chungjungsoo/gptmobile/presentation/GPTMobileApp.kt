@@ -44,6 +44,7 @@ class GPTMobileApp : Application() {
     override fun onCreate() {
         SanitizedChatBackup.restoreIfPresent(this)
         super.onCreate()
+        registerActivityLifecycleCallbacks(AppForegroundTracker)
         applicationScope.launch {
             secretMigrationErrors = runStartupMaintenance(
                 interruptPersistedWork = {

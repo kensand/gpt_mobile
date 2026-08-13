@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import dagger.hilt.android.AndroidEntryPoint
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunCoordinator
+import dev.chungjungsoo.gptmobile.presentation.AppForegroundTracker
 import dev.chungjungsoo.gptmobile.presentation.ui.main.MainActivity
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -34,15 +35,21 @@ class AgentRunForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        var wasActive = coordinator.activeRuns.value.isNotEmpty()
         showNotification(coordinator.activeRuns.value.size)
         serviceScope.launch {
             coordinator.activeRuns.collectLatest { activeRuns ->
-                if (activeRuns.isEmpty()) {
+                val isActive = activeRuns.isNotEmpty()
+                if (!isActive) {
                     ServiceCompat.stopForeground(this@AgentRunForegroundService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                    if (shouldNotifyAgentRunsCompleted(wasActive, isActive, AppForegroundTracker.isBackgrounded)) {
+                        showCompletionNotification()
+                    }
                     stopSelf()
                 } else {
                     showNotification(activeRuns.size)
                 }
+                wasActive = isActive
             }
         }
     }
@@ -78,15 +85,7 @@ class AgentRunForegroundService : Service() {
     }
 
     private fun buildNotification(activeCount: Int): Notification {
-        val openAppIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val openApp = PendingIntent.getActivity(
-            this,
-            0,
-            openAppIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val openApp = buildOpenAppPendingIntent(0)
         val cancelRuns = PendingIntent.getService(
             this,
             1,
@@ -104,6 +103,32 @@ class AgentRunForegroundService : Service() {
             .setProgress(0, 0, true)
             .addAction(0, getString(R.string.cancel_agent_runs), cancelRuns)
             .build()
+    }
+
+    private fun showCompletionNotification() {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, buildCompletionNotification())
+    }
+
+    private fun buildCompletionNotification(): Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_gpt_mobile_monochrome_foreground)
+        .setContentTitle(getString(R.string.agent_completion_notification_title))
+        .setContentText(getString(R.string.agent_completion_notification_text))
+        .setContentIntent(buildOpenAppPendingIntent(2))
+        .setAutoCancel(true)
+        .setCategory(NotificationCompat.CATEGORY_STATUS)
+        .build()
+
+    private fun buildOpenAppPendingIntent(requestCode: Int): PendingIntent {
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        return PendingIntent.getActivity(
+            this,
+            requestCode,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
     private fun createNotificationChannel() {
@@ -130,3 +155,9 @@ class AgentRunForegroundService : Service() {
         }
     }
 }
+
+internal fun shouldNotifyAgentRunsCompleted(
+    wasActive: Boolean,
+    isActive: Boolean,
+    isAppBackground: Boolean
+): Boolean = wasActive && !isActive && isAppBackground
