@@ -61,10 +61,12 @@ class ToolTraceBlockTest {
     }
 
     @Test
-    fun toolTraceStatusSummary_prioritizesActiveFailedCanceledAndCompletedStates() {
+    fun toolTraceStatusSummary_prioritizesActiveAndDistinguishesPartialFailure() {
         assertEquals("0 tool calls", toolTraceStatusSummary(emptyList()))
         assertEquals("2 tool calls - running", toolTraceStatusSummary(listOf(event("one", status = ToolEventStatus.COMPLETED), event("two", status = ToolEventStatus.RUNNING))))
-        assertEquals("2 tool calls - failed", toolTraceStatusSummary(listOf(event("one", status = ToolEventStatus.COMPLETED), event("two", status = ToolEventStatus.FAILED))))
+        assertEquals("2 tool calls - running", toolTraceStatusSummary(listOf(event("one", status = ToolEventStatus.FAILED), event("two", status = ToolEventStatus.PENDING))))
+        assertEquals("2 tool calls - failed", toolTraceStatusSummary(listOf(event("one", status = ToolEventStatus.FAILED), event("two", status = ToolEventStatus.COMPLETED, isError = true))))
+        assertEquals("2 tool calls - completed with errors", toolTraceStatusSummary(listOf(event("one", status = ToolEventStatus.COMPLETED), event("two", status = ToolEventStatus.FAILED))))
         assertEquals("2 tool calls - canceled", toolTraceStatusSummary(listOf(event("one", status = ToolEventStatus.COMPLETED), event("two", status = ToolEventStatus.CANCELED))))
         assertEquals("2 tool calls - completed", toolTraceStatusSummary(listOf(event("one", status = ToolEventStatus.COMPLETED), event("two", status = ToolEventStatus.COMPLETED))))
     }
@@ -138,7 +140,8 @@ class ToolTraceBlockTest {
         status: String = ToolEventStatus.COMPLETED,
         startedAt: Long? = null,
         completedAt: Long? = null,
-        error: String? = null
+        error: String? = null,
+        isError: Boolean = false
     ) = ToolEvent(
         eventId = eventId,
         runId = "run-1",
@@ -152,6 +155,7 @@ class ToolTraceBlockTest {
         result = result,
         resultType = null,
         status = status,
+        isError = isError,
         startedAt = startedAt,
         completedAt = completedAt,
         error = error

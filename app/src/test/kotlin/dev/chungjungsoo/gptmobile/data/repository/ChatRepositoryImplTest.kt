@@ -410,7 +410,7 @@ class ChatRepositoryImplTest {
         ).toList()
 
         assertEquals(listOf(ApiState.Loading, ApiState.Success("done"), ApiState.Done), states)
-        assertEquals("web_search", openAIAPI.requests.first().tools!!.single().function.name)
+        assertEquals(listOf("current_date", "web_search"), openAIAPI.requests.first().tools!!.map { it.function.name }.sorted())
         assertEquals("call_exact", openAIAPI.requests.last().messages.takeLast(2).first().toolCalls!!.single().id)
         val event = traceDao.events.single()
         assertEquals("run-web", event.runId)

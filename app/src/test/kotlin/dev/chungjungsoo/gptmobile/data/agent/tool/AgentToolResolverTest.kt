@@ -13,6 +13,9 @@ import dev.chungjungsoo.gptmobile.data.network.NetworkClient
 import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
 import dev.chungjungsoo.gptmobile.data.security.SecretVault
 import io.ktor.client.engine.cio.CIO
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
@@ -21,10 +24,32 @@ import org.junit.Test
 
 class AgentToolResolverTest {
     @Test
-    fun `zero bindings resolves no tools`() = runBlocking {
+    fun `zero bindings resolves current date tool`() = runBlocking {
         val resolver = resolver()
 
-        assertEquals(emptyList<ResolvedAgentTool>(), resolver.resolve("profile-1"))
+        val resolved = resolver.resolve("profile-1").single()
+
+        assertEquals("current_date", resolved.modelToolName)
+        assertEquals(null, resolved.connectionUid)
+        assertEquals(null, resolved.connectionName)
+    }
+
+    @Test
+    fun `current date returns deterministic local date time and zone`() = runBlocking {
+        val tool = CurrentDateTool(
+            Clock.fixed(Instant.parse("2026-08-13T03:04:05Z"), ZoneId.of("Asia/Tokyo"))
+        )
+
+        val result = tool.execute("call-date", buildJsonObject {})
+
+        assertEquals("current_date", tool.definition.name)
+        assertEquals(buildJsonObject {}, tool.definition.inputSchema)
+        assertEquals("call-date", result.callId)
+        assertEquals(false, result.isError)
+        assertEquals(
+            """{"date":"2026-08-13","time":"12:04:05","zone":"Asia/Tokyo"}""",
+            (result.content as ToolResultContent.Json).value.toString()
+        )
     }
 
     @Test
@@ -36,8 +61,8 @@ class AgentToolResolverTest {
 
         val resolved = resolver.resolve("profile-1")
 
-        assertEquals(listOf("read_url"), resolved.map { it.tool.definition.name })
-        assertEquals(null, resolved.single().connectionUid)
+        assertEquals(listOf("current_date", "read_url"), resolved.map { it.tool.definition.name })
+        assertEquals(null, resolved.single { it.modelToolName == "read_url" }.connectionUid)
     }
 
     @Test
@@ -55,7 +80,7 @@ class AgentToolResolverTest {
             val resolver = resolver(dao, vault)
             dao.bind(connection("search-$index", connectionType, endpointUrl = null, secretRef = "secret-$index"), binding("profile-1", "search-$index", "web_search"))
 
-            val resolved = resolver.resolve("profile-1").single()
+            val resolved = resolver.resolve("profile-1").single { it.modelToolName == "web_search" }
             val config = resolved.tool.webSearchConfig()
 
             assertEquals("web_search", resolved.realToolName)
@@ -79,7 +104,7 @@ class AgentToolResolverTest {
             binding("profile-1", "search-1", "web_search")
         )
 
-        val config = resolver.resolve("profile-1").single().tool.webSearchConfig()
+        val config = resolver.resolve("profile-1").single { it.modelToolName == "web_search" }.tool.webSearchConfig()
 
         assertEquals("https://api.exa.ai/search", config.endpointUrl)
     }
@@ -90,7 +115,7 @@ class AgentToolResolverTest {
         val resolver = resolver(dao)
         dao.bind(connection("search-1", ToolConnectionType.FIRECRAWL, secretRef = null), binding("profile-1", "search-1", "web_search"))
 
-        val resolved = resolver.resolve("profile-1").single()
+        val resolved = resolver.resolve("profile-1").single { it.modelToolName == "web_search" }
         val result = resolved.tool.execute("call-1", buildJsonObject {})
 
         assertEquals("web_search", resolved.tool.definition.name)
@@ -120,7 +145,7 @@ class AgentToolResolverTest {
         val resolver = resolver(dao)
         dao.bind(null, binding("profile-1", null, BuiltInAgentTool.READ_URL))
 
-        val resolved = resolver.resolve("profile-1").single()
+        val resolved = resolver.resolve("profile-1").single { it.modelToolName == "read_url" }
 
         assertEquals(ReadUrlTool::class.java, resolved.tool.javaClass)
         assertEquals(null, resolved.connectionUid)
@@ -137,7 +162,7 @@ class AgentToolResolverTest {
         dao.bind(connection("mcp-1", ToolConnectionType.MCP, secretRef = "secret-mcp"), binding("profile-1", "mcp-1", "mcp_tool"))
         dao.bind(connection("search-1", ToolConnectionType.FIRECRAWL, secretRef = "secret-1"), binding("profile-1", "search-1", "unknown_tool"))
 
-        assertEquals(emptyList<ResolvedAgentTool>(), resolver.resolve("profile-1"))
+        assertEquals(listOf("current_date"), resolver.resolve("profile-1").map { it.modelToolName })
     }
 
     @Test
@@ -156,7 +181,7 @@ class AgentToolResolverTest {
 
         val resolved = resolver.resolve("profile-1")
 
-        assertEquals(listOf("read_url", "web_search"), resolved.map { it.modelToolName })
+        assertEquals(listOf("current_date", "read_url", "web_search"), resolved.map { it.modelToolName })
         assertEquals("search-a", resolved.single { it.modelToolName == "web_search" }.connectionUid)
         assertEquals(WebSearchProvider.FIRECRAWL, resolved.single { it.modelToolName == "web_search" }.tool.webSearchConfig().provider)
     }

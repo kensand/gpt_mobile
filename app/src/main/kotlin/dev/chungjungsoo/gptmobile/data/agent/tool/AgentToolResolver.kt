@@ -29,7 +29,9 @@ class AgentToolResolver @Inject constructor(
     private val networkClient: NetworkClient
 ) {
     suspend fun resolve(profileUid: String): List<ResolvedAgentTool> {
-        val resolved = mutableListOf<ResolvedAgentTool>()
+        val resolved = mutableListOf(
+            CurrentDateTool().resolved(null, null, BuiltInAgentTool.CURRENT_DATE)
+        )
         toolConnectionRepository.listBindingsWithConnections(profileUid)
             .sortedWith(compareBy<AgentToolBindingWithConnection> { it.binding.toolName }.thenBy { it.binding.connectionUid ?: "" }.thenBy { it.binding.bindingUid })
             .forEach { binding ->

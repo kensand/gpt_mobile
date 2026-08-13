@@ -207,9 +207,14 @@ internal fun toolTraceStatusSummary(events: List<ToolEvent>): String {
     val noun = if (count == 1) "tool call" else "tool calls"
     if (events.isEmpty()) return "0 $noun"
 
+    val hasActive = events.any { it.status == ToolEventStatus.RUNNING || it.status == ToolEventStatus.PENDING }
+    val failed = events.count { it.status == ToolEventStatus.FAILED || it.isError }
+    val completed = events.count { it.status == ToolEventStatus.COMPLETED && !it.isError }
     val status = when {
-        events.any { it.status == ToolEventStatus.FAILED || it.isError } -> "failed"
-        events.any { it.status == ToolEventStatus.RUNNING || it.status == ToolEventStatus.PENDING } -> "running"
+        hasActive -> "running"
+        failed == events.size -> "failed"
+        failed > 0 && completed > 0 -> "completed with errors"
+        failed > 0 -> "failed"
         events.any { it.status == ToolEventStatus.CANCELED } -> "canceled"
         else -> "completed"
     }

@@ -2,7 +2,6 @@ package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,6 +47,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -266,13 +266,14 @@ fun PlatformSettingScreen(
                     showTrailingIcon = true,
                     showLeadingIcon = false
                 )
-                PreferenceSwitchWithContainer(
+                PreferenceListSwitch(
+                    modifier = Modifier.height(64.dp),
                     title = stringResource(R.string.read_url),
                     icon = ImageVector.vectorResource(id = R.drawable.ic_link),
-                    isChecked = toolBindingState.readUrlEnabled
-                ) {
-                    settingViewModel.toggleReadUrl(!toolBindingState.readUrlEnabled)
-                }
+                    enabled = true,
+                    isChecked = toolBindingState.readUrlEnabled,
+                    onCheckedChange = settingViewModel::toggleReadUrl
+                )
 
                 PlatformNameDialog(dialogState, platformData.name, settingViewModel)
                 APIUrlDialog(dialogState, platformData.apiUrl, settingViewModel)
@@ -406,36 +407,57 @@ fun ExtendedThinkingSwitch(
     isChecked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    val clickableModifier = if (enabled) {
-        modifier
-            .fillMaxWidth()
-            .clickable(onClick = { onCheckedChange(!isChecked) })
-            .padding(horizontal = 8.dp)
-    } else {
-        modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-    }
+    PreferenceListSwitch(
+        modifier = modifier,
+        title = stringResource(R.string.extended_thinking),
+        description = stringResource(R.string.extended_thinking_description),
+        icon = ImageVector.vectorResource(id = R.drawable.ic_model),
+        enabled = enabled,
+        isChecked = isChecked,
+        onCheckedChange = onCheckedChange
+    )
+}
+
+@Composable
+private fun PreferenceListSwitch(
+    modifier: Modifier,
+    title: String,
+    description: String? = null,
+    icon: ImageVector,
+    enabled: Boolean,
+    isChecked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
     val colors = ListItemDefaults.colors()
 
     ListItem(
-        modifier = clickableModifier,
+        modifier = modifier
+            .fillMaxWidth()
+            .toggleable(
+                value = isChecked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
+            .padding(horizontal = 8.dp),
         headlineContent = {
             Text(
-                text = stringResource(R.string.extended_thinking),
+                text = title,
                 overflow = TextOverflow.Ellipsis
             )
         },
-        supportingContent = {
-            Text(
-                text = stringResource(R.string.extended_thinking_description),
-                overflow = TextOverflow.Ellipsis
-            )
+        supportingContent = description?.let {
+            {
+                Text(
+                    text = description,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         },
         leadingContent = {
             Icon(
-                imageVector = ImageVector.vectorResource(id = R.drawable.ic_model),
-                contentDescription = stringResource(R.string.extended_thinking)
+                imageVector = icon,
+                contentDescription = title
             )
         },
         trailingContent = {
