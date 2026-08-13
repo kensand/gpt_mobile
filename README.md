@@ -4,7 +4,7 @@
 
 # GPT Mobile
 
-### Multi-provider AI chat and optional on-device agents for Android.
+## Multi-provider AI chat and optional on-device agents for Android.
 
 <p>
   <a href="https://mailchi.mp/kotlinweekly/kotlin-weekly-431"><img alt="Kotlin Weekly" src="https://img.shields.io/badge/Kotlin%20Weekly-%23431-blue"/></a>
@@ -55,7 +55,7 @@
 - Local chat history
   - Chat history is **only saved locally**
   - Credentials are encrypted with Android Keystore and excluded from backup/export
-  - Requests go only to providers and tools selected by the user
+  - During chats, requests go only to selected model providers and assigned tools. Opening a profile's Tools dialog may contact every saved MCP server for discovery and may include its bearer or OAuth credential.
 - [Material You](https://m3.material.io/) style UI, Icons
   - Supports dark mode, system dynamic theming **without Activity restart**
 - Per app language setting for Android 13+
