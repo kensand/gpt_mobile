@@ -17,4 +17,10 @@ class NetworkClientTest {
         assertTrue(NetworkClient.isSensitiveHeader("x-goog-api-key"))
         assertTrue(NetworkClient.isSensitiveHeader("X-Goog-Api-Key"))
     }
+
+    @Test
+    fun `anthropic credential header is sanitized case insensitively`() {
+        assertTrue(NetworkClient.isSensitiveHeader("x-api-key"))
+        assertTrue(NetworkClient.isSensitiveHeader("X-Api-Key"))
+    }
 }

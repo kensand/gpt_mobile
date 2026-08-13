@@ -42,6 +42,7 @@ import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.network.AnthropicAPI
 import dev.chungjungsoo.gptmobile.data.network.GoogleAPI
 import dev.chungjungsoo.gptmobile.data.network.GroqAPI
+import dev.chungjungsoo.gptmobile.data.network.NetworkClient
 import dev.chungjungsoo.gptmobile.data.network.OpenAIAPI
 import dev.chungjungsoo.gptmobile.data.network.ProviderRequestConfig
 import dev.chungjungsoo.gptmobile.data.network.UploadedProviderFile
@@ -52,8 +53,12 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -274,6 +279,45 @@ class ProviderAdaptersTest {
     }
 
     @Test
+    fun `anthropic adapter replays signed thinking block before tool use`() = runBlocking {
+        val firstRound = listOf(
+            """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"checking"}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_exact"}}""",
+            """{"type":"content_block_stop","index":0}""",
+            """{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_exact","name":"weather","input":{}}}""",
+            """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Tokyo\"}"}}""",
+            """{"type":"content_block_stop","index":1}""",
+            """{"type":"message_stop"}"""
+        ).map { NetworkClient.json.decodeFromString<MessageResponseChunk>(it) }
+        val api = FakeAnthropicAPI(
+            ArrayDeque(
+                listOf(
+                    flowOf(*firstRound.toTypedArray()),
+                    flowOf(MessageStopResponseChunk)
+                )
+            )
+        )
+        val session = AnthropicMessagesAdapter(api, attachmentEncoder())
+            .openSession(turns(), platform(ClientType.ANTHROPIC).copy(reasoning = true))
+
+        val emittedCall = session.streamRound(listOf(definition), emptyList()).toList()
+            .filterIsInstance<ProviderEvent.ToolCall>()
+            .single()
+        session.streamRound(
+            listOf(definition),
+            listOf(AgentToolExchange(listOf(emittedCall), listOf(result)))
+        ).toList()
+
+        val messages = requestJson(api.requests.last())["messages"]!!.jsonArray
+        val assistantContent = messages[messages.lastIndex - 1].jsonObject["content"]!!.jsonArray
+        assertEquals("thinking", assistantContent[0].jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals("checking", assistantContent[0].jsonObject["thinking"]!!.jsonPrimitive.content)
+        assertEquals("sig_exact", assistantContent[0].jsonObject["signature"]!!.jsonPrimitive.content)
+        assertEquals("tool_use", assistantContent[1].jsonObject["type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `anthropic omits tools for chat only profiles`() = runBlocking {
         val api = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
 
@@ -326,6 +370,38 @@ class ProviderAdaptersTest {
     }
 
     @Test
+    fun `gemini adapter preserves thought signature and omitted provider id`() = runBlocking {
+        val firstRound = NetworkClient.json.decodeFromString<GenerateContentResponse>(
+            """{"candidates":[{"index":0,"content":{"role":"model","parts":[{"thought":true,"text":"checking"},{"thoughtSignature":"signature_exact","functionCall":{"name":"weather","args":{"city":"Tokyo"}}}]}}]}"""
+        )
+        val api = FakeGoogleAPI(
+            ArrayDeque(
+                listOf(
+                    flowOf(firstRound),
+                    flowOf(GenerateContentResponse(candidates = emptyList()))
+                )
+            )
+        )
+        val session = GeminiAdapter(api, attachmentEncoder())
+            .openSession(turns(), platform(ClientType.GOOGLE).copy(reasoning = true))
+
+        val emittedCall = session.streamRound(listOf(definition), emptyList()).toList()
+            .filterIsInstance<ProviderEvent.ToolCall>()
+            .single()
+        session.streamRound(
+            listOf(definition),
+            listOf(AgentToolExchange(listOf(emittedCall), listOf(result.copy(callId = emittedCall.callId))))
+        ).toList()
+
+        val contents = requestJson(api.requests.last())["contents"]!!.jsonArray
+        val replayedCall = contents[contents.lastIndex - 1].jsonObject["parts"]!!.jsonArray[1].jsonObject
+        val replayedResponse = contents.last().jsonObject["parts"]!!.jsonArray.single().jsonObject["functionResponse"]!!.jsonObject
+        assertEquals("signature_exact", replayedCall["thoughtSignature"]!!.jsonPrimitive.content)
+        assertFalse(replayedCall["functionCall"]!!.jsonObject.containsKey("id"))
+        assertFalse(replayedResponse.containsKey("id"))
+    }
+
+    @Test
     fun `gemini omits tools for chat only profiles`() = runBlocking {
         val api = FakeGoogleAPI(ArrayDeque(listOf(emptyFlow())))
 
@@ -344,6 +420,10 @@ class ProviderAdaptersTest {
             isCurrentTurn = true
         )
     )
+
+    private inline fun <reified T> requestJson(value: T) = NetworkClient.json
+        .parseToJsonElement(NetworkClient.json.encodeToString(value))
+        .jsonObject
 
     private fun platform(type: ClientType) = PlatformV2(
         uid = "profile",

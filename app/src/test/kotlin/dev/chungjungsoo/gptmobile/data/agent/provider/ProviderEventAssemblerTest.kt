@@ -9,6 +9,7 @@ import dev.chungjungsoo.gptmobile.data.network.NetworkClient
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderEventAssemblerTest {
@@ -105,5 +106,17 @@ class ProviderEventAssemblerTest {
             ),
             GeminiEventMapper.accept(response)
         )
+    }
+
+    @Test
+    fun `gemini mapper accepts function calls without provider ids`() {
+        val fixture = """{"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"name":"read_url","args":{"url":"https://example.com"}}}]}}]}"""
+        val response = NetworkClient.json.decodeFromString<GenerateContentResponse>(fixture)
+
+        val event = GeminiEventMapper.accept(response).single() as ProviderEvent.ToolCall
+
+        assertTrue(event.callId.isNotBlank())
+        assertEquals("read_url", event.name)
+        assertEquals(buildJsonObject { put("url", "https://example.com") }, event.arguments)
     }
 }

@@ -150,6 +150,7 @@ class AgentRunnerTest {
     @Test
     fun `round ceiling stops repeated tool loops`() = runBlocking {
         val providerCalls = AtomicInteger()
+        val executions = AtomicInteger()
         val session = session { _, _ ->
             val round = providerCalls.getAndIncrement()
             flow {
@@ -158,6 +159,7 @@ class AgentRunnerTest {
             }
         }
         val tool = tool { callId, _ ->
+            executions.incrementAndGet()
             AgentToolResult(callId, ToolResultContent.Text("ok"), isError = false)
         }
 
@@ -166,6 +168,7 @@ class AgentRunnerTest {
         ).run(session, listOf(tool)).toList()
 
         assertEquals(2, providerCalls.get())
+        assertEquals(1, executions.get())
         assertTrue((events.last() as AgentRunEvent.Provider).event is ProviderEvent.Failed)
     }
 
@@ -252,7 +255,7 @@ class AgentRunnerTest {
     @Test
     fun `tool timeout becomes an error result and the model can continue`() = runBlocking {
         val providerCalls = AtomicInteger()
-        var resultWasError = false
+        var replayedResult: AgentToolResult? = null
         val session = session { _, exchanges ->
             when (providerCalls.getAndIncrement()) {
                 0 -> flow {
@@ -261,7 +264,7 @@ class AgentRunnerTest {
                 }
 
                 else -> flow {
-                    resultWasError = exchanges.single().results.single().isError
+                    replayedResult = exchanges.single().results.single()
                     emit(ProviderEvent.Completed)
                 }
             }
@@ -272,7 +275,27 @@ class AgentRunnerTest {
             limits = AgentRunLimits(toolTimeoutMillis = 20)
         ).run(session, listOf(tool)).toList()
 
-        assertTrue(resultWasError)
+        assertEquals(true, replayedResult?.isError)
+        assertEquals(
+            ToolResultContent.Text("Tool 'lookup' timed out after 20 ms."),
+            replayedResult?.content
+        )
+    }
+
+    @Test
+    fun `run timeout message uses configured duration`() = runBlocking {
+        val session = session { _, _ ->
+            flow { awaitCancellation() }
+        }
+
+        val events = AgentRunner(
+            limits = AgentRunLimits(runTimeoutMillis = 20)
+        ).run(session, emptyList()).toList()
+
+        assertEquals(
+            AgentRunEvent.Provider(ProviderEvent.Failed("Agent run timed out after 20 ms.")),
+            events.single()
+        )
     }
 
     @Test

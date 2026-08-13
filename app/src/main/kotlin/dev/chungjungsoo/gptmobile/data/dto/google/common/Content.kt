@@ -33,6 +33,9 @@ data class Part(
     @SerialName("thought")
     val thought: Boolean? = null,
 
+    @SerialName("thoughtSignature")
+    val thoughtSignature: String? = null,
+
     @SerialName("functionCall")
     val functionCall: FunctionCall? = null,
 

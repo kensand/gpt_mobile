@@ -1,6 +1,10 @@
 package dev.chungjungsoo.gptmobile.data.agent.provider
 
 import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
+import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.MessageContent
+import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.TextContent
+import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.ThinkingContent
+import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.ToolUseContent
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.response.ContentBlockType
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.response.ContentDeltaResponseChunk
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.response.ContentStartResponseChunk
@@ -124,27 +128,47 @@ class AnthropicEventAssembler {
     )
 
     private val pending = mutableMapOf<Int, PendingCall>()
+    private val pendingText = mutableMapOf<Int, StringBuilder>()
+    private val pendingThinking = mutableMapOf<Int, Pair<StringBuilder, StringBuilder>>()
+    private val completed = sortedMapOf<Int, MessageContent>()
 
     fun accept(event: MessageResponseChunk): List<ProviderEvent> = when (event) {
         is ContentStartResponseChunk -> {
-            if (event.contentBlock.type != ContentBlockType.TOOL_USE) {
-                emptyList()
-            } else {
-                val callId = event.contentBlock.id
-                val name = event.contentBlock.name
-                if (callId == null || name == null) {
-                    listOf(ProviderEvent.Failed("Anthropic returned an incomplete tool use block."))
-                } else {
+            when (event.contentBlock.type) {
+                ContentBlockType.TEXT -> pendingText[event.index] = StringBuilder(event.contentBlock.text.orEmpty())
+
+                ContentBlockType.THINKING -> pendingThinking[event.index] =
+                    StringBuilder(event.contentBlock.thinking.orEmpty()) to StringBuilder(event.contentBlock.signature.orEmpty())
+
+                ContentBlockType.TOOL_USE -> {
+                    val callId = event.contentBlock.id
+                    val name = event.contentBlock.name
+                    if (callId == null || name == null) {
+                        return listOf(ProviderEvent.Failed("Anthropic returned an incomplete tool use block."))
+                    }
                     pending[event.index] = PendingCall(callId, name)
-                    emptyList()
                 }
+
+                else -> Unit
             }
+            emptyList()
         }
 
         is ContentDeltaResponseChunk -> when (event.delta.type) {
-            ContentBlockType.TEXT, ContentBlockType.DELTA -> event.delta.text?.let { listOf(ProviderEvent.TextDelta(it)) }.orEmpty()
+            ContentBlockType.TEXT, ContentBlockType.DELTA -> event.delta.text?.let {
+                pendingText.getOrPut(event.index) { StringBuilder() }.append(it)
+                listOf(ProviderEvent.TextDelta(it))
+            }.orEmpty()
 
-            ContentBlockType.THINKING, ContentBlockType.THINKING_DELTA -> event.delta.thinking?.let { listOf(ProviderEvent.ThinkingDelta(it)) }.orEmpty()
+            ContentBlockType.THINKING, ContentBlockType.THINKING_DELTA -> event.delta.thinking?.let {
+                pendingThinking.getOrPut(event.index) { StringBuilder() to StringBuilder() }.first.append(it)
+                listOf(ProviderEvent.ThinkingDelta(it))
+            }.orEmpty()
+
+            ContentBlockType.SIGNATURE, ContentBlockType.SIGNATURE_DELTA -> {
+                pendingThinking.getOrPut(event.index) { StringBuilder() to StringBuilder() }.second.append(event.delta.signature.orEmpty())
+                emptyList()
+            }
 
             ContentBlockType.INPUT_JSON_DELTA -> {
                 pending[event.index]?.arguments?.append(event.delta.partialJson.orEmpty())
@@ -155,8 +179,20 @@ class AnthropicEventAssembler {
         }
 
         is ContentStopResponseChunk -> {
+            pendingText.remove(event.index)?.let { completed[event.index] = TextContent(it.toString()) }
+            pendingThinking.remove(event.index)?.let { (thinking, signature) ->
+                completed[event.index] = ThinkingContent(thinking.toString(), signature.toString())
+            }
             val call = pending.remove(event.index) ?: return emptyList()
-            toolCall(call.callId, call.name, call.arguments.toString())
+            val events = toolCall(call.callId, call.name, call.arguments.toString())
+            if (events.singleOrNull() is ProviderEvent.ToolCall) {
+                completed[event.index] = ToolUseContent(
+                    call.callId,
+                    call.name,
+                    Json.parseToJsonElement(call.arguments.toString().ifBlank { "{}" }) as JsonObject
+                )
+            }
+            events
         }
 
         is ErrorResponseChunk -> listOf(ProviderEvent.Failed(event.error.message))
@@ -165,6 +201,8 @@ class AnthropicEventAssembler {
 
         else -> emptyList()
     }
+
+    fun replayContent(): List<MessageContent> = completed.values.toList()
 }
 
 object GeminiEventMapper {
@@ -176,11 +214,7 @@ object GeminiEventMapper {
                 events += if (part.thought == true) ProviderEvent.ThinkingDelta(text) else ProviderEvent.TextDelta(text)
             }
             part.functionCall?.let { call ->
-                events += if (call.id == null) {
-                    ProviderEvent.Failed("Gemini returned a function call without an id.")
-                } else {
-                    ProviderEvent.ToolCall(call.id, call.name, call.args)
-                }
+                events += ProviderEvent.ToolCall(call.id ?: java.util.UUID.randomUUID().toString(), call.name, call.args)
             }
         }
         return events

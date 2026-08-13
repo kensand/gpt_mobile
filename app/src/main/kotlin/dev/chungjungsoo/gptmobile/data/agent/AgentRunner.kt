@@ -90,6 +90,10 @@ class AgentRunner(
                     if (completed) emit(AgentRunEvent.Provider(ProviderEvent.Completed))
                     return@withTimeoutOrNull
                 }
+                if (rounds >= limits.maxRounds) {
+                    emit(failed("Agent stopped after ${limits.maxRounds} model/tool rounds."))
+                    return@withTimeoutOrNull
+                }
                 if (toolCallCount + calls.size > limits.maxToolCalls) {
                     emit(failed("Agent stopped before exceeding ${limits.maxToolCalls} tool calls."))
                     return@withTimeoutOrNull
@@ -116,7 +120,7 @@ class AgentRunner(
         }
 
         if (finishedInTime == null) {
-            emit(failed("Agent run timed out after 15 minutes."))
+            emit(failed("Agent run timed out after ${limits.runTimeoutMillis} ms."))
         }
     }
 
@@ -137,7 +141,7 @@ class AgentRunner(
                 tool.execute(call.callId, call.arguments)
             } ?: AgentToolResult(
                 callId = call.callId,
-                content = ToolResultContent.Text("Tool '${call.name}' timed out after 60 seconds."),
+                content = ToolResultContent.Text("Tool '${call.name}' timed out after ${limits.toolTimeoutMillis} ms."),
                 isError = true
             )
             result.copy(content = boundContent(result.content))

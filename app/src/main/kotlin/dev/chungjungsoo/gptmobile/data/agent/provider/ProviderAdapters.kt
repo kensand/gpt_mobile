@@ -7,6 +7,7 @@ import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
 import dev.chungjungsoo.gptmobile.data.agent.ToolResultContent
 import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.MessageContent
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.MessageRole
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.ToolResultContent as AnthropicToolResultContent
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.ToolUseContent
@@ -203,6 +204,7 @@ class AnthropicMessagesAdapter @Inject constructor(
     suspend fun openSession(turns: List<ConversationTurn>, platform: PlatformV2): AgentProviderSession {
         val initialMessages = attachmentEncoder.anthropicMessages(turns, platform.uid)
         val config = ProviderRequestConfig(platform.apiUrl, platform.token)
+        val assistantContentByRound = mutableMapOf<Int, List<MessageContent>>()
         return object : AgentProviderSession {
             override fun streamRound(
                 tools: List<AgentToolDefinition>,
@@ -210,7 +212,9 @@ class AnthropicMessagesAdapter @Inject constructor(
             ): Flow<ProviderEvent> = flow {
                 val request = MessageRequest(
                     model = platform.model,
-                    messages = initialMessages + exchanges.flatMap { it.toAnthropicMessages() },
+                    messages = initialMessages + exchanges.flatMapIndexed { index, exchange ->
+                        exchange.toAnthropicMessages(assistantContentByRound[index])
+                    },
                     maxTokens = if (platform.reasoning) 16000 else 4096,
                     stream = platform.stream,
                     systemPrompt = platform.systemPrompt,
@@ -241,6 +245,7 @@ class AnthropicMessagesAdapter @Inject constructor(
                         }
                     }
                 }
+                assembler.replayContent().takeIf { it.isNotEmpty() }?.let { assistantContentByRound[exchanges.size] = it }
                 if (!failed) emit(ProviderEvent.Completed)
             }
         }
@@ -254,13 +259,16 @@ class GeminiAdapter @Inject constructor(
     suspend fun openSession(turns: List<ConversationTurn>, platform: PlatformV2): AgentProviderSession {
         val initialContents = attachmentEncoder.googleContents(turns, platform.uid)
         val config = ProviderRequestConfig(platform.apiUrl, platform.token)
+        val modelPartsByRound = mutableMapOf<Int, List<Part>>()
         return object : AgentProviderSession {
             override fun streamRound(
                 tools: List<AgentToolDefinition>,
                 exchanges: List<AgentToolExchange>
             ): Flow<ProviderEvent> = flow {
                 val request = GenerateContentRequest(
-                    contents = initialContents + exchanges.flatMap { it.toGeminiContents() },
+                    contents = initialContents + exchanges.flatMapIndexed { index, exchange ->
+                        exchange.toGeminiContents(modelPartsByRound[index])
+                    },
                     generationConfig = GenerationConfig(
                         temperature = platform.temperature,
                         topP = platform.topP,
@@ -286,6 +294,10 @@ class GeminiAdapter @Inject constructor(
                 )
                 var failed = false
                 api.streamGenerateContent(request, platform.model, platform.timeout, config).collect { response ->
+                    val parts = response.candidates.orEmpty().flatMap { it.content?.parts.orEmpty() }
+                    if (parts.isNotEmpty()) {
+                        modelPartsByRound[exchanges.size] = modelPartsByRound[exchanges.size].orEmpty() + parts
+                    }
                     val safetyError = when {
                         response.promptFeedback?.blockReason != null ->
                             "Gemini safety settings blocked the prompt: ${response.promptFeedback.blockReason}"
@@ -333,10 +345,10 @@ private fun dev.chungjungsoo.gptmobile.data.dto.ApiState.toProviderEvent(): Prov
     else -> null
 }
 
-private fun AgentToolExchange.toAnthropicMessages(): List<InputMessage> = listOf(
+private fun AgentToolExchange.toAnthropicMessages(assistantContent: List<MessageContent>?): List<InputMessage> = listOf(
     InputMessage(
         MessageRole.ASSISTANT,
-        calls.map { call -> ToolUseContent(call.callId, call.name, call.arguments) }
+        assistantContent ?: calls.map { call -> ToolUseContent(call.callId, call.name, call.arguments) }
     ),
     InputMessage(
         MessageRole.USER,
@@ -346,20 +358,22 @@ private fun AgentToolExchange.toAnthropicMessages(): List<InputMessage> = listOf
     )
 )
 
-private fun AgentToolExchange.toGeminiContents(): List<Content> {
+private fun AgentToolExchange.toGeminiContents(modelParts: List<Part>?): List<Content> {
     val callsById = calls.associateBy { it.callId }
+    val originalCalls = modelParts.orEmpty().mapNotNull { it.functionCall }
     return listOf(
         Content(
             GoogleRole.MODEL,
-            calls.map { call -> Part(functionCall = FunctionCall(call.callId, call.name, call.arguments)) }
+            modelParts ?: calls.map { call -> Part(functionCall = FunctionCall(call.callId, call.name, call.arguments)) }
         ),
         Content(
             GoogleRole.USER,
             results.mapNotNull { result ->
                 val call = callsById[result.callId] ?: return@mapNotNull null
+                val providerCallId = if (modelParts == null) result.callId else originalCalls.getOrNull(calls.indexOf(call))?.id
                 Part(
                     functionResponse = FunctionResponse(
-                        id = result.callId,
+                        id = providerCallId,
                         name = call.name,
                         response = result.modelJson()
                     )

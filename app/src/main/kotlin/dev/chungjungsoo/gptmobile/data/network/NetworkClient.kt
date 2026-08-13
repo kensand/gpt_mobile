@@ -73,6 +73,7 @@ class NetworkClient @Inject constructor(
         internal fun resolveNetworkLogLevel(): LogLevel = LogLevel.HEADERS
 
         internal fun isSensitiveHeader(header: String): Boolean = header.equals(HttpHeaders.Authorization, ignoreCase = true) ||
-            header.equals("x-goog-api-key", ignoreCase = true)
+            header.equals("x-goog-api-key", ignoreCase = true) ||
+            header.equals("x-api-key", ignoreCase = true)
     }
 }

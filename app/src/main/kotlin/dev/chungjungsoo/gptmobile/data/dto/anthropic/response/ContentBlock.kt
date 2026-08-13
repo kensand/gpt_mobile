@@ -16,6 +16,9 @@ data class ContentBlock(
     @SerialName("thinking")
     val thinking: String? = null,
 
+    @SerialName("signature")
+    val signature: String? = null,
+
     @SerialName("id")
     val id: String? = null,
 
