@@ -12,6 +12,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventError
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import kotlinx.coroutines.runBlocking
@@ -123,7 +124,7 @@ class AgentPersistenceDaoInstrumentedTest {
             assertTrue(cursor.moveToFirst())
             assertEquals("CANCELED", cursor.getString(0))
             assertEquals(300L, cursor.getLong(1))
-            assertEquals("Interrupted when the app stopped.", cursor.getString(2))
+            assertEquals(ToolEventError.INTERRUPTED_APP_STOPPED, cursor.getString(2))
         }
     }
 

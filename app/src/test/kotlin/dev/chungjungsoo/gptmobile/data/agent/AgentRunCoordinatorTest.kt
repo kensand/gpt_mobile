@@ -3,6 +3,7 @@ package dev.chungjungsoo.gptmobile.data.agent
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -12,6 +13,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentRunCoordinatorTest {
+    @Test
+    fun `lazy run cleanup fires when job is canceled before start`() = runTest {
+        val events = mutableListOf<String>()
+        val job = launch(start = CoroutineStart.LAZY) { events += "execute" }
+
+        job.invokeOnCompletionCleanup { events += "cleanup" }
+        job.cancel()
+
+        assertEquals(listOf("cleanup"), events)
+    }
+
     @Test
     fun `cancellation joins the run before applying the terminal fallback`() = runTest {
         val events = mutableListOf<String>()

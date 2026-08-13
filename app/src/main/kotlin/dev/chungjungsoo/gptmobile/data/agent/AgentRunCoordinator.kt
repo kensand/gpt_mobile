@@ -3,6 +3,7 @@ package dev.chungjungsoo.gptmobile.data.agent
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunTerminalError
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 
 data class AgentRunRequest(
@@ -54,6 +56,7 @@ class AgentRunCoordinator @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = ConcurrentHashMap<String, Job>()
+    private val chatLocks = ConcurrentHashMap<Int, Mutex>()
     private val interruptingRunIds = ConcurrentHashMap.newKeySet<String>()
     private val _activeRuns = MutableStateFlow<Map<String, ActiveAgentRun>>(emptyMap())
     private val _notices = MutableSharedFlow<AgentRunNotice>(extraBufferCapacity = 8)
@@ -62,17 +65,26 @@ class AgentRunCoordinator @Inject constructor(
     val notices = _notices.asSharedFlow()
 
     fun start(requests: List<AgentRunRequest>) {
+        scope.launch {
+            withChatGate(requests.map { it.chatId }) {
+                startUnlocked(requests)
+            }
+        }
+    }
+
+    private fun startUnlocked(requests: List<AgentRunRequest>) {
         val pending = requests.distinctBy(AgentRunRequest::runId).mapNotNull { request ->
             val job = scope.launch(start = CoroutineStart.LAZY) {
-                try {
-                    execute(request)
-                } finally {
-                    jobs.remove(request.runId)
-                    interruptingRunIds.remove(request.runId)
-                    _activeRuns.update { it - request.runId }
-                }
+                execute(request)
             }
             if (jobs.putIfAbsent(request.runId, job) == null) {
+                job.invokeOnCompletionCleanup {
+                    runCatching {
+                        jobs.remove(request.runId)
+                        interruptingRunIds.remove(request.runId)
+                        _activeRuns.update { it - request.runId }
+                    }
+                }
                 request to job
             } else {
                 job.cancel()
@@ -126,6 +138,20 @@ class AgentRunCoordinator @Inject constructor(
 
     fun hasActiveRuns(chatId: Int): Boolean = _activeRuns.value.values.any { it.chatId == chatId }
 
+    suspend fun <T> withChatGate(chatId: Int, block: suspend () -> T): T = withChatGate(listOf(chatId), block)
+
+    suspend fun <T> withChatGate(chatIds: List<Int>, block: suspend () -> T): T {
+        val locks = locksFor(chatIds)
+        locks.forEach { it.lock() }
+        return try {
+            block()
+        } finally {
+            locks.asReversed().forEach { it.unlock() }
+        }
+    }
+
+    private fun locksFor(chatIds: List<Int>): List<Mutex> = chatIds.distinct().sorted().map { chatLocks.computeIfAbsent(it) { Mutex() } }
+
     private fun requestCancellation(runIds: Set<String>, isInterrupted: Boolean) {
         if (runIds.isEmpty()) return
         scope.launch {
@@ -144,7 +170,7 @@ class AgentRunCoordinator @Inject constructor(
                         runId = runId,
                         status = if (isInterrupted) AgentRunStatus.INTERRUPTED else AgentRunStatus.CANCELED,
                         completedAt = completedAt,
-                        terminalError = if (isInterrupted) "Foreground agent service stopped." else null
+                        terminalError = if (isInterrupted) AgentRunTerminalError.SERVICE_STOPPED else null
                     )
                 }
             }
@@ -225,7 +251,7 @@ class AgentRunCoordinator @Inject constructor(
                                 request.runId,
                                 if (isInterrupted) AgentRunStatus.INTERRUPTED else AgentRunStatus.CANCELED,
                                 completedAt,
-                                if (isInterrupted) "Foreground agent service stopped." else null
+                                if (isInterrupted) AgentRunTerminalError.SERVICE_STOPPED else null
                             )
                         },
                         persistMessage = {
@@ -288,6 +314,10 @@ internal suspend fun commitTerminalAgentRun(
 internal suspend fun cancelAndJoinAgentRun(job: Job?, finishActiveRun: suspend () -> Unit) {
     job?.cancelAndJoin()
     finishActiveRun()
+}
+
+internal fun Job.invokeOnCompletionCleanup(cleanup: () -> Unit) {
+    invokeOnCompletion { cleanup() }
 }
 
 private fun currentEpochSeconds(): Long = System.currentTimeMillis() / 1000

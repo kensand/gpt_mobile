@@ -109,7 +109,7 @@ interface AgentPersistenceDao {
         UPDATE tool_events
         SET status = 'CANCELED',
             completed_at = :completedAt,
-            error = COALESCE(error, 'Interrupted when the app stopped.')
+            error = COALESCE(error, 'INTERRUPTED_APP_STOPPED')
         WHERE status IN ('PENDING', 'RUNNING')
             AND run_id IN (SELECT run_id FROM agent_runs WHERE status = 'INTERRUPTED')
         """

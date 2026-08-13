@@ -69,6 +69,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,6 +93,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider.getUriForFile
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
@@ -148,11 +151,9 @@ fun ChatScreen(
     val isIdle = loadingStates.all { it == ChatViewModel.LoadingState.Idle }
     val context = LocalContext.current
     val lastMessageIndex = groupedMessages.userMessages.lastIndex
-    var requestedNotificationPermission by remember { mutableStateOf(false) }
-    var sendAfterLocalNetworkPermission by remember { mutableStateOf(false) }
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { requestedNotificationPermission = true }
+    var requestedNotificationPermission by rememberSaveable { mutableStateOf(false) }
+    var sendAfterNotificationPermission by rememberSaveable { mutableStateOf(false) }
+    var sendAfterLocalNetworkPermission by rememberSaveable { mutableStateOf(false) }
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -164,8 +165,30 @@ fun ChatScreen(
         }
         sendAfterLocalNetworkPermission = false
     }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        requestedNotificationPermission = true
+        if (sendAfterNotificationPermission) {
+            if (needsLocalNetworkAccess &&
+                Build.VERSION.SDK_INT >= 37 &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
+            ) {
+                sendAfterLocalNetworkPermission = true
+                localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+            } else {
+                chatViewModel.askQuestion()
+                focusManager.clearFocus()
+            }
+        }
+        sendAfterNotificationPermission = false
+    }
 
     val scope = rememberCoroutineScope()
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        chatViewModel.refreshLocalNetworkRequirement()
+    }
 
     suspend fun animateScrollToLatestMessage() {
         if (lastMessageIndex >= 0) {
@@ -185,16 +208,6 @@ fun ChatScreen(
         attachmentNotice?.let { notice ->
             Toast.makeText(context, notice, Toast.LENGTH_SHORT).show()
             chatViewModel.consumeAttachmentNotice()
-        }
-    }
-
-    LaunchedEffect(isIdle) {
-        if (!isIdle &&
-            !requestedNotificationPermission &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -343,7 +356,13 @@ fun ChatScreen(
                 onFileRemoved = { filePath -> chatViewModel.removeSelectedFile(filePath) },
                 onCancelButtonClick = chatViewModel::cancelActiveRuns
             ) {
-                if (needsLocalNetworkAccess &&
+                if (!requestedNotificationPermission &&
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    sendAfterNotificationPermission = true
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else if (needsLocalNetworkAccess &&
                     Build.VERSION.SDK_INT >= 37 &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
                 ) {

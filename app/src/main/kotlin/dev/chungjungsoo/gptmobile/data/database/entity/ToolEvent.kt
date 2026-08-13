@@ -86,3 +86,7 @@ object ToolEventResultType {
     const val RESOURCE_LINKS = "RESOURCE_LINKS"
     const val UNSUPPORTED = "UNSUPPORTED"
 }
+
+object ToolEventError {
+    const val INTERRUPTED_APP_STOPPED = "INTERRUPTED_APP_STOPPED"
+}

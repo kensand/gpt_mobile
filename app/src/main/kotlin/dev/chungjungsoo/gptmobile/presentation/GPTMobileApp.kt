@@ -15,6 +15,7 @@ import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,7 +46,7 @@ class GPTMobileApp : Application() {
         SanitizedChatBackup.restoreIfPresent(this)
         super.onCreate()
         registerActivityLifecycleCallbacks(AppForegroundTracker)
-        applicationScope.launch {
+        StartupRecoveryGate.start(applicationScope) {
             secretMigrationErrors = runStartupMaintenance(
                 interruptPersistedWork = {
                     val interruptedAt = System.currentTimeMillis() / 1000
@@ -72,6 +73,19 @@ class GPTMobileApp : Application() {
 
     private companion object {
         const val TAG = "GPTMobileApp"
+    }
+}
+
+object StartupRecoveryGate {
+    @Volatile
+    private var job: Job? = null
+
+    fun start(scope: CoroutineScope, block: suspend () -> Unit) {
+        job = scope.launch { block() }
+    }
+
+    suspend fun await() {
+        job?.join()
     }
 }
 

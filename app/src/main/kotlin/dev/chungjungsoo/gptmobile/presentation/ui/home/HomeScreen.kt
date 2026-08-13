@@ -122,7 +122,7 @@ fun HomeScreen(
                 isSelectionMode = chatListState.isSelectionMode,
                 isSearchMode = chatListState.isSearchMode,
                 selectedChats = selectedChatCount,
-                duplicateEnabled = selectedChat?.id !in activeChatIds,
+                duplicateEnabled = selectedChat != null && selectedChat.id !in activeChatIds,
                 scrollBehavior = scrollBehavior,
                 actionOnClick = {
                     if (chatListState.isSelectionMode) {

@@ -115,3 +115,7 @@ object AgentRunStatus {
     const val CANCELED = "CANCELED"
     const val INTERRUPTED = "INTERRUPTED"
 }
+
+object AgentRunTerminalError {
+    const val SERVICE_STOPPED = "SERVICE_STOPPED"
+}

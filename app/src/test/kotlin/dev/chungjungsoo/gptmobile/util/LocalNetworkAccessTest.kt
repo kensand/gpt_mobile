@@ -16,6 +16,8 @@ class LocalNetworkAccessTest {
         assertTrue(requiresLocalNetworkAccess("https://192.168.1.10/mcp"))
         assertTrue(requiresLocalNetworkAccess("https://tools.local/mcp"))
         assertTrue(requiresLocalNetworkAccess("https://ollama:11434"))
+        assertTrue(requiresLocalNetworkAccess("localhost:11434"))
+        assertTrue(requiresLocalNetworkAccess("192.168.1.10:11434"))
     }
 
     @Test

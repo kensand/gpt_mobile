@@ -32,6 +32,7 @@ import dev.chungjungsoo.gptmobile.data.repository.AttachmentUploadCoordinator
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
+import dev.chungjungsoo.gptmobile.presentation.StartupRecoveryGate
 import dev.chungjungsoo.gptmobile.util.AttachmentPayloadCache
 import dev.chungjungsoo.gptmobile.util.FileUtils
 import dev.chungjungsoo.gptmobile.util.buildAssistantErrorContent
@@ -206,6 +207,10 @@ class ChatViewModel @Inject constructor(
 
     fun cancelActiveRuns() {
         _chatRoom.value.id.takeIf { it > 0 }?.let(agentRunCoordinator::cancelChat)
+    }
+
+    fun refreshLocalNetworkRequirement() {
+        fetchEnabledPlatformsInApp()
     }
 
     override fun onCleared() {
@@ -668,92 +673,6 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun launchProviderRun(
-        runId: String,
-        turnIndex: Int,
-        platformIndex: Int,
-        platform: PlatformV2,
-        contextMessages: GroupedMessages
-    ) {
-        viewModelScope.launch {
-            val startedAt = currentTimeStamp
-            try {
-                chatRepository.updateAgentRunStatus(
-                    runId,
-                    AgentRunStatus.RUNNING,
-                    startedAt,
-                    null,
-                    null
-                )
-                val outcome = chatRepository.completeChat(
-                    contextMessages.userMessages,
-                    contextMessages.assistantMessages,
-                    platform,
-                    runId
-                ).handleStates(
-                    messageFlow = _groupedMessages,
-                    turnIndex = turnIndex,
-                    platformIdx = platformIndex,
-                    onLoadingComplete = {},
-                    onNotice = { notice -> _attachmentNotice.update { notice } }
-                )
-                val terminal = outcome.toAgentRunTerminalUpdate()
-                chatRepository.finishAgentRun(
-                    assistantMessage = _groupedMessages.value.assistantMessages[turnIndex][platformIndex],
-                    runId = runId,
-                    status = terminal.status,
-                    startedAt = startedAt,
-                    completedAt = currentTimeStamp,
-                    terminalError = terminal.error
-                )
-            } catch (error: CancellationException) {
-                withContext(NonCancellable) {
-                    runCatching {
-                        chatRepository.updateAgentRunStatus(
-                            runId,
-                            AgentRunStatus.CANCELED,
-                            startedAt,
-                            currentTimeStamp,
-                            null
-                        )
-                    }
-                    runCatching {
-                        chatRepository.saveChat(
-                            chatRoom = _chatRoom.value,
-                            messages = persistableMessages(_groupedMessages.value),
-                            chatPlatformModels = _chatPlatformModels.value
-                        )
-                    }
-                }
-                throw error
-            } catch (error: Throwable) {
-                val message = error.message ?: "Unknown provider error."
-                _groupedMessages.update { groupedMessages ->
-                    updateAssistantSlot(groupedMessages, turnIndex, platformIndex) { assistantMessage ->
-                        assistantMessage.copy(
-                            content = buildAssistantErrorContent(assistantMessage.content, message),
-                            createdAt = currentTimeStamp
-                        )
-                    }
-                }
-                runCatching {
-                    chatRepository.finishAgentRun(
-                        assistantMessage = _groupedMessages.value.assistantMessages[turnIndex][platformIndex],
-                        runId = runId,
-                        status = AgentRunStatus.FAILED,
-                        startedAt = startedAt,
-                        completedAt = currentTimeStamp,
-                        terminalError = message
-                    )
-                }
-            } finally {
-                _loadingStates.update { states ->
-                    states.toMutableList().apply { this[platformIndex] = LoadingState.Idle }
-                }
-            }
-        }
-    }
-
     private fun showPersistenceFailure(turnIndex: Int, platformIndexes: List<Int>, error: Throwable) {
         val message = error.message ?: "Failed to save this turn."
         _groupedMessages.update { groupedMessages ->
@@ -1094,6 +1013,7 @@ class ChatViewModel @Inject constructor(
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun observePersistedMessages() {
         viewModelScope.launch {
+            StartupRecoveryGate.await()
             _chatRoom
                 .map { it.id }
                 .distinctUntilChanged()
@@ -1120,6 +1040,7 @@ class ChatViewModel @Inject constructor(
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeAgentRuns() {
         viewModelScope.launch {
+            StartupRecoveryGate.await()
             _chatRoom
                 .map { it.id }
                 .distinctUntilChanged()
@@ -1165,6 +1086,7 @@ class ChatViewModel @Inject constructor(
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeToolEvents() {
         viewModelScope.launch {
+            StartupRecoveryGate.await()
             _chatRoom
                 .map { it.id }
                 .distinctUntilChanged()

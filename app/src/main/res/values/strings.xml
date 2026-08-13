@@ -381,6 +381,10 @@
         <item quantity="one">%1$d profile running</item>
         <item quantity="other">%1$d profiles running</item>
     </plurals>
+    <plurals name="duration_seconds">
+        <item quantity="one">%1$d s</item>
+        <item quantity="other">%1$d s</item>
+    </plurals>
     <string name="retry_tools_warning">Retry may run assigned tools again.</string>
     <string name="no_matching_tool_calls">No matching tool calls.</string>
     <string name="cancel_active_runs">Cancel active runs</string>
@@ -389,6 +393,8 @@
     <string name="agent_run_canceled">Agent run canceled — partial response kept</string>
     <string name="agent_run_interrupted">Agent run interrupted — tools were not replayed</string>
     <string name="agent_run_failed">Agent run failed</string>
+    <string name="agent_run_error_service_stopped">Foreground agent service stopped.</string>
+    <string name="tool_event_error_interrupted_app_stopped">Interrupted when the app stopped.</string>
     <string name="local_network_permission_required">Local network access is required for this provider or MCP connection.</string>
     <string name="local_network_check_failed">Could not check MCP network access. Local network permission will be requested as a precaution.</string>
 </resources>

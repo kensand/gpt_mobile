@@ -16,4 +16,11 @@ class AgentRunForegroundServiceTest {
         assertFalse(shouldNotifyAgentRunsCompleted(wasActive = true, isActive = false, isAppBackground = false))
         assertFalse(shouldNotifyAgentRunsCompleted(wasActive = true, isActive = true, isAppBackground = true))
     }
+
+    @Test
+    fun `destroy interrupts only while service still owns active runs`() {
+        assertTrue(shouldInterruptAgentRunsOnDestroy(stoppedBecauseInactive = false, hasActiveRuns = true))
+        assertFalse(shouldInterruptAgentRunsOnDestroy(stoppedBecauseInactive = true, hasActiveRuns = false))
+        assertFalse(shouldInterruptAgentRunsOnDestroy(stoppedBecauseInactive = false, hasActiveRuns = false))
+    }
 }

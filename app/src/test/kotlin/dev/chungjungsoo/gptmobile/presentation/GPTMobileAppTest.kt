@@ -6,6 +6,17 @@ import org.junit.Test
 
 class GPTMobileAppTest {
     @Test
+    fun `startup recovery gate waits for current maintenance job`() = runTest {
+        val events = mutableListOf<String>()
+
+        StartupRecoveryGate.start(this) { events += "recover" }
+        StartupRecoveryGate.await()
+        events += "observe"
+
+        assertEquals(listOf("recover", "observe"), events)
+    }
+
+    @Test
     fun `startup interrupts persisted work before migrating credentials`() = runTest {
         val events = mutableListOf<String>()
 

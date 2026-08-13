@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventError
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventStatus
 import java.time.Instant
 import java.util.Locale
@@ -189,8 +191,8 @@ private fun ToolTraceEventCard(event: ToolEvent, labels: ToolTraceLabels) {
             ToolTraceLine(labels.status, event.status)
             ToolTraceLine(labels.callId, event.callId)
             connectionLabel(event)?.let { ToolTraceLine(labels.connection, it) }
-            timingLabel(event, labels)?.let { ToolTraceLine(labels.timing, it) }
-            event.error?.takeIf { it.isNotBlank() }?.let { ToolTraceLine(labels.error, boundedText(it)) }
+            toolTimingLabel(event, labels)?.let { ToolTraceLine(labels.timing, it) }
+            event.error?.takeIf { it.isNotBlank() }?.let { ToolTraceLine(labels.error, toolEventErrorText(it)) }
             ToolTraceBlockText(labels.arguments, event.arguments)
             event.result?.takeIf { it.isNotBlank() }?.let { ToolTraceBlockText(labels.result, it) }
         }
@@ -241,7 +243,7 @@ internal fun filterToolEvents(events: List<ToolEvent>, query: String): List<Tool
             event.arguments,
             event.result,
             event.error,
-            timingLabel(event)
+            timingLabel(event, ToolTraceLabels.Default)
         ).any { normalizedQuery in it.lowercase(Locale.ROOT) }
     }
 }
@@ -266,9 +268,30 @@ internal fun toolTraceStatusSummary(events: List<ToolEvent>, labels: ToolTraceLa
 }
 
 internal fun formatToolDuration(event: ToolEvent): String? {
+    val seconds = toolDurationSeconds(event) ?: return null
+    return "$seconds s"
+}
+
+internal fun toolDurationSeconds(event: ToolEvent): Long? {
     val startedAt = event.startedAt ?: return null
     val completedAt = event.completedAt ?: return null
-    return "${(completedAt - startedAt).coerceAtLeast(0)} s"
+    return (completedAt - startedAt).coerceAtLeast(0)
+}
+
+@Composable
+private fun toolTimingLabel(event: ToolEvent, labels: ToolTraceLabels): String? {
+    val startedAt = event.startedAt
+    val completedAt = event.completedAt
+    return when {
+        startedAt != null && completedAt != null -> {
+            val seconds = toolDurationSeconds(event) ?: return null
+            "${Instant.ofEpochSecond(startedAt)} - ${Instant.ofEpochSecond(completedAt)} (${pluralStringResource(R.plurals.duration_seconds, seconds.toInt(), seconds)})"
+        }
+
+        startedAt != null -> "${labels.startedAt} ${Instant.ofEpochSecond(startedAt)}"
+
+        else -> null
+    }
 }
 
 internal fun formatToolTraceMarkdown(
@@ -310,6 +333,12 @@ private fun timingLabel(event: ToolEvent, labels: ToolTraceLabels): String? {
         startedAt != null -> "${labels.startedAt} ${Instant.ofEpochSecond(startedAt)}"
         else -> null
     }
+}
+
+@Composable
+private fun toolEventErrorText(error: String): String = when (error) {
+    ToolEventError.INTERRUPTED_APP_STOPPED -> stringResource(R.string.tool_event_error_interrupted_app_stopped)
+    else -> boundedText(error)
 }
 
 private fun connectionLabel(event: ToolEvent): String? {

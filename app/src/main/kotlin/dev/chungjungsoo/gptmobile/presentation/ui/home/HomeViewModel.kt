@@ -125,12 +125,15 @@ class HomeViewModel @Inject constructor(
     fun deleteSelectedChats() {
         viewModelScope.launch {
             val selectedChats = _chatListState.value.chats.filterIndexed { index, _ ->
-                _chatListState.value.selectedChats[index]
+                _chatListState.value.selectedChats.getOrElse(index) { false }
             }
 
-            selectedChats.forEach { agentRunCoordinator.cancelChatAndJoin(it.id) }
-            chatRepository.deleteChatsV2(selectedChats)
-            _chatListState.update { it.copy(chats = chatRepository.fetchChatListV2()) }
+            val chats = agentRunCoordinator.withChatGate(selectedChats.map { it.id }) {
+                selectedChats.forEach { agentRunCoordinator.cancelChatAndJoin(it.id) }
+                chatRepository.deleteChatsV2(selectedChats)
+                chatRepository.fetchChatListV2()
+            }
+            _chatListState.update { it.copy(chats = chats) }
             disableSelectionMode()
         }
     }
@@ -138,13 +141,15 @@ class HomeViewModel @Inject constructor(
     fun duplicateSelectedChat() {
         viewModelScope.launch {
             val selectedChats = _chatListState.value.chats.filterIndexed { index, _ ->
-                _chatListState.value.selectedChats[index]
+                _chatListState.value.selectedChats.getOrElse(index) { false }
             }
             val selectedChat = selectedChats.singleOrNull() ?: return@launch
-            if (agentRunCoordinator.hasActiveRuns(selectedChat.id)) return@launch
-
-            chatRepository.duplicateChatV2(selectedChat)
-            _chatListState.update { it.copy(chats = chatRepository.fetchChatListV2()) }
+            val chats = agentRunCoordinator.withChatGate(selectedChat.id) {
+                if (agentRunCoordinator.hasActiveRuns(selectedChat.id)) return@withChatGate null
+                chatRepository.duplicateChatV2(selectedChat)
+                chatRepository.fetchChatListV2()
+            } ?: return@launch
+            _chatListState.update { it.copy(chats = chats) }
             disableSelectionMode()
         }
     }
@@ -201,7 +206,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun selectChat(chatRoomIdx: Int) {
-        if (chatRoomIdx < 0 || chatRoomIdx > _chatListState.value.chats.size) return
+        if (chatRoomIdx < 0 || chatRoomIdx >= _chatListState.value.chats.size) return
 
         _chatListState.update {
             it.copy(

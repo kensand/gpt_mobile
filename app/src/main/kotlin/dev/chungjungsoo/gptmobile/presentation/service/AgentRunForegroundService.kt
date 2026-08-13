@@ -31,23 +31,32 @@ class AgentRunForegroundService : Service() {
     lateinit var coordinator: AgentRunCoordinator
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var stoppedBecauseInactive = false
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         var wasActive = coordinator.activeRuns.value.isNotEmpty()
-        showNotification(coordinator.activeRuns.value.size)
+        if (!showNotification(coordinator.activeRuns.value.size)) {
+            coordinator.interruptAll()
+            stopSelf()
+            return
+        }
         serviceScope.launch {
             coordinator.activeRuns.collectLatest { activeRuns ->
                 val isActive = activeRuns.isNotEmpty()
                 if (!isActive) {
+                    stoppedBecauseInactive = true
                     ServiceCompat.stopForeground(this@AgentRunForegroundService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     if (shouldNotifyAgentRunsCompleted(wasActive, isActive, AppForegroundTracker.isBackgrounded)) {
                         showCompletionNotification()
                     }
                     stopSelf()
                 } else {
-                    showNotification(activeRuns.size)
+                    if (!showNotification(activeRuns.size)) {
+                        coordinator.interruptAll()
+                        stopSelf()
+                    }
                 }
                 wasActive = isActive
             }
@@ -62,7 +71,9 @@ class AgentRunForegroundService : Service() {
     }
 
     override fun onDestroy() {
-        coordinator.interruptAll()
+        if (shouldInterruptAgentRunsOnDestroy(stoppedBecauseInactive, coordinator.activeRuns.value.isNotEmpty())) {
+            coordinator.interruptAll()
+        }
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -75,14 +86,14 @@ class AgentRunForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun showNotification(activeCount: Int) {
+    private fun showNotification(activeCount: Int): Boolean = runCatching {
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
             buildNotification(activeCount.coerceAtLeast(1)),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
-    }
+    }.isSuccess
 
     private fun buildNotification(activeCount: Int): Notification {
         val openApp = buildOpenAppPendingIntent(0)
@@ -120,7 +131,7 @@ class AgentRunForegroundService : Service() {
         .build()
 
     private fun buildOpenAppPendingIntent(requestCode: Int): PendingIntent {
-        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+        val openAppIntent = Intent().setClass(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
@@ -161,3 +172,5 @@ internal fun shouldNotifyAgentRunsCompleted(
     isActive: Boolean,
     isAppBackground: Boolean
 ): Boolean = wasActive && !isActive && isAppBackground
+
+internal fun shouldInterruptAgentRunsOnDestroy(stoppedBecauseInactive: Boolean, hasActiveRuns: Boolean): Boolean = !stoppedBecauseInactive && hasActiveRuns

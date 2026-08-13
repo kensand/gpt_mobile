@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunTerminalError
 
 @Composable
 fun AgentRunStatusBlock(run: AgentRun?, modifier: Modifier = Modifier) {
@@ -34,10 +36,15 @@ fun AgentRunStatusBlock(run: AgentRun?, modifier: Modifier = Modifier) {
         AgentRunStatus.INTERRUPTED -> stringResource(R.string.agent_run_interrupted)
         else -> stringResource(R.string.agent_run_failed)
     }
-    val duration = agentRunDurationSeconds(run)?.let { " · ${it}s" }.orEmpty()
+    val duration = agentRunDurationSeconds(run)
+        ?.let { " · ${pluralStringResource(R.plurals.duration_seconds, it.toInt(), it)}" }
+        .orEmpty()
+    val terminalError = run.terminalError
+        ?.takeIf { it.isNotBlank() }
+        ?.let { agentRunTerminalErrorText(it) }
 
     Card(
-        modifier = modifier.semantics { contentDescription = status },
+        modifier = modifier.semantics { contentDescription = listOfNotNull(status + duration, terminalError).joinToString(". ") },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -52,7 +59,7 @@ fun AgentRunStatusBlock(run: AgentRun?, modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            run.terminalError?.takeIf { it.isNotBlank() }?.let { error ->
+            terminalError?.let { error ->
                 Text(
                     text = error,
                     style = MaterialTheme.typography.bodySmall,
@@ -64,6 +71,12 @@ fun AgentRunStatusBlock(run: AgentRun?, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+@Composable
+private fun agentRunTerminalErrorText(error: String): String = when (error) {
+    AgentRunTerminalError.SERVICE_STOPPED -> stringResource(R.string.agent_run_error_service_stopped)
+    else -> error
 }
 
 internal fun agentRunDurationSeconds(run: AgentRun): Long? {

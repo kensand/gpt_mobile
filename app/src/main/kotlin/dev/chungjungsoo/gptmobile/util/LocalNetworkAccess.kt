@@ -4,7 +4,7 @@ import java.net.URI
 import kotlinx.coroutines.CancellationException
 
 internal fun requiresLocalNetworkAccess(url: String): Boolean {
-    val host = runCatching { URI(url.trim()).host }
+    val host = runCatching { URI(normalizeEndpointForHostCheck(url)).host }
         .getOrNull()
         ?.trim('[', ']')
         ?.trimEnd('.')
@@ -33,6 +33,12 @@ internal fun requiresLocalNetworkAccess(url: String): Boolean {
         host.startsWith("feb") ||
         host.startsWith("fc") ||
         host.startsWith("fd")
+}
+
+private fun normalizeEndpointForHostCheck(url: String): String {
+    val trimmed = url.trim()
+    if ("://" in trimmed) return trimmed
+    return "http://$trimmed"
 }
 
 private fun parseIpv4(host: String): List<Int>? {
