@@ -45,6 +45,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
+import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
 import java.io.File
 
@@ -92,6 +94,8 @@ fun OpponentChatBubble(
     text: String,
     thoughts: String = "",
     attachments: List<String> = emptyList(),
+    agentRun: AgentRun? = null,
+    toolEvents: List<ToolEvent> = emptyList(),
     contentIdentity: Any = text,
     canEdit: Boolean = false,
     revisionIndexLabel: String? = null,
@@ -115,6 +119,11 @@ fun OpponentChatBubble(
     val isThinking = isLoading && thoughts.isNotBlank() && text.isBlank()
 
     Column(modifier = modifier) {
+        AgentRunStatusBlock(
+            run = agentRun,
+            modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp)
+        )
+
         // Thinking block (collapsed by default)
         if (thoughts.isNotBlank()) {
             ThinkingBlock(
@@ -124,6 +133,12 @@ fun OpponentChatBubble(
                 isLoading = isThinking
             )
         }
+
+        ToolTraceBlock(
+            events = toolEvents,
+            modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp),
+            contentIdentity = contentIdentity
+        )
 
         Column {
             Card(
@@ -165,6 +180,14 @@ fun OpponentChatBubble(
                         Spacer(modifier = Modifier.width(8.dp))
                         RetryIcon(onRetryClick)
                     }
+                }
+                if (canRetry) {
+                    Text(
+                        text = stringResource(R.string.retry_tools_warning),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+                    )
                 }
 
                 revisionIndexLabel?.let { label ->

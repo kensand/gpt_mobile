@@ -5,6 +5,7 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -22,7 +23,29 @@ data class GenerateContentRequest(
 
     @SerialName("safetySettings")
     @EncodeDefault(EncodeDefault.Mode.NEVER)
-    val safetySettings: List<SafetySetting>? = null
+    val safetySettings: List<SafetySetting>? = null,
+
+    @SerialName("tools")
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val tools: List<GoogleTool>? = null
+)
+
+@Serializable
+data class GoogleTool(
+    @SerialName("functionDeclarations")
+    val functionDeclarations: List<FunctionDeclaration>
+)
+
+@Serializable
+data class FunctionDeclaration(
+    @SerialName("name")
+    val name: String,
+
+    @SerialName("description")
+    val description: String,
+
+    @SerialName("parameters")
+    val parameters: JsonObject
 )
 
 @OptIn(ExperimentalSerializationApi::class)

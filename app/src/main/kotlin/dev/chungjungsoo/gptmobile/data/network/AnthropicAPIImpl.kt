@@ -1,6 +1,5 @@
 package dev.chungjungsoo.gptmobile.data.network
 
-import dev.chungjungsoo.gptmobile.data.ModelConstants
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.request.MessageRequest
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.response.ErrorDetail
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.response.ErrorResponseChunk
@@ -24,6 +23,7 @@ import io.ktor.http.isSuccess
 import io.ktor.utils.io.readLine
 import java.io.File
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -34,10 +34,6 @@ import kotlinx.serialization.json.Json
 class AnthropicAPIImpl @Inject constructor(
     private val networkClient: NetworkClient
 ) : AnthropicAPI {
-
-    private var token: String? = null
-    private var apiUrl: String = ModelConstants.ANTHROPIC_API_URL
-
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -45,15 +41,13 @@ class AnthropicAPIImpl @Inject constructor(
         explicitNulls = false
     }
 
-    override fun setToken(token: String?) {
-        this.token = token
-    }
-
-    override fun setAPIUrl(url: String) {
-        this.apiUrl = url
-    }
-
-    override suspend fun uploadFile(filePath: String, fileName: String, mimeType: String): UploadedProviderFile {
+    override suspend fun uploadFile(
+        filePath: String,
+        fileName: String,
+        mimeType: String,
+        config: ProviderRequestConfig
+    ): UploadedProviderFile {
+        val apiUrl = config.apiUrl
         val endpoint = if (apiUrl.endsWith("/")) "${apiUrl}files" else "$apiUrl/files"
         val responseBody = networkClient().preparePost(endpoint) {
             setBody(
@@ -71,7 +65,7 @@ class AnthropicAPIImpl @Inject constructor(
                 )
             )
             headers {
-                append(API_KEY_HEADER, token ?: "")
+                append(API_KEY_HEADER, config.token ?: "")
                 append(VERSION_HEADER, ANTHROPIC_VERSION)
                 append(BETA_HEADER, ANTHROPIC_FILES_BETA)
             }
@@ -85,12 +79,13 @@ class AnthropicAPIImpl @Inject constructor(
         )
     }
 
-    override suspend fun isFileAvailable(fileId: String): Boolean {
+    override suspend fun isFileAvailable(fileId: String, config: ProviderRequestConfig): Boolean {
+        val apiUrl = config.apiUrl
         val endpoint = if (apiUrl.endsWith("/")) "${apiUrl}files/$fileId" else "$apiUrl/files/$fileId"
         return try {
             networkClient().prepareGet(endpoint) {
                 headers {
-                    append(API_KEY_HEADER, token ?: "")
+                    append(API_KEY_HEADER, config.token ?: "")
                     append(VERSION_HEADER, ANTHROPIC_VERSION)
                     append(BETA_HEADER, ANTHROPIC_FILES_BETA)
                 }
@@ -102,8 +97,13 @@ class AnthropicAPIImpl @Inject constructor(
         }
     }
 
-    override fun streamChatMessage(messageRequest: MessageRequest, timeoutSeconds: Int): Flow<MessageResponseChunk> = flow {
+    override fun streamChatMessage(
+        messageRequest: MessageRequest,
+        timeoutSeconds: Int,
+        config: ProviderRequestConfig
+    ): Flow<MessageResponseChunk> = flow {
         try {
+            val apiUrl = config.apiUrl
             val endpoint = if (apiUrl.endsWith("/")) "${apiUrl}messages" else "$apiUrl/messages"
 
             networkClient().preparePost(endpoint) {
@@ -112,12 +112,13 @@ class AnthropicAPIImpl @Inject constructor(
                 setBody(json.encodeToString(messageRequest))
                 accept(ContentType.Text.EventStream)
                 headers {
-                    append(API_KEY_HEADER, token ?: "")
+                    append(API_KEY_HEADER, config.token ?: "")
                     append(VERSION_HEADER, ANTHROPIC_VERSION)
                     append(BETA_HEADER, ANTHROPIC_FILES_BETA)
                 }
             }.execute { response ->
                 if (!response.status.isSuccess()) {
+                    throwIfToolDefinitionsRejected(response.status.value, !messageRequest.tools.isNullOrEmpty())
                     val errorBody = response.body<String>()
 
                     val errorMessage = try {
@@ -147,6 +148,7 @@ class AnthropicAPIImpl @Inject constructor(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException || e is dev.chungjungsoo.gptmobile.data.agent.ToolDefinitionsRejectedException) throw e
             val errorMessage = when (e) {
                 is java.net.UnknownHostException -> "Network error: Unable to resolve host."
                 is java.nio.channels.UnresolvedAddressException -> "Network error: Unable to resolve address. Check your internet connection."

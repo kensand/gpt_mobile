@@ -4,10 +4,24 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
+import dev.chungjungsoo.gptmobile.data.agent.tool.namespaceMcpToolName
+import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
+import dev.chungjungsoo.gptmobile.data.database.entity.BuiltInAgentTool
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
+import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
+import dev.chungjungsoo.gptmobile.data.repository.ToolBindingSelection
+import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
+import dev.chungjungsoo.gptmobile.data.security.SecretVault
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,8 +31,12 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class PlatformSettingViewModel @Inject constructor(
     private val settingRepository: SettingRepository,
+    toolConnectionDao: ToolConnectionDao,
+    secretVault: SecretVault,
+    private val agentToolResolver: AgentToolResolver,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+    private val toolConnectionRepository = ToolConnectionRepository(toolConnectionDao, secretVault)
 
     private val platformUid: String = checkNotNull(savedStateHandle["platformUid"])
 
@@ -31,8 +49,13 @@ class PlatformSettingViewModel @Inject constructor(
     private val _isDeleted = MutableStateFlow(false)
     val isDeleted: StateFlow<Boolean> = _isDeleted.asStateFlow()
 
+    private val _toolBindingState = MutableStateFlow(ToolBindingState())
+    val toolBindingState: StateFlow<ToolBindingState> = _toolBindingState.asStateFlow()
+    private var mcpDiscoveryJob: Job? = null
+
     init {
         loadPlatform()
+        loadToolBindings()
     }
 
     private fun loadPlatform() {
@@ -40,6 +63,33 @@ class PlatformSettingViewModel @Inject constructor(
             val platforms = settingRepository.fetchPlatformV2s()
             val platform = platforms.firstOrNull { it.uid == platformUid }
             _platformState.update { platform }
+        }
+    }
+
+    fun loadToolBindings() {
+        viewModelScope.launch {
+            runCatching {
+                val connections = toolConnectionRepository.listConnections()
+                val bindings = toolConnectionRepository.listBindingsByProfile(platformUid)
+                val mcpConnections = connections.filter { it.type == ToolConnectionType.MCP }
+                val mcpConnectionUids = mcpConnections.map { it.connectionUid }.toSet()
+                val searchConnections = connections.filter { it.type in WEB_SEARCH_TYPES }
+                val searchConnectionUids = searchConnections.map { it.connectionUid }.toSet()
+                ToolBindingState(
+                    searchConnections = searchConnections,
+                    selectedSearchConnectionUid = bindings.firstOrNull {
+                        it.toolName == WEB_SEARCH_TOOL && it.connectionUid in searchConnectionUids
+                    }?.connectionUid,
+                    readUrlEnabled = bindings.any { it.toolName == BuiltInAgentTool.READ_URL && it.connectionUid == null },
+                    mcpConnections = mcpConnections,
+                    selectedMcpTools = bindings.mapNotNull { binding ->
+                        binding.connectionUid?.takeIf { it in mcpConnectionUids }?.let { ToolBindingSelection(it, binding.toolName) }
+                    }.toSet(),
+                    errorMessage = null
+                )
+            }.onSuccess { state ->
+                _toolBindingState.update { state }
+            }.onFailure(::showToolError)
         }
     }
 
@@ -178,6 +228,130 @@ class PlatformSettingViewModel @Inject constructor(
         }
     }
 
+    fun openSearchBackendDialog() = _toolBindingState.update { it.copy(isSearchBackendDialogOpen = true) }
+    fun closeSearchBackendDialog() = _toolBindingState.update { it.copy(isSearchBackendDialogOpen = false) }
+    fun clearToolError() = _toolBindingState.update { it.copy(errorMessage = null) }
+
+    fun selectSearchBackend(connectionUid: String?) {
+        viewModelScope.launch {
+            runCatching {
+                if (connectionUid == null) {
+                    toolConnectionRepository.removeWebSearchBinding(platformUid)
+                } else {
+                    toolConnectionRepository.replaceWebSearchBinding(platformUid, connectionUid)
+                }
+            }
+                .onSuccess {
+                    _toolBindingState.update {
+                        it.copy(selectedSearchConnectionUid = connectionUid, isSearchBackendDialogOpen = false, errorMessage = null)
+                    }
+                }
+                .onFailure(::showToolError)
+        }
+    }
+
+    fun toggleReadUrl(enabled: Boolean) {
+        viewModelScope.launch {
+            runCatching { toolConnectionRepository.setReadUrlBinding(platformUid, enabled) }
+                .onSuccess {
+                    _toolBindingState.update { it.copy(readUrlEnabled = enabled, errorMessage = null) }
+                }
+                .onFailure(::showToolError)
+        }
+    }
+
+    fun openMcpToolsDialog() {
+        mcpDiscoveryJob?.cancel()
+        val connections = _toolBindingState.value.mcpConnections
+        _toolBindingState.update {
+            it.copy(
+                isMcpToolsDialogOpen = true,
+                isMcpToolsLoading = true,
+                mcpToolOptions = emptyList(),
+                pendingMcpTools = it.selectedMcpTools,
+                errorMessage = null
+            )
+        }
+        mcpDiscoveryJob = viewModelScope.launch {
+            try {
+                val results = coroutineScope {
+                    connections.map { connection ->
+                        async { connection to discoverMcpTools(connection) }
+                    }.awaitAll()
+                }
+                val options = results.flatMap { (connection, result) ->
+                    result.getOrDefault(emptyList()).map { tool ->
+                        McpToolOption(
+                            connectionUid = connection.connectionUid,
+                            connectionName = connection.name,
+                            toolName = tool.name,
+                            modelToolName = namespaceMcpToolName(connection.alias, tool.name),
+                            description = tool.description
+                        )
+                    }
+                }.sortedWith(compareBy<McpToolOption> { it.connectionName }.thenBy { it.toolName })
+                val failures = results.mapNotNull { (connection, result) ->
+                    result.exceptionOrNull()?.let { "${connection.name}: ${it.message ?: "discovery failed"}" }
+                }
+                _toolBindingState.update {
+                    it.copy(
+                        isMcpToolsLoading = false,
+                        mcpToolOptions = options,
+                        errorMessage = failures.takeIf(List<String>::isNotEmpty)?.joinToString("\n")
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            }
+        }
+    }
+
+    fun closeMcpToolsDialog() {
+        mcpDiscoveryJob?.cancel()
+        _toolBindingState.update { it.copy(isMcpToolsDialogOpen = false, isMcpToolsLoading = false) }
+    }
+
+    private suspend fun discoverMcpTools(connection: ToolConnection) = try {
+        Result.success(agentToolResolver.discoverMcpTools(connection))
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
+
+    fun toggleMcpTool(connectionUid: String, toolName: String) {
+        val selection = ToolBindingSelection(connectionUid, toolName)
+        _toolBindingState.update { state ->
+            state.copy(
+                pendingMcpTools = state.pendingMcpTools.toMutableSet().apply {
+                    if (!add(selection)) remove(selection)
+                }
+            )
+        }
+    }
+
+    fun saveMcpTools() {
+        val selections = _toolBindingState.value.pendingMcpTools
+            .sortedWith(compareBy<ToolBindingSelection> { it.connectionUid }.thenBy { it.toolName })
+        viewModelScope.launch {
+            runCatching { toolConnectionRepository.replaceMcpToolBindings(platformUid, selections) }
+                .onSuccess {
+                    _toolBindingState.update {
+                        it.copy(
+                            selectedMcpTools = selections.toSet(),
+                            isMcpToolsDialogOpen = false,
+                            errorMessage = null
+                        )
+                    }
+                }
+                .onFailure(::showToolError)
+        }
+    }
+
+    private fun showToolError(error: Throwable) {
+        _toolBindingState.update { it.copy(errorMessage = error.message ?: "Tool binding update failed.") }
+    }
+
     data class DialogState(
         val isPlatformNameDialogOpen: Boolean = false,
         val isApiUrlDialogOpen: Boolean = false,
@@ -190,4 +364,31 @@ class PlatformSettingViewModel @Inject constructor(
         val isGeminiSafetyDialogOpen: Boolean = false,
         val isDeleteDialogOpen: Boolean = false
     )
+
+    data class ToolBindingState(
+        val searchConnections: List<ToolConnection> = emptyList(),
+        val selectedSearchConnectionUid: String? = null,
+        val readUrlEnabled: Boolean = false,
+        val mcpConnections: List<ToolConnection> = emptyList(),
+        val selectedMcpTools: Set<ToolBindingSelection> = emptySet(),
+        val pendingMcpTools: Set<ToolBindingSelection> = emptySet(),
+        val mcpToolOptions: List<McpToolOption> = emptyList(),
+        val isSearchBackendDialogOpen: Boolean = false,
+        val isMcpToolsDialogOpen: Boolean = false,
+        val isMcpToolsLoading: Boolean = false,
+        val errorMessage: String? = null
+    )
+
+    data class McpToolOption(
+        val connectionUid: String,
+        val connectionName: String,
+        val toolName: String,
+        val modelToolName: String,
+        val description: String?
+    )
+
+    companion object {
+        private const val WEB_SEARCH_TOOL = "web_search"
+        private val WEB_SEARCH_TYPES = setOf(ToolConnectionType.FIRECRAWL, ToolConnectionType.PERPLEXITY, ToolConnectionType.EXA)
+    }
 }

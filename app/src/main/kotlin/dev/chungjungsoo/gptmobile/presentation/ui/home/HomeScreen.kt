@@ -90,11 +90,13 @@ fun HomeScreen(
     val showSelectModelDialog by homeViewModel.showSelectModelDialog.collectAsStateWithLifecycle()
     val showDeleteWarningDialog by homeViewModel.showDeleteWarningDialog.collectAsStateWithLifecycle()
     val platformState by homeViewModel.platformState.collectAsStateWithLifecycle()
+    val activeChatIds by homeViewModel.activeChatIds.collectAsStateWithLifecycle()
     val searchQuery by homeViewModel.searchQuery.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val selectedChatCount = chatListState.selectedChats.count { it }
+    val selectedChat = chatListState.chats.filterIndexed { index, _ -> chatListState.selectedChats.getOrElse(index) { false } }.singleOrNull()
     val duplicatedChatMessage = stringResource(R.string.duplicated_chat)
     val deletedChatsMessage = stringResource(R.string.deleted_chats, selectedChatCount)
 
@@ -120,6 +122,7 @@ fun HomeScreen(
                 isSelectionMode = chatListState.isSelectionMode,
                 isSearchMode = chatListState.isSearchMode,
                 selectedChats = selectedChatCount,
+                duplicateEnabled = selectedChat != null && selectedChat.id !in activeChatIds,
                 scrollBehavior = scrollBehavior,
                 actionOnClick = {
                     if (chatListState.isSelectionMode) {
@@ -255,6 +258,7 @@ fun HomeTopAppBar(
     isSelectionMode: Boolean,
     isSearchMode: Boolean,
     selectedChats: Int,
+    duplicateEnabled: Boolean,
     scrollBehavior: TopAppBarScrollBehavior,
     actionOnClick: () -> Unit,
     duplicateOnClick: () -> Unit,
@@ -363,7 +367,7 @@ fun HomeTopAppBar(
                     if (selectedChats == 1) {
                         IconButton(
                             modifier = Modifier.padding(4.dp),
-                            enabled = true,
+                            enabled = duplicateEnabled,
                             onClick = duplicateOnClick
                         ) {
                             Icon(

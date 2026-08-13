@@ -31,6 +31,9 @@ data class PlatformV2(
     @ColumnInfo(name = "token")
     val token: String? = null,
 
+    @ColumnInfo(name = "secret_ref")
+    val secretRef: String? = null,
+
     @ColumnInfo(name = "model")
     val model: String,
 

@@ -1,8 +1,13 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +23,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
@@ -44,17 +53,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.presentation.common.RadioItem
 import dev.chungjungsoo.gptmobile.presentation.common.SettingItem
 import dev.chungjungsoo.gptmobile.util.formatPlatformTimeout
 import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
+import dev.chungjungsoo.gptmobile.util.requiresLocalNetworkAccess
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +86,19 @@ fun PlatformSettingScreen(
     val platform by settingViewModel.platformState.collectAsStateWithLifecycle()
     val dialogState by settingViewModel.dialogState.collectAsStateWithLifecycle()
     val isDeleted by settingViewModel.isDeleted.collectAsStateWithLifecycle()
+    val toolBindingState by settingViewModel.toolBindingState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var openMcpToolsAfterPermission by remember { mutableStateOf(false) }
+    val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted && openMcpToolsAfterPermission) {
+            settingViewModel.openMcpToolsDialog()
+        } else if (!granted) {
+            Toast.makeText(context, R.string.local_network_permission_required, Toast.LENGTH_SHORT).show()
+        }
+        openMcpToolsAfterPermission = false
+    }
 
     LaunchedEffect(isDeleted) {
         if (isDeleted) {
@@ -249,6 +278,47 @@ fun PlatformSettingScreen(
                     isChecked = platformData.reasoning,
                     onCheckedChange = { settingViewModel.toggleReasoning() }
                 )
+                SettingItem(
+                    modifier = Modifier.height(64.dp),
+                    title = stringResource(R.string.search_backend),
+                    description = toolBindingState.searchConnections.firstOrNull {
+                        it.connectionUid == toolBindingState.selectedSearchConnectionUid
+                    }?.name ?: stringResource(R.string.none),
+                    enabled = platformData.enabled,
+                    onItemClick = settingViewModel::openSearchBackendDialog,
+                    showTrailingIcon = true,
+                    showLeadingIcon = false
+                )
+                PreferenceListSwitch(
+                    modifier = Modifier.height(64.dp),
+                    title = stringResource(R.string.read_url),
+                    icon = ImageVector.vectorResource(id = R.drawable.ic_link),
+                    enabled = true,
+                    isChecked = toolBindingState.readUrlEnabled,
+                    onCheckedChange = settingViewModel::toggleReadUrl
+                )
+                SettingItem(
+                    modifier = Modifier.height(64.dp),
+                    title = stringResource(R.string.mcp_tools),
+                    description = stringResource(R.string.mcp_tools_assigned, toolBindingState.selectedMcpTools.size),
+                    enabled = platformData.enabled,
+                    onItemClick = {
+                        val needsPermission = toolBindingState.mcpConnections.any { connection ->
+                            connection.endpointUrl?.let(::requiresLocalNetworkAccess) == true
+                        }
+                        if (needsPermission &&
+                            Build.VERSION.SDK_INT >= 37 &&
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            openMcpToolsAfterPermission = true
+                            localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                        } else {
+                            settingViewModel.openMcpToolsDialog()
+                        }
+                    },
+                    showTrailingIcon = true,
+                    showLeadingIcon = false
+                )
 
                 PlatformNameDialog(dialogState, platformData.name, settingViewModel)
                 APIUrlDialog(dialogState, platformData.apiUrl, settingViewModel)
@@ -260,8 +330,130 @@ fun PlatformSettingScreen(
                 TimeoutDialog(dialogState, platformData.timeout, settingViewModel)
                 GeminiSafetySettingsDialog(dialogState, platformData, settingViewModel)
                 DeletePlatformDialog(dialogState, settingViewModel)
+                SearchBackendDialog(toolBindingState, settingViewModel)
+                McpToolsDialog(toolBindingState, settingViewModel)
+                toolBindingState.errorMessage?.let { message ->
+                    AlertDialog(
+                        title = { Text(stringResource(R.string.error)) },
+                        text = { Text(message) },
+                        onDismissRequest = settingViewModel::clearToolError,
+                        confirmButton = {
+                            TextButton(onClick = settingViewModel::clearToolError) {
+                                Text(stringResource(R.string.close))
+                            }
+                        }
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun McpToolsDialog(
+    toolBindingState: PlatformSettingViewModel.ToolBindingState,
+    settingViewModel: PlatformSettingViewModel
+) {
+    if (!toolBindingState.isMcpToolsDialogOpen) return
+    AlertDialog(
+        title = { Text(stringResource(R.string.mcp_tools)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                when {
+                    toolBindingState.mcpConnections.isEmpty() -> Text(stringResource(R.string.no_mcp_connections))
+
+                    toolBindingState.isMcpToolsLoading -> CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .semantics { contentDescription = "Discovering MCP tools" }
+                    )
+
+                    toolBindingState.mcpToolOptions.isEmpty() -> Text(stringResource(R.string.no_mcp_tools))
+
+                    else -> toolBindingState.mcpToolOptions.forEach { option ->
+                        val selected = toolBindingState.pendingMcpTools.any {
+                            it.connectionUid == option.connectionUid && it.toolName == option.toolName
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .toggleable(
+                                    value = selected,
+                                    onValueChange = { settingViewModel.toggleMcpTool(option.connectionUid, option.toolName) }
+                                )
+                                .semantics { contentDescription = "${option.connectionName} ${option.toolName}" }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(checked = selected, onCheckedChange = null)
+                            Column(Modifier.padding(start = 8.dp)) {
+                                Text("${option.connectionName} · ${option.toolName}")
+                                Text(
+                                    option.description ?: option.modelToolName,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        onDismissRequest = settingViewModel::closeMcpToolsDialog,
+        confirmButton = {
+            TextButton(
+                enabled = !toolBindingState.isMcpToolsLoading,
+                onClick = settingViewModel::saveMcpTools
+            ) {
+                Text(stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = settingViewModel::closeMcpToolsDialog) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun SearchBackendDialog(
+    toolBindingState: PlatformSettingViewModel.ToolBindingState,
+    settingViewModel: PlatformSettingViewModel
+) {
+    if (toolBindingState.isSearchBackendDialogOpen) {
+        AlertDialog(
+            title = { Text(stringResource(R.string.search_backend)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    RadioItem(
+                        modifier = Modifier.semantics { contentDescription = "Search backend None" },
+                        title = stringResource(R.string.none),
+                        description = null,
+                        value = "",
+                        selected = toolBindingState.selectedSearchConnectionUid == null
+                    ) {
+                        settingViewModel.selectSearchBackend(null)
+                    }
+                    toolBindingState.searchConnections.forEach { connection ->
+                        RadioItem(
+                            modifier = Modifier.semantics { contentDescription = "Search backend ${connection.name}" },
+                            title = connection.name,
+                            description = connection.alias,
+                            value = connection.connectionUid,
+                            selected = toolBindingState.selectedSearchConnectionUid == connection.connectionUid
+                        ) {
+                            settingViewModel.selectSearchBackend(connection.connectionUid)
+                        }
+                    }
+                }
+            },
+            onDismissRequest = settingViewModel::closeSearchBackendDialog,
+            confirmButton = {
+                TextButton(onClick = settingViewModel::closeSearchBackendDialog) {
+                    Text(stringResource(R.string.close))
+                }
+            }
+        )
     }
 }
 
@@ -327,36 +519,57 @@ fun ExtendedThinkingSwitch(
     isChecked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    val clickableModifier = if (enabled) {
-        modifier
-            .fillMaxWidth()
-            .clickable(onClick = { onCheckedChange(!isChecked) })
-            .padding(horizontal = 8.dp)
-    } else {
-        modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-    }
+    PreferenceListSwitch(
+        modifier = modifier,
+        title = stringResource(R.string.extended_thinking),
+        description = stringResource(R.string.extended_thinking_description),
+        icon = ImageVector.vectorResource(id = R.drawable.ic_model),
+        enabled = enabled,
+        isChecked = isChecked,
+        onCheckedChange = onCheckedChange
+    )
+}
+
+@Composable
+private fun PreferenceListSwitch(
+    modifier: Modifier,
+    title: String,
+    description: String? = null,
+    icon: ImageVector,
+    enabled: Boolean,
+    isChecked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
     val colors = ListItemDefaults.colors()
 
     ListItem(
-        modifier = clickableModifier,
+        modifier = modifier
+            .fillMaxWidth()
+            .toggleable(
+                value = isChecked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
+            .padding(horizontal = 8.dp),
         headlineContent = {
             Text(
-                text = stringResource(R.string.extended_thinking),
+                text = title,
                 overflow = TextOverflow.Ellipsis
             )
         },
-        supportingContent = {
-            Text(
-                text = stringResource(R.string.extended_thinking_description),
-                overflow = TextOverflow.Ellipsis
-            )
+        supportingContent = description?.let {
+            {
+                Text(
+                    text = description,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         },
         leadingContent = {
             Icon(
-                imageVector = ImageVector.vectorResource(id = R.drawable.ic_model),
-                contentDescription = stringResource(R.string.extended_thinking)
+                imageVector = icon,
+                contentDescription = title
             )
         },
         trailingContent = {

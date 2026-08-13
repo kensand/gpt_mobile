@@ -11,16 +11,61 @@ import kotlinx.coroutines.flow.update
 
 private const val STREAM_PUBLISH_INTERVAL_MILLIS = 50L
 
+sealed interface ApiStateFlowOutcome {
+    data object Completed : ApiStateFlowOutcome
+    data class Failed(val message: String) : ApiStateFlowOutcome
+    data object Incomplete : ApiStateFlowOutcome
+}
+
 suspend fun Flow<ApiState>.handleStates(
     messageFlow: MutableStateFlow<ChatViewModel.GroupedMessages>,
     turnIndex: Int,
     platformIdx: Int,
     onLoadingComplete: () -> Unit,
+    onNotice: (String) -> Unit = {},
     nanoTimeProvider: () -> Long = System::nanoTime,
     currentTimeProvider: () -> Long = { System.currentTimeMillis() / 1000 },
     revisionToAppendOnSuccess: AssistantRevision? = null
-) {
-    val buffer = StreamingMessageBuffer(nanoTimeProvider = nanoTimeProvider)
+): ApiStateFlowOutcome {
+    try {
+        val outcome = collectApiStateUpdates(
+            onUpdate = { content, thoughts ->
+                messageFlow.setBufferedText(turnIndex, platformIdx, content, thoughts)
+            },
+            onNotice = onNotice,
+            nanoTimeProvider = nanoTimeProvider
+        )
+        when (outcome) {
+            is ApiStateFlowOutcome.Failed -> messageFlow.setErrorMessage(
+                turnIndex = turnIndex,
+                platformIdx = platformIdx,
+                error = outcome.message,
+                currentTimeProvider = currentTimeProvider,
+                revisionToAppend = revisionToAppendOnSuccess
+            )
+
+            ApiStateFlowOutcome.Completed -> messageFlow.setTimestamp(
+                turnIndex = turnIndex,
+                platformIdx = platformIdx,
+                currentTimeProvider = currentTimeProvider,
+                revisionToAppend = revisionToAppendOnSuccess
+            )
+
+            ApiStateFlowOutcome.Incomplete -> Unit
+        }
+        return outcome
+    } finally {
+        onLoadingComplete()
+    }
+}
+
+internal suspend fun Flow<ApiState>.collectApiStateUpdates(
+    onUpdate: suspend (content: String, thoughts: String) -> Unit,
+    onNotice: (String) -> Unit = {},
+    nanoTimeProvider: () -> Long = System::nanoTime,
+    publishIntervalMillis: Long = STREAM_PUBLISH_INTERVAL_MILLIS
+): ApiStateFlowOutcome {
+    val buffer = StreamingMessageBuffer(nanoTimeProvider, publishIntervalMillis)
     var isCompletedSuccessfully = false
     var terminalError: String? = null
 
@@ -29,13 +74,15 @@ suspend fun Flow<ApiState>.handleStates(
             when (chunk) {
                 is ApiState.Thinking -> {
                     buffer.appendThought(chunk.thinkingChunk)
-                    buffer.publishIfDue(messageFlow, turnIndex, platformIdx)
+                    buffer.publishIfDue(onUpdate)
                 }
 
                 is ApiState.Success -> {
                     buffer.appendContent(chunk.textChunk)
-                    buffer.publishIfDue(messageFlow, turnIndex, platformIdx)
+                    buffer.publishIfDue(onUpdate)
                 }
+
+                is ApiState.Notice -> onNotice(chunk.message)
 
                 ApiState.Done -> {
                     isCompletedSuccessfully = true
@@ -49,29 +96,19 @@ suspend fun Flow<ApiState>.handleStates(
             }
         }
     } finally {
-        buffer.flush(messageFlow, turnIndex, platformIdx)
-        when {
-            terminalError != null -> messageFlow.setErrorMessage(
-                turnIndex = turnIndex,
-                platformIdx = platformIdx,
-                error = terminalError,
-                currentTimeProvider = currentTimeProvider,
-                revisionToAppend = revisionToAppendOnSuccess
-            )
+        buffer.flush(onUpdate)
+    }
 
-            isCompletedSuccessfully -> messageFlow.setTimestamp(
-                turnIndex = turnIndex,
-                platformIdx = platformIdx,
-                currentTimeProvider = currentTimeProvider,
-                revisionToAppend = revisionToAppendOnSuccess
-            )
-        }
-        onLoadingComplete()
+    return when {
+        terminalError != null -> ApiStateFlowOutcome.Failed(terminalError)
+        isCompletedSuccessfully -> ApiStateFlowOutcome.Completed
+        else -> ApiStateFlowOutcome.Incomplete
     }
 }
 
 private class StreamingMessageBuffer(
-    private val nanoTimeProvider: () -> Long
+    private val nanoTimeProvider: () -> Long,
+    private val publishIntervalMillis: Long
 ) {
     private val thoughts = StringBuilder()
     private val content = StringBuilder()
@@ -91,42 +128,27 @@ private class StreamingMessageBuffer(
         }
     }
 
-    fun publishIfDue(
-        messageFlow: MutableStateFlow<ChatViewModel.GroupedMessages>,
-        turnIndex: Int,
-        platformIdx: Int
-    ) {
+    suspend fun publishIfDue(onUpdate: suspend (content: String, thoughts: String) -> Unit) {
         if (!hasPendingChanges()) return
 
         val now = nanoTimeProvider()
         if (lastPublishedAtNanos == 0L ||
-            now - lastPublishedAtNanos >= STREAM_PUBLISH_INTERVAL_MILLIS * 1_000_000
+            now - lastPublishedAtNanos >= publishIntervalMillis * 1_000_000
         ) {
-            publish(messageFlow, turnIndex, platformIdx, now)
+            publish(onUpdate, now)
         }
     }
 
-    fun flush(
-        messageFlow: MutableStateFlow<ChatViewModel.GroupedMessages>,
-        turnIndex: Int,
-        platformIdx: Int
-    ) {
+    suspend fun flush(onUpdate: suspend (content: String, thoughts: String) -> Unit) {
         if (!hasPendingChanges()) return
-        publish(messageFlow, turnIndex, platformIdx, nanoTimeProvider())
+        publish(onUpdate, nanoTimeProvider())
     }
 
-    private fun publish(
-        messageFlow: MutableStateFlow<ChatViewModel.GroupedMessages>,
-        turnIndex: Int,
-        platformIdx: Int,
+    private suspend fun publish(
+        onUpdate: suspend (content: String, thoughts: String) -> Unit,
         publishedAtNanos: Long
     ) {
-        messageFlow.setBufferedText(
-            turnIndex = turnIndex,
-            platformIdx = platformIdx,
-            content = content.toString(),
-            thoughts = thoughts.toString()
-        )
+        onUpdate(content.toString(), thoughts.toString())
         publishedContentLength = content.length
         publishedThoughtLength = thoughts.length
         lastPublishedAtNanos = publishedAtNanos

@@ -23,15 +23,21 @@ import dev.chungjungsoo.gptmobile.presentation.ui.setting.LicenseScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.PlatformSettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingViewModelV2
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionEditorScreen
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionsScreen
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.ToolConnectionsViewModel
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupCompleteScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformListScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformTypeScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformWizardScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2
 import dev.chungjungsoo.gptmobile.presentation.ui.startscreen.StartScreen
-
 @Composable
-fun SetupNavGraph(navController: NavHostController) {
+fun SetupNavGraph(
+    navController: NavHostController,
+    toolConnectionsViewModel: ToolConnectionsViewModel,
+    onLaunchOAuth: (String) -> Unit = {}
+) {
     NavHost(
         modifier = Modifier
             .fillMaxSize()
@@ -43,7 +49,7 @@ fun SetupNavGraph(navController: NavHostController) {
         migrationScreenNavigation(navController)
         startScreenNavigation(navController)
         setupNavigation(navController)
-        settingNavigation(navController)
+        settingNavigation(navController, toolConnectionsViewModel, onLaunchOAuth)
         chatScreenNavigation(navController)
     }
 }
@@ -156,7 +162,11 @@ fun NavGraphBuilder.chatScreenNavigation(navController: NavHostController) {
     }
 }
 
-fun NavGraphBuilder.settingNavigation(navController: NavHostController) {
+fun NavGraphBuilder.settingNavigation(
+    navController: NavHostController,
+    toolConnectionsViewModel: ToolConnectionsViewModel,
+    onLaunchOAuth: (String) -> Unit = {}
+) {
     navigation(startDestination = Route.SETTINGS, route = Route.SETTING_ROUTE) {
         composable(Route.SETTINGS) {
             val parentEntry = remember(it) {
@@ -172,6 +182,7 @@ fun NavGraphBuilder.settingNavigation(navController: NavHostController) {
                         Route.PLATFORM_SETTINGS.replace("{platformUid}", platformUid)
                     )
                 },
+                onNavigateToToolConnections = { navController.navigate(Route.TOOL_CONNECTIONS) },
                 onNavigateToAboutPage = { navController.navigate(Route.ABOUT_PAGE) }
             )
         }
@@ -194,6 +205,35 @@ fun NavGraphBuilder.settingNavigation(navController: NavHostController) {
         ) {
             PlatformSettingScreen(
                 onNavigationClick = { navController.navigateUp() }
+            )
+        }
+        composable(Route.TOOL_CONNECTIONS) {
+            ToolConnectionsScreen(
+                viewModel = toolConnectionsViewModel,
+                onLaunchOAuth = onLaunchOAuth,
+                onNavigationClick = { navController.navigateUp() },
+                onAddConnectionClick = { navController.navigate(Route.ADD_TOOL_CONNECTION) },
+                onEditConnectionClick = { connectionUid ->
+                    navController.navigate(Route.EDIT_TOOL_CONNECTION.replace("{connectionUid}", connectionUid))
+                }
+            )
+        }
+        composable(Route.ADD_TOOL_CONNECTION) {
+            ToolConnectionEditorScreen(
+                viewModel = toolConnectionsViewModel,
+                onNavigationClick = { navController.navigateUp() },
+                onSaveComplete = { navController.navigateUp() }
+            )
+        }
+        composable(
+            Route.EDIT_TOOL_CONNECTION,
+            arguments = listOf(navArgument("connectionUid") { type = NavType.StringType })
+        ) {
+            ToolConnectionEditorScreen(
+                connectionUid = it.arguments?.getString("connectionUid"),
+                viewModel = toolConnectionsViewModel,
+                onNavigationClick = { navController.navigateUp() },
+                onSaveComplete = { navController.navigateUp() }
             )
         }
         composable(Route.ABOUT_PAGE) {
