@@ -1,5 +1,7 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,26 +10,28 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,13 +39,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.ModelConstants
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
+
+private enum class AddPlatformStep { API_TYPE, DETAILS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,30 +61,50 @@ fun AddPlatformScreen(
     onNavigationClick: () -> Unit,
     onSave: (PlatformV2) -> Unit
 ) {
+    var step by remember { mutableStateOf(AddPlatformStep.API_TYPE) }
+    var selectedClientType by remember { mutableStateOf<ClientType?>(null) }
     var platformName by remember { mutableStateOf("") }
-    var selectedClientType by remember { mutableStateOf(ClientType.OPENAI) }
-    var clientTypeExpanded by remember { mutableStateOf(false) }
     var apiUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
     var reasoningEnabled by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val scrollBehavior = pinnedExitUntilCollapsedScrollBehavior(
+        canScroll = { scrollState.canScrollForward || scrollState.canScrollBackward }
+    )
+    val title = stringResource(if (step == AddPlatformStep.API_TYPE) R.string.choose_platform_type else R.string.platform_details)
+    val canSave = platformName.isNotBlank() && apiUrl.isNotBlank() && model.isNotBlank()
+    val navigateBack = { if (step == AddPlatformStep.DETAILS) step = AddPlatformStep.API_TYPE else onNavigationClick() }
+    BackHandler(enabled = step == AddPlatformStep.DETAILS) { step = AddPlatformStep.API_TYPE }
 
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.add_platform)) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigationClick) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.go_back)
+            AddPlatformTopBar(
+                title = title,
+                scrollBehavior = scrollBehavior,
+                actionLabel = if (step == AddPlatformStep.DETAILS) stringResource(R.string.save) else null,
+                isActionEnabled = canSave,
+                onNavigationClick = navigateBack,
+                onActionClick = {
+                    val clientType = selectedClientType ?: return@AddPlatformTopBar
+                    onSave(
+                        PlatformV2(
+                            name = platformName.trim(),
+                            compatibleType = clientType,
+                            enabled = true,
+                            apiUrl = apiUrl.trim(),
+                            token = apiKey.trim().takeIf(String::isNotEmpty),
+                            model = model.trim(),
+                            temperature = 1.0f,
+                            topP = 1.0f,
+                            systemPrompt = ModelConstants.DEFAULT_PROMPT,
+                            stream = true,
+                            reasoning = reasoningEnabled,
+                            timeout = 30
                         )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                    )
+                }
             )
         }
     ) { innerPadding ->
@@ -81,204 +112,124 @@ fun AddPlatformScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .imePadding()
                 .padding(horizontal = 24.dp)
         ) {
             Spacer(modifier = Modifier.height(16.dp))
-
-            // Header text
-            Text(
-                text = stringResource(R.string.add_platform_description),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Platform Name
-            OutlinedTextField(
-                value = platformName,
-                onValueChange = { platformName = it },
-                label = { Text(stringResource(R.string.platform_name)) },
-                placeholder = { Text(stringResource(R.string.platform_name_hint)) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                supportingText = {
-                    Text(stringResource(R.string.platform_name_supporting))
-                }
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Client Type Dropdown
-            ExposedDropdownMenuBox(
-                expanded = clientTypeExpanded,
-                onExpandedChange = { clientTypeExpanded = it }
-            ) {
-                OutlinedTextField(
-                    value = getClientTypeName(selectedClientType),
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text(stringResource(R.string.api_type)) },
-                    trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = clientTypeExpanded)
-                    },
-                    modifier = Modifier
-                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
-                        .fillMaxWidth(),
-                    supportingText = {
-                        Text(getClientTypeDescription(selectedClientType))
-                    }
+            if (step == AddPlatformStep.API_TYPE) {
+                Text(
+                    text = stringResource(R.string.choose_platform_type_step_description),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
                 )
-
-                ExposedDropdownMenu(
-                    expanded = clientTypeExpanded,
-                    onDismissRequest = { clientTypeExpanded = false }
-                ) {
-                    ClientType.entries.forEach { clientType ->
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(
-                                        text = getClientTypeName(clientType),
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                    Text(
-                                        text = getClientTypeDescription(clientType),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            },
-                            onClick = {
-                                selectedClientType = clientType
-                                // Set default API URL based on client type
-                                apiUrl = when (clientType) {
-                                    ClientType.OPENAI -> ModelConstants.OPENAI_API_URL
-                                    ClientType.ANTHROPIC -> ModelConstants.ANTHROPIC_API_URL
-                                    ClientType.GOOGLE -> ModelConstants.GOOGLE_API_URL
-                                    ClientType.GROQ -> ModelConstants.GROQ_API_URL
-                                    ClientType.OLLAMA -> ModelConstants.OLLAMA_API_URL
-                                    ClientType.OPENROUTER -> ModelConstants.OPENROUTER_API_URL
-                                    ClientType.CUSTOM -> ""
-                                }
-                                clientTypeExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // API URL
-            OutlinedTextField(
-                value = apiUrl,
-                onValueChange = { apiUrl = it },
-                label = { Text(stringResource(R.string.api_url)) },
-                placeholder = { Text(stringResource(R.string.api_url_hint)) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // API Key
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
-                label = { Text(stringResource(R.string.api_key)) },
-                placeholder = { Text(stringResource(R.string.api_key_hint)) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                supportingText = {
-                    Text(stringResource(R.string.api_key_supporting))
-                }
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Model
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it },
-                label = { Text(stringResource(R.string.model)) },
-                placeholder = { Text(getModelPlaceholder(selectedClientType)) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                supportingText = {
-                    Text(stringResource(R.string.model_supporting))
-                }
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Extended Thinking Toggle
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.extended_thinking),
-                        style = MaterialTheme.typography.bodyLarge
+                ClientType.entries.forEach { clientType ->
+                    PlatformTypeCard(
+                        title = getClientTypeName(clientType),
+                        description = getClientTypeDescription(clientType),
+                        onClick = {
+                            selectedClientType = clientType
+                            platformName = defaultPlatformName(clientType)
+                            apiUrl = defaultApiUrl(clientType)
+                            model = defaultModel(clientType)
+                            step = AddPlatformStep.DETAILS
+                        }
                     )
-                    Text(
-                        text = stringResource(R.string.extended_thinking_description),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
-                Switch(
-                    checked = reasoningEnabled,
-                    onCheckedChange = { reasoningEnabled = it }
+            } else {
+                val clientType = selectedClientType ?: ClientType.OPENAI
+                Text(
+                    text = stringResource(R.string.platform_details_description, getClientTypeName(clientType)),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
                 )
+                OutlinedTextField(value = platformName, onValueChange = { platformName = it }, label = { Text(stringResource(R.string.platform_name)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, supportingText = { Text(stringResource(R.string.platform_name_supporting)) })
+                OutlinedTextField(value = apiUrl, onValueChange = { apiUrl = it }, label = { Text(stringResource(R.string.api_url)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true)
+                OutlinedTextField(value = apiKey, onValueChange = { apiKey = it }, label = { Text(stringResource(R.string.api_key)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, visualTransformation = PasswordVisualTransformation(), supportingText = { Text(stringResource(R.string.api_key_supporting)) })
+                OutlinedTextField(value = model, onValueChange = { model = it }, label = { Text(stringResource(R.string.model)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, supportingText = { Text(stringResource(R.string.model_supporting)) })
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = stringResource(R.string.extended_thinking), style = MaterialTheme.typography.bodyLarge)
+                        Text(text = stringResource(R.string.extended_thinking_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = reasoningEnabled, onCheckedChange = { reasoningEnabled = it })
+                }
             }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Action buttons
-            Button(
-                onClick = {
-                    val platform = PlatformV2(
-                        name = platformName.trim(),
-                        compatibleType = selectedClientType,
-                        enabled = true,
-                        apiUrl = apiUrl.trim(),
-                        token = apiKey.trim().takeIf { it.isNotEmpty() },
-                        model = model.trim(),
-                        temperature = 1.0f,
-                        topP = 1.0f,
-                        systemPrompt = ModelConstants.DEFAULT_PROMPT,
-                        stream = true,
-                        reasoning = reasoningEnabled,
-                        timeout = 30
-                    )
-                    onSave(platform)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = platformName.isNotBlank() && apiUrl.isNotBlank() && model.isNotBlank()
-            ) {
-                Text(stringResource(R.string.save))
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedButton(
-                onClick = onNavigationClick,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.cancel))
-            }
-
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddPlatformTopBar(
+    title: String,
+    scrollBehavior: TopAppBarScrollBehavior,
+    actionLabel: String?,
+    isActionEnabled: Boolean,
+    onNavigationClick: () -> Unit,
+    onActionClick: () -> Unit
+) {
+    LargeTopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background, titleContentColor = MaterialTheme.colorScheme.onBackground),
+        title = { Text(modifier = Modifier.padding(4.dp), text = title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        navigationIcon = {
+            IconButton(modifier = Modifier.padding(4.dp), onClick = onNavigationClick) {
+                Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.go_back))
+            }
+        },
+        actions = {
+            actionLabel?.let { label ->
+                TextButton(modifier = Modifier.semantics { contentDescription = label }, enabled = isActionEnabled, onClick = onActionClick) { Text(label) }
+            }
+        },
+        scrollBehavior = scrollBehavior
+    )
+}
+
+@Composable
+private fun PlatformTypeCard(title: String, description: String, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Icon(imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+        }
+    }
+}
+
+private fun defaultApiUrl(clientType: ClientType) = when (clientType) {
+    ClientType.OPENAI -> ModelConstants.OPENAI_API_URL
+    ClientType.ANTHROPIC -> ModelConstants.ANTHROPIC_API_URL
+    ClientType.GOOGLE -> ModelConstants.GOOGLE_API_URL
+    ClientType.GROQ -> ModelConstants.GROQ_API_URL
+    ClientType.OLLAMA -> ModelConstants.OLLAMA_API_URL
+    ClientType.OPENROUTER -> ModelConstants.OPENROUTER_API_URL
+    ClientType.CUSTOM -> ""
+}
+
+private fun defaultPlatformName(clientType: ClientType) = when (clientType) {
+    ClientType.OPENAI -> "OpenAI"
+    ClientType.ANTHROPIC -> "Anthropic"
+    ClientType.GOOGLE -> "Google"
+    ClientType.GROQ -> "Groq"
+    ClientType.OLLAMA -> "Ollama"
+    ClientType.OPENROUTER -> "OpenRouter"
+    ClientType.CUSTOM -> ""
+}
+
+private fun defaultModel(clientType: ClientType) = ModelConstants.defaultModel(clientType)
 
 @Composable
 private fun getClientTypeName(clientType: ClientType): String = when (clientType) {
@@ -300,15 +251,4 @@ private fun getClientTypeDescription(clientType: ClientType): String = when (cli
     ClientType.OLLAMA -> stringResource(R.string.client_type_ollama_desc)
     ClientType.OPENROUTER -> stringResource(R.string.client_type_openrouter_desc)
     ClientType.CUSTOM -> stringResource(R.string.client_type_custom_desc)
-}
-
-@Composable
-private fun getModelPlaceholder(clientType: ClientType): String = when (clientType) {
-    ClientType.OPENAI -> "gpt-5.2"
-    ClientType.ANTHROPIC -> "claude-sonnet-4-5-20250929"
-    ClientType.GOOGLE -> "gemini-3-pro-preview"
-    ClientType.GROQ -> "openai/gpt-oss-120b"
-    ClientType.OLLAMA -> "gpt-oss"
-    ClientType.OPENROUTER -> "openai/gpt-4o"
-    ClientType.CUSTOM -> stringResource(R.string.model_name)
 }
