@@ -35,19 +35,13 @@ data class ToolConnectionSetupFlow(
             null -> false
         }
 
-    fun selectPath(path: ToolConnectionSetupPath): ToolConnectionSetupFlow = when (path) {
-        ToolConnectionSetupPath.WEB_SEARCH -> copy(
-            step = ToolConnectionSetupStep.WEB_SEARCH_PROVIDER,
-            path = path,
-            provider = provider.takeIf { this.path == path }
-        )
-
-        ToolConnectionSetupPath.MCP_SERVER -> copy(
-            step = ToolConnectionSetupStep.DETAILS,
-            path = path,
-            provider = ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.MCP }
-        )
-    }
+    fun selectPath(path: ToolConnectionSetupPath): ToolConnectionSetupFlow = copy(
+        path = path,
+        provider = when (path) {
+            ToolConnectionSetupPath.WEB_SEARCH -> provider.takeIf { this.path == path && it?.type != ToolConnectionType.MCP }
+            ToolConnectionSetupPath.MCP_SERVER -> ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.MCP }
+        }
+    )
 
     fun selectWebProvider(provider: ToolConnectionProvider): ToolConnectionSetupFlow = if (path == ToolConnectionSetupPath.WEB_SEARCH && provider.type != ToolConnectionType.MCP) {
         copy(provider = provider)
@@ -56,6 +50,12 @@ data class ToolConnectionSetupFlow(
     }
 
     fun next(): ToolConnectionSetupFlow = when (step) {
+        ToolConnectionSetupStep.CONNECTION_TYPE -> when (path) {
+            ToolConnectionSetupPath.WEB_SEARCH -> copy(step = ToolConnectionSetupStep.WEB_SEARCH_PROVIDER)
+            ToolConnectionSetupPath.MCP_SERVER -> copy(step = ToolConnectionSetupStep.DETAILS)
+            null -> this
+        }
+
         ToolConnectionSetupStep.WEB_SEARCH_PROVIDER ->
             if (provider != null) copy(step = ToolConnectionSetupStep.DETAILS) else this
 

@@ -72,9 +72,12 @@ class ToolConnectionsViewModelTest {
     fun `web search setup progresses through provider then relevant details`() {
         val provider = ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.EXA }
 
-        val providerStep = ToolConnectionSetupFlow().selectPath(ToolConnectionSetupPath.WEB_SEARCH)
+        val selected = ToolConnectionSetupFlow().selectPath(ToolConnectionSetupPath.WEB_SEARCH)
+        val providerStep = selected.next()
         val detailsStep = providerStep.selectWebProvider(provider).next()
 
+        assertEquals(ToolConnectionSetupStep.CONNECTION_TYPE, selected.step)
+        assertEquals(ToolConnectionSetupPath.WEB_SEARCH, selected.path)
         assertEquals(ToolConnectionSetupStep.WEB_SEARCH_PROVIDER, providerStep.step)
         assertFalse(providerStep.canContinue)
         assertEquals(ToolConnectionSetupStep.DETAILS, detailsStep.step)
@@ -86,9 +89,12 @@ class ToolConnectionsViewModelTest {
 
     @Test
     fun `MCP setup separates connection details from authentication`() {
-        val detailsStep = ToolConnectionSetupFlow().selectPath(ToolConnectionSetupPath.MCP_SERVER)
+        val selected = ToolConnectionSetupFlow().selectPath(ToolConnectionSetupPath.MCP_SERVER)
+        val detailsStep = selected.next()
         val authenticationStep = detailsStep.next()
 
+        assertEquals(ToolConnectionSetupStep.CONNECTION_TYPE, selected.step)
+        assertEquals(ToolConnectionSetupPath.MCP_SERVER, selected.path)
         assertEquals(ToolConnectionSetupStep.DETAILS, detailsStep.step)
         assertEquals(ToolConnectionType.MCP, detailsStep.provider?.type)
         assertEquals(ToolConnectionSetupStep.AUTHENTICATION, authenticationStep.step)

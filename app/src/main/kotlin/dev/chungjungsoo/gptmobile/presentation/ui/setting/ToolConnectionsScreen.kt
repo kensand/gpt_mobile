@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,17 +16,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,7 +53,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -215,7 +224,6 @@ fun ToolConnectionEditorScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val connection = connectionUid?.let { uid -> uiState.connections.firstOrNull { it.connectionUid == uid } }
     val isEditing = connectionUid != null
-    val title = stringResource(if (isEditing) R.string.edit_tool_connection else R.string.add_tool_connection)
     val scrollState = rememberScrollState()
     val scrollBehavior = pinnedExitUntilCollapsedScrollBehavior(
         canScroll = { scrollState.canScrollForward || scrollState.canScrollBackward }
@@ -226,7 +234,7 @@ fun ToolConnectionEditorScreen(
             modifier = modifier,
             topBar = {
                 ToolConnectionEditorTopBar(
-                    title = title,
+                    title = stringResource(R.string.edit_tool_connection),
                     scrollBehavior = scrollBehavior,
                     actionLabel = null,
                     isActionEnabled = false,
@@ -248,6 +256,15 @@ fun ToolConnectionEditorScreen(
     var setupFlow by remember(connection?.connectionUid) {
         mutableStateOf(connection?.let(ToolConnectionSetupFlow::editing) ?: ToolConnectionSetupFlow())
     }
+    val title = stringResource(
+        when {
+            isEditing -> R.string.edit_tool_connection
+            setupFlow.step == ToolConnectionSetupStep.CONNECTION_TYPE -> R.string.choose_connection_type
+            setupFlow.step == ToolConnectionSetupStep.WEB_SEARCH_PROVIDER -> R.string.choose_search_provider
+            setupFlow.step == ToolConnectionSetupStep.AUTHENTICATION -> R.string.authentication
+            else -> R.string.connection_details
+        }
+    )
     var name by remember(connection?.connectionUid) { mutableStateOf(connection?.name.orEmpty()) }
     var alias by remember(connection?.connectionUid) { mutableStateOf(connection?.alias.orEmpty()) }
     var endpoint by remember(connection?.connectionUid) { mutableStateOf(connection?.endpointUrl.orEmpty()) }
@@ -366,7 +383,7 @@ fun ToolConnectionEditorScreen(
             isEndpointValid = isEndpointValid,
             onPathSelected = { path ->
                 val previousPath = setupFlow.path
-                setupFlow = setupFlow.selectPath(path)
+                setupFlow = setupFlow.selectPath(path).next()
                 if (previousPath != null && previousPath != path) {
                     name = ""
                     alias = ""
@@ -577,32 +594,31 @@ private fun ToolConnectionStepContent(
         Spacer(modifier = Modifier.height(16.dp))
         when (setupFlow.step) {
             ToolConnectionSetupStep.CONNECTION_TYPE -> {
-                StepHeading(
-                    title = stringResource(R.string.choose_connection_type),
-                    description = stringResource(R.string.choose_connection_type_description)
+                Text(
+                    text = stringResource(R.string.choose_connection_type_description),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
                 )
-                RadioItem(
+                ConnectionTypeCard(
                     title = stringResource(R.string.web_search),
                     description = stringResource(R.string.web_search_connection_description),
-                    value = ToolConnectionSetupPath.WEB_SEARCH.name,
-                    selected = setupFlow.path == ToolConnectionSetupPath.WEB_SEARCH
-                ) {
-                    onPathSelected(ToolConnectionSetupPath.WEB_SEARCH)
-                }
-                RadioItem(
+                    onClick = { onPathSelected(ToolConnectionSetupPath.WEB_SEARCH) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                ConnectionTypeCard(
                     title = stringResource(R.string.mcp_server),
                     description = stringResource(R.string.mcp_server_connection_description),
-                    value = ToolConnectionSetupPath.MCP_SERVER.name,
-                    selected = setupFlow.path == ToolConnectionSetupPath.MCP_SERVER
-                ) {
-                    onPathSelected(ToolConnectionSetupPath.MCP_SERVER)
-                }
+                    onClick = { onPathSelected(ToolConnectionSetupPath.MCP_SERVER) }
+                )
             }
 
             ToolConnectionSetupStep.WEB_SEARCH_PROVIDER -> {
-                StepHeading(
-                    title = stringResource(R.string.choose_search_provider),
-                    description = stringResource(R.string.choose_search_provider_description)
+                Text(
+                    text = stringResource(R.string.choose_search_provider_description),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
                 )
                 ToolConnectionsViewModel.providers
                     .filterNot { it.type == ToolConnectionType.MCP }
@@ -654,20 +670,6 @@ private fun ToolConnectionStepContent(
 }
 
 @Composable
-private fun StepHeading(
-    title: String,
-    description: String
-) {
-    Text(text = title, style = MaterialTheme.typography.headlineSmall)
-    Text(
-        text = description,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 8.dp, bottom = 16.dp)
-    )
-}
-
-@Composable
 private fun ConnectionDetailsStep(
     connection: ToolConnection?,
     provider: ToolConnectionProvider?,
@@ -689,12 +691,14 @@ private fun ConnectionDetailsStep(
     val normalizedAlias = ToolConnectionsViewModel.normalizeAlias(alias)
     val isAliasInvalid = alias.isNotBlank() && !ToolConnectionsViewModel.isValidAlias(normalizedAlias)
     val aliasError = stringResource(R.string.stable_alias_error)
-    StepHeading(
-        title = stringResource(R.string.connection_details),
-        description = stringResource(
+    Text(
+        text = stringResource(
             if (isMcp) R.string.mcp_details_description else R.string.web_search_details_description,
             provider?.label.orEmpty()
-        )
+        ),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 16.dp)
     )
     OutlinedTextField(
         modifier = Modifier.fillMaxWidth(),
@@ -729,8 +733,8 @@ private fun ConnectionDetailsStep(
             value = endpoint,
             onValueChange = onEndpointChange,
             label = { Text(stringResource(R.string.api_url)) },
-            isError = !isEndpointValid,
-            supportingText = if (!isEndpointValid) {
+            isError = endpoint.isNotBlank() && !isEndpointValid,
+            supportingText = if (endpoint.isNotBlank() && !isEndpointValid) {
                 { Text(stringResource(R.string.mcp_endpoint_error)) }
             } else {
                 null
@@ -776,9 +780,11 @@ private fun AuthenticationStep(
     onClearCredentialChange: (Boolean) -> Unit
 ) {
     val bearerToken = stringResource(R.string.bearer_token)
-    StepHeading(
-        title = stringResource(R.string.authentication),
-        description = stringResource(R.string.mcp_authentication_description)
+    Text(
+        text = stringResource(R.string.mcp_authentication_description),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 16.dp)
     )
     listOf(
         ToolConnectionAuthType.NONE to stringResource(R.string.public_access),
@@ -937,4 +943,45 @@ private fun ToolConnectionEditorTopBar(
     )
 }
 
+@Composable
+private fun ConnectionTypeCard(
+    title: String,
+    description: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+}
 private fun providerLabel(type: String): String = ToolConnectionsViewModel.providers.firstOrNull { it.type == type }?.label ?: type
