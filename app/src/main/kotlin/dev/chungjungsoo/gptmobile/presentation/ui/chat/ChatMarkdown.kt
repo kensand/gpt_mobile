@@ -52,6 +52,7 @@ import com.mikepenz.markdown.compose.elements.MarkdownParagraph
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.MarkdownAnnotator
+import com.mikepenz.markdown.model.markdownAnimations
 import com.mikepenz.markdown.model.markdownAnnotator
 import com.mikepenz.markdown.model.markdownInlineContent
 import com.mikepenz.markdown.model.rememberMarkdownState
@@ -196,6 +197,7 @@ fun ChatMarkdown(
             content = combinedMarkdown,
             retainState = true
         )
+        val animations = markdownAnimations(animateTextSize = { this })
 
         Markdown(
             markdownState = markdownState,
@@ -203,6 +205,7 @@ fun ChatMarkdown(
             annotator = annotator,
             components = components,
             typography = chatMarkdownTypography(),
+            animations = animations,
             modifier = modifier
         )
     }

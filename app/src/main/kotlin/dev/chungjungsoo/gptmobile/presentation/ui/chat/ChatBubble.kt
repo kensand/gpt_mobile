@@ -106,8 +106,7 @@ fun OpponentChatBubble(
     onRetryClick: () -> Unit = {},
     onEditClick: () -> Unit = {},
     onShowPreviousRevision: () -> Unit = {},
-    onShowNextRevision: () -> Unit = {},
-    bottomMarkerModifier: Modifier = Modifier
+    onShowNextRevision: () -> Unit = {}
 ) {
     val cardColor = CardColors(
         containerColor = MaterialTheme.colorScheme.background,
@@ -222,7 +221,6 @@ fun OpponentChatBubble(
                     }
                 }
             }
-            Spacer(modifier = bottomMarkerModifier.size(1.dp))
         }
     }
 }
