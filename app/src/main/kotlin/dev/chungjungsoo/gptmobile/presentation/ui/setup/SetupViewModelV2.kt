@@ -165,25 +165,9 @@ class SetupViewModelV2 @Inject constructor(
 
     fun isSetupComplete(): Boolean = _platforms.value.isNotEmpty()
 
-    private fun getDefaultPlatformName(clientType: ClientType): String = when (clientType) {
-        ClientType.OPENAI -> "OpenAI"
-        ClientType.ANTHROPIC -> "Anthropic"
-        ClientType.GOOGLE -> "Google"
-        ClientType.GROQ -> "Groq"
-        ClientType.OLLAMA -> "Ollama"
-        ClientType.OPENROUTER -> "OpenRouter"
-        ClientType.CUSTOM -> ""
-    }
+    private fun getDefaultPlatformName(clientType: ClientType): String = ModelConstants.defaultPlatformName(clientType)
 
-    private fun getDefaultApiUrl(clientType: ClientType): String = when (clientType) {
-        ClientType.OPENAI -> ModelConstants.OPENAI_API_URL
-        ClientType.ANTHROPIC -> ModelConstants.ANTHROPIC_API_URL
-        ClientType.GOOGLE -> ModelConstants.GOOGLE_API_URL
-        ClientType.GROQ -> ModelConstants.GROQ_API_URL
-        ClientType.OLLAMA -> ModelConstants.OLLAMA_API_URL
-        ClientType.OPENROUTER -> ModelConstants.OPENROUTER_API_URL
-        ClientType.CUSTOM -> ""
-    }
+    private fun getDefaultApiUrl(clientType: ClientType): String = ModelConstants.defaultApiUrl(clientType)
 
     companion object {
         private const val TAG = "SetupViewModelV2"

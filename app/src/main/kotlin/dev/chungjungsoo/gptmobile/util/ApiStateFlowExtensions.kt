@@ -237,7 +237,7 @@ private fun MutableStateFlow<ChatViewModel.GroupedMessages>.setErrorMessage(
             platformIndex = platformIdx
         ) { currentMessage ->
             val updatedContent = buildAssistantErrorContent(currentMessage.content, error)
-            val appendedError = updatedContent.substring(currentMessage.content.length)
+            val appendedError = assistantErrorAppendedText(currentMessage.content, updatedContent)
             currentMessage.copy(
                 content = updatedContent,
                 timeline = currentMessage.timeline.appendErrorText(appendedError),

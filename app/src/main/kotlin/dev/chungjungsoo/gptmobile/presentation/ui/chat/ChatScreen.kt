@@ -701,7 +701,10 @@ fun ChatBubbleDropdownMenu(
 
 private fun exportChat(context: Context, chatViewModel: ChatViewModel) {
     try {
-        val (fileName, fileContent) = chatViewModel.exportChat(context.toolTraceLabels())
+        val (fileName, fileContent) = chatViewModel.exportChat(
+            toolTraceLabels = context.toolTraceLabels(),
+            legacyOrderNotice = context.getString(R.string.legacy_assistant_order_unavailable)
+        )
         val file = File(context.getExternalFilesDir(null), fileName)
         file.writeText(fileContent)
         val uri = getUriForFile(context, "${context.packageName}.fileprovider", file)

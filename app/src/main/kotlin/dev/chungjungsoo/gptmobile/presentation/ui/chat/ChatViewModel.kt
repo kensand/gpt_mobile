@@ -476,7 +476,7 @@ class ChatViewModel @Inject constructor(
         }
 
         // Start new conversation from the edited question
-        _chatRoom.value.id.takeIf { it > 0 }?.let(agentRunCoordinator::cancelChat)
+        cancelActiveRuns()
         completeChat(persistSnapshotFirst = true)
         return true
     }
@@ -566,7 +566,10 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun exportChat(toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default): Pair<String, String> {
+    fun exportChat(
+        toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default,
+        legacyOrderNotice: String = LEGACY_ORDER_NOTICE
+    ): Pair<String, String> {
         // Build the chat history in Markdown format
         val chatHistoryMarkdown = buildString {
             appendLine("# Chat Export: \"${chatRoom.value.title}\"")
@@ -586,7 +589,7 @@ class ChatViewModel @Inject constructor(
                     val platformName = message.platformType
                         ?.let { _platformsInApp.value.getPlatformName(it) }
                         ?: "Unknown"
-                    append(formatAssistantExport(platformName, message, _toolEventsByRun.value, toolTraceLabels))
+                    append(formatAssistantExport(platformName, message, _toolEventsByRun.value, toolTraceLabels, legacyOrderNotice))
                 }
             }
         }
@@ -1236,7 +1239,8 @@ internal fun formatAssistantExport(
     platformName: String,
     message: MessageV2,
     toolEventsByRun: Map<String, List<ToolEvent>>,
-    toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default
+    toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default,
+    legacyOrderNotice: String = LEGACY_ORDER_NOTICE
 ): String = buildString {
     appendLine("**Assistant ($platformName):**")
     val trace = message.effectiveRunId()
@@ -1246,7 +1250,7 @@ internal fun formatAssistantExport(
     val content = message.effectiveContent()
     val thoughts = message.effectiveThoughts()
     if (hasUnavailableAssistantOrder(timeline, content, thoughts, trace.isNotEmpty())) {
-        appendLine("> $LEGACY_ORDER_NOTICE")
+        appendLine("> $legacyOrderNotice")
         appendLine()
         thoughts.takeIf(String::isNotBlank)?.let {
             appendLine("<details><summary>Thinking (order unavailable)</summary>")
@@ -1273,6 +1277,7 @@ internal fun formatAssistantExport(
         }
     } else {
         val traceBySequence = trace.associateBy(ToolEvent::sequence)
+        val renderedSequences = timeline.mapNotNull { it.toolSequence }.toSet()
         timeline.forEach { item ->
             when (item.type) {
                 AssistantTimelineItemType.TEXT -> appendLine(item.content)
@@ -1294,6 +1299,12 @@ internal fun formatAssistantExport(
             }
             appendLine()
         }
+        trace.filterNot { it.sequence in renderedSequences }
+            .takeIf { it.isNotEmpty() }
+            ?.let {
+                appendLine(formatToolTraceMarkdown(it, toolTraceLabels))
+                appendLine()
+            }
     }
 }
 

@@ -80,9 +80,10 @@ data class ToolConnectionSetupFlow(
     }
 
     companion object {
-        fun editing(connection: ToolConnection): ToolConnectionSetupFlow {
-            val provider = ToolConnectionsViewModel.providers.firstOrNull { it.type == connection.type }
-                ?: ToolConnectionsViewModel.providers.first()
+        // Returns null for a stored type this build does not know, so the editor cannot
+        // rewrite the connection's type and endpoint by falling back to another provider.
+        fun editing(connection: ToolConnection): ToolConnectionSetupFlow? {
+            val provider = ToolConnectionsViewModel.providers.firstOrNull { it.type == connection.type } ?: return null
             val path = if (provider.type == ToolConnectionType.MCP) {
                 ToolConnectionSetupPath.MCP_SERVER
             } else {

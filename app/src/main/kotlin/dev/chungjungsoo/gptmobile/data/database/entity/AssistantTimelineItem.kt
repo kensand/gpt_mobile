@@ -17,8 +17,9 @@ data class AssistantTimelineItem(
     val toolSequence: Int? = null
 )
 
+// Fallback for callers without a resource context; keep in sync with R.string.legacy_assistant_order_unavailable.
 internal const val LEGACY_ORDER_NOTICE =
-    "Original event order is unavailable for this response. Reasoning, text, and tool calls are preserved below without implying chronology."
+    "Original event order is unavailable. Reasoning, response text, and tool calls are shown without implying chronology."
 
 internal fun rebuildAssistantTimelineForEdit(
     currentTimeline: List<AssistantTimelineItem>,

@@ -104,6 +104,26 @@ class ToolConnectionsViewModelTest {
     }
 
     @Test
+    fun `editing keeps a stored connection type instead of falling back to another provider`() {
+        val stored = ToolConnection(
+            connectionUid = "search-edit",
+            name = "Search",
+            alias = "search",
+            type = ToolConnectionType.EXA,
+            endpointUrl = "https://api.exa.ai/search",
+            authType = ToolConnectionAuthType.API_KEY,
+            secretRef = null,
+            oauthClientId = null
+        )
+
+        val known = ToolConnectionSetupFlow.editing(stored)
+
+        assertEquals(ToolConnectionType.EXA, known?.provider?.type)
+        assertEquals(ToolConnectionSetupPath.WEB_SEARCH, known?.path)
+        assertNull(ToolConnectionSetupFlow.editing(stored.copy(type = "UNSUPPORTED_PROVIDER")))
+    }
+
+    @Test
     fun `normalizeAlias keeps aliases lowercase model safe and validates boundaries`() {
         assertEquals("fire_crawl_1", ToolConnectionsViewModel.normalizeAlias(" Fire-Crawl 1 "))
 

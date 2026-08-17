@@ -219,7 +219,7 @@ class ChatDatabaseV2MigrationInstrumentedTest {
 
     @Test
     @Throws(IOException::class)
-    fun migrate7To8_marksLegacyAssistantTimelineOrderAsUnavailableWithoutChangingMessages() {
+    fun migrate7To8_marksOnlyAmbiguousLegacyAssistantOrderWithoutChangingMessages() {
         helper.createDatabase(TIMELINE_DATABASE, 7).apply {
             execSQL(
                 "INSERT INTO chats_v2 (chat_id, title, enabled_platform, created_at, updated_at) " +
@@ -239,6 +239,14 @@ class ChatDatabaseV2MigrationInstrumentedTest {
                     message_id, chat_id, thoughts, content, attachments, revisions,
                     active_revision_index, linked_message_id, platform_type, current_run_id, created_at
                 ) VALUES (12, 8, 'Checking', 'Existing answer', '[]', '[]', -1, 11, 'profile-1', 'run-1', 102)
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO messages_v2 (
+                    message_id, chat_id, thoughts, content, attachments, revisions,
+                    active_revision_index, linked_message_id, platform_type, current_run_id, created_at
+                ) VALUES (13, 8, '', 'Plain answer', '[]', '[]', -1, 11, 'profile-2', NULL, 103)
                 """.trimIndent()
             )
             execSQL(
@@ -279,6 +287,11 @@ class ChatDatabaseV2MigrationInstrumentedTest {
             assertEquals("Existing answer", cursor.getString(1))
             assertEquals("run-1", cursor.getString(2))
             assertEquals("""[{"type":"LEGACY_ORDER"}]""", cursor.getString(3))
+        }
+        database.query("SELECT content, timeline FROM messages_v2 WHERE message_id = 13").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("Plain answer", cursor.getString(0))
+            assertEquals("[]", cursor.getString(1))
         }
         database.query("SELECT sequence, result FROM tool_events WHERE run_id = 'run-1'").use { cursor ->
             assertTrue(cursor.moveToFirst())

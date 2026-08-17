@@ -272,16 +272,34 @@ class ProviderToolRejectionTest {
         body: String,
         onRequest: (HttpExchange) -> Unit = {},
         block: (String) -> T
-    ): T {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { exchange ->
-            onRequest(exchange)
-            exchange.requestBody.close()
-            val bytes = body.toByteArray()
-            exchange.responseHeaders.add("Content-Type", "application/json")
-            exchange.sendResponseHeaders(status, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
+    ): T = withHttpServer(block) { exchange ->
+        onRequest(exchange)
+        exchange.requestBody.close()
+        exchange.respond(status, "application/json", body)
+    }
+
+    private fun <T> withOpenRouterFallbackServer(
+        requestsWithTools: MutableList<Boolean>,
+        block: (String) -> T
+    ): T = withHttpServer(block) { exchange ->
+        val hasTools = exchange.requestBody.use { body ->
+            body.readBytes().decodeToString().contains("\"tools\"")
         }
+        requestsWithTools += hasTools
+        if (hasTools) {
+            exchange.respond(404, "application/json", """{"error":{"message":"No endpoints found that support tool use"}}""")
+        } else {
+            exchange.respond(
+                200,
+                "text/event-stream",
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"chat fallback\"}}]}\n\ndata: [DONE]\n\n"
+            )
+        }
+    }
+
+    private fun <T> withHttpServer(block: (String) -> T, handler: (HttpExchange) -> Unit): T {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange -> handler(exchange) }
         server.start()
         return try {
             block("http://127.0.0.1:${server.address.port}/")
@@ -290,36 +308,11 @@ class ProviderToolRejectionTest {
         }
     }
 
-    private fun <T> withOpenRouterFallbackServer(requestsWithTools: MutableList<Boolean>, block: (String) -> T): T {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { exchange ->
-            val hasTools = exchange.requestBody.use { body ->
-                body.readBytes().decodeToString().contains("\"tools\"")
-            }
-            requestsWithTools += hasTools
-            val status: Int
-            val contentType: String
-            val body: String
-            if (hasTools) {
-                status = 404
-                contentType = "application/json"
-                body = """{"error":{"message":"No endpoints found that support tool use"}}"""
-            } else {
-                status = 200
-                contentType = "text/event-stream"
-                body = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"chat fallback\"}}]}\n\ndata: [DONE]\n\n"
-            }
-            val bytes = body.toByteArray()
-            exchange.responseHeaders.add("Content-Type", contentType)
-            exchange.sendResponseHeaders(status, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
-        }
-        server.start()
-        return try {
-            block("http://127.0.0.1:${server.address.port}/")
-        } finally {
-            server.stop(0)
-        }
+    private fun HttpExchange.respond(status: Int, contentType: String, body: String) {
+        val bytes = body.toByteArray()
+        responseHeaders.add("Content-Type", contentType)
+        sendResponseHeaders(status, bytes.size.toLong())
+        responseBody.use { it.write(bytes) }
     }
 
     private fun openAIError() = """{"error":{"message":"This model does not support tools"}}"""

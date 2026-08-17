@@ -10,7 +10,9 @@ object ModelConstants {
     const val GOOGLE_DEFAULT_MODEL = "gemini-3.7-flash"
     const val GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
     const val OLLAMA_DEFAULT_MODEL = "gpt-oss"
-    const val OPENROUTER_DEFAULT_MODEL = "openai/gpt-5.6"
+
+    // OpenRouter has no unsuffixed alias; only the explicit tier slugs are served.
+    const val OPENROUTER_DEFAULT_MODEL = "openai/gpt-5.6-sol"
 
     val openaiModels = linkedSetOf(OPENAI_DEFAULT_MODEL, "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano")
     val anthropicModels = linkedSetOf(ANTHROPIC_DEFAULT_MODEL, "claude-opus-5", "claude-sonnet-4-6", "claude-haiku-4-5-20251001")
@@ -41,6 +43,26 @@ object ModelConstants {
         "https://openrouter.ai/api", "https://openrouter.ai/api/" -> OPENROUTER_API_URL
         "http://localhost:11434", "http://localhost:11434/" -> OLLAMA_API_URL
         else -> apiUrl
+    }
+
+    fun defaultPlatformName(clientType: ClientType): String = when (clientType) {
+        ClientType.OPENAI -> "OpenAI"
+        ClientType.ANTHROPIC -> "Anthropic"
+        ClientType.GOOGLE -> "Google"
+        ClientType.GROQ -> "Groq"
+        ClientType.OLLAMA -> "Ollama"
+        ClientType.OPENROUTER -> "OpenRouter"
+        ClientType.CUSTOM -> ""
+    }
+
+    fun defaultApiUrl(clientType: ClientType): String = when (clientType) {
+        ClientType.OPENAI -> OPENAI_API_URL
+        ClientType.ANTHROPIC -> ANTHROPIC_API_URL
+        ClientType.GOOGLE -> GOOGLE_API_URL
+        ClientType.GROQ -> GROQ_API_URL
+        ClientType.OLLAMA -> OLLAMA_API_URL
+        ClientType.OPENROUTER -> OPENROUTER_API_URL
+        ClientType.CUSTOM -> ""
     }
 
     fun defaultModel(clientType: ClientType): String = when (clientType) {

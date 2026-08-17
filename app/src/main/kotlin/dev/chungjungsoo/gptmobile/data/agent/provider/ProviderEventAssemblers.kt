@@ -142,8 +142,11 @@ class AnthropicEventAssembler {
                 ContentBlockType.THINKING -> pendingThinking[event.index] =
                     StringBuilder(event.contentBlock.thinking.orEmpty()) to StringBuilder(event.contentBlock.signature.orEmpty())
 
-                ContentBlockType.REDACTED_THINKING -> pendingRedactedThinking[event.index] =
-                    event.contentBlock.data.orEmpty()
+                // Anthropic rejects a replayed redacted_thinking block without its encrypted payload.
+                ContentBlockType.REDACTED_THINKING ->
+                    event.contentBlock.data
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { pendingRedactedThinking[event.index] = it }
 
                 ContentBlockType.TOOL_USE -> {
                     val callId = event.contentBlock.id

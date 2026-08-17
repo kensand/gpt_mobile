@@ -1,7 +1,6 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,16 +9,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,7 +32,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,6 +42,7 @@ import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.ModelConstants
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.presentation.common.DestinationCard
 import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
 
 private enum class AddPlatformStep { API_TYPE, DETAILS }
@@ -67,13 +60,13 @@ fun AddPlatformScreen(
     var apiUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
-    var reasoningEnabled by remember { mutableStateOf(false) }
+    var isReasoningEnabled by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val scrollBehavior = pinnedExitUntilCollapsedScrollBehavior(
         canScroll = { scrollState.canScrollForward || scrollState.canScrollBackward }
     )
     val title = stringResource(if (step == AddPlatformStep.API_TYPE) R.string.choose_platform_type else R.string.platform_details)
-    val canSave = platformName.isNotBlank() && apiUrl.isNotBlank() && model.isNotBlank()
+    val isSaveEnabled = platformName.isNotBlank() && apiUrl.isNotBlank() && model.isNotBlank()
     val navigateBack = { if (step == AddPlatformStep.DETAILS) step = AddPlatformStep.API_TYPE else onNavigationClick() }
     BackHandler(enabled = step == AddPlatformStep.DETAILS) { step = AddPlatformStep.API_TYPE }
 
@@ -84,7 +77,7 @@ fun AddPlatformScreen(
                 title = title,
                 scrollBehavior = scrollBehavior,
                 actionLabel = if (step == AddPlatformStep.DETAILS) stringResource(R.string.save) else null,
-                isActionEnabled = canSave,
+                isActionEnabled = isSaveEnabled,
                 onNavigationClick = navigateBack,
                 onActionClick = {
                     val clientType = selectedClientType ?: return@AddPlatformTopBar
@@ -100,7 +93,7 @@ fun AddPlatformScreen(
                             topP = 1.0f,
                             systemPrompt = ModelConstants.DEFAULT_PROMPT,
                             stream = true,
-                            reasoning = reasoningEnabled,
+                            reasoning = isReasoningEnabled,
                             timeout = 30
                         )
                     )
@@ -125,14 +118,16 @@ fun AddPlatformScreen(
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
                 ClientType.entries.forEach { clientType ->
-                    PlatformTypeCard(
+                    DestinationCard(
                         title = getClientTypeName(clientType),
                         description = getClientTypeDescription(clientType),
                         onClick = {
                             selectedClientType = clientType
-                            platformName = defaultPlatformName(clientType)
-                            apiUrl = defaultApiUrl(clientType)
-                            model = defaultModel(clientType)
+                            platformName = ModelConstants.defaultPlatformName(clientType)
+                            apiUrl = ModelConstants.defaultApiUrl(clientType)
+                            model = ModelConstants.defaultModel(clientType)
+                            apiKey = ""
+                            isReasoningEnabled = false
                             step = AddPlatformStep.DETAILS
                         }
                     )
@@ -155,7 +150,7 @@ fun AddPlatformScreen(
                         Text(text = stringResource(R.string.extended_thinking), style = MaterialTheme.typography.bodyLarge)
                         Text(text = stringResource(R.string.extended_thinking_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(checked = reasoningEnabled, onCheckedChange = { reasoningEnabled = it })
+                    Switch(checked = isReasoningEnabled, onCheckedChange = { isReasoningEnabled = it })
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
@@ -191,55 +186,9 @@ private fun AddPlatformTopBar(
 }
 
 @Composable
-private fun PlatformTypeCard(title: String, description: String, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Icon(imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
-        }
-    }
-}
-
-private fun defaultApiUrl(clientType: ClientType) = when (clientType) {
-    ClientType.OPENAI -> ModelConstants.OPENAI_API_URL
-    ClientType.ANTHROPIC -> ModelConstants.ANTHROPIC_API_URL
-    ClientType.GOOGLE -> ModelConstants.GOOGLE_API_URL
-    ClientType.GROQ -> ModelConstants.GROQ_API_URL
-    ClientType.OLLAMA -> ModelConstants.OLLAMA_API_URL
-    ClientType.OPENROUTER -> ModelConstants.OPENROUTER_API_URL
-    ClientType.CUSTOM -> ""
-}
-
-private fun defaultPlatformName(clientType: ClientType) = when (clientType) {
-    ClientType.OPENAI -> "OpenAI"
-    ClientType.ANTHROPIC -> "Anthropic"
-    ClientType.GOOGLE -> "Google"
-    ClientType.GROQ -> "Groq"
-    ClientType.OLLAMA -> "Ollama"
-    ClientType.OPENROUTER -> "OpenRouter"
-    ClientType.CUSTOM -> ""
-}
-
-private fun defaultModel(clientType: ClientType) = ModelConstants.defaultModel(clientType)
-
-@Composable
 private fun getClientTypeName(clientType: ClientType): String = when (clientType) {
-    ClientType.OPENAI -> "OpenAI"
-    ClientType.ANTHROPIC -> "Anthropic"
-    ClientType.GOOGLE -> "Google"
-    ClientType.GROQ -> "Groq"
-    ClientType.OLLAMA -> "Ollama"
-    ClientType.OPENROUTER -> "OpenRouter"
     ClientType.CUSTOM -> stringResource(R.string.custom)
+    else -> ModelConstants.defaultPlatformName(clientType)
 }
 
 @Composable

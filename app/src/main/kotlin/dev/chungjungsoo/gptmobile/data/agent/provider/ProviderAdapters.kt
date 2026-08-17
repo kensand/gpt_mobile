@@ -324,9 +324,21 @@ internal fun geminiToolParameters(schema: JsonObject): JsonObject {
     return buildJsonObject {
         schema.forEach { (key, value) ->
             if (key == "additionalProperties") return@forEach
-            put(key, stripAdditionalProperties(value))
+            put(key, if (key in SCHEMA_MAP_KEYWORDS) stripAdditionalPropertiesInSchemaMap(value) else stripAdditionalProperties(value))
         }
     }
+}
+
+// Keys under these keywords are caller-defined names, so a property literally named
+// additionalProperties must survive while the keyword itself is stripped everywhere else.
+private val SCHEMA_MAP_KEYWORDS = setOf("properties", "patternProperties", "definitions", "\$defs")
+
+private fun stripAdditionalPropertiesInSchemaMap(value: JsonElement): JsonElement = when (value) {
+    is JsonObject -> buildJsonObject {
+        value.forEach { (name, member) -> put(name, stripAdditionalProperties(member)) }
+    }
+
+    else -> stripAdditionalProperties(value)
 }
 
 private fun stripAdditionalProperties(value: JsonElement): JsonElement = when (value) {

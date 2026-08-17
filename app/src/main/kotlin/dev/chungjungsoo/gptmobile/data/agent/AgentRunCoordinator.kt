@@ -11,6 +11,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
 import dev.chungjungsoo.gptmobile.presentation.service.AgentRunForegroundService
 import dev.chungjungsoo.gptmobile.util.ApiStateFlowOutcome
+import dev.chungjungsoo.gptmobile.util.assistantErrorAppendedText
 import dev.chungjungsoo.gptmobile.util.buildAssistantErrorContent
 import dev.chungjungsoo.gptmobile.util.collectApiStateUpdates
 import java.util.concurrent.ConcurrentHashMap
@@ -289,7 +290,7 @@ internal fun terminalAgentMessage(message: MessageV2, error: String?, completedA
     if (error == null) return message.copy(createdAt = completedAt).resetActiveRevision()
 
     val updatedContent = buildAssistantErrorContent(message.content, error)
-    val appendedError = updatedContent.substring(message.content.length)
+    val appendedError = assistantErrorAppendedText(message.content, updatedContent)
     return message.copy(
         content = updatedContent,
         timeline = message.timeline.appendChronologicalText(appendedError),

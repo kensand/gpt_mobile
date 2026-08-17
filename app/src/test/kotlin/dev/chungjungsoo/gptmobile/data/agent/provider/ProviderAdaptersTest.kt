@@ -1,6 +1,7 @@
 package dev.chungjungsoo.gptmobile.data.agent.provider
 
 import android.content.ContextWrapper
+import dev.chungjungsoo.gptmobile.data.ModelConstants
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunEvent
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunner
 import dev.chungjungsoo.gptmobile.data.agent.AgentTool
@@ -360,6 +361,15 @@ class ProviderAdaptersTest {
     }
 
     @Test
+    fun `every declared anthropic model resolves a summarized thinking policy`() {
+        ModelConstants.anthropicModels.forEach { model ->
+            val policy = anthropicThinkingPolicy(model, reasoningEnabled = true, hasTools = true)
+
+            assertEquals("$model should summarize reasoning", "summarized", policy.config?.display)
+        }
+    }
+
+    @Test
     fun `anthropic manual thinking enables interleaving only for supported tool models`() = runBlocking {
         listOf("claude-sonnet-4-5-20250929", "claude-opus-4-1-20250805").forEach { model ->
             val api = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
@@ -658,6 +668,55 @@ class ProviderAdaptersTest {
 
         assertEquals("object", sanitized.getValue("type").toString().trim('"'))
         assertFalse(sanitized.containsKey("additionalProperties"))
+    }
+
+    @Test
+    fun `gemini keeps nested properties named additionalProperties`() {
+        val schema = buildJsonObject {
+            put("type", "object")
+            put("additionalProperties", false)
+            put(
+                "properties",
+                buildJsonObject {
+                    put(
+                        "additionalProperties",
+                        buildJsonObject {
+                            put("type", "string")
+                        }
+                    )
+                    put(
+                        "nested",
+                        buildJsonObject {
+                            put("type", "object")
+                            put("additionalProperties", false)
+                            put(
+                                "properties",
+                                buildJsonObject {
+                                    put(
+                                        "additionalProperties",
+                                        buildJsonObject {
+                                            put("type", "boolean")
+                                            put("additionalProperties", false)
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    )
+                }
+            )
+        }
+
+        val sanitized = geminiToolParameters(schema)
+
+        assertFalse(sanitized.containsKey("additionalProperties"))
+        val properties = sanitized.getValue("properties").jsonObject
+        assertEquals("string", properties.getValue("additionalProperties").jsonObject.getValue("type").jsonPrimitive.content)
+        val nested = properties.getValue("nested").jsonObject
+        assertFalse(nested.containsKey("additionalProperties"))
+        val nestedProperty = nested.getValue("properties").jsonObject.getValue("additionalProperties").jsonObject
+        assertEquals("boolean", nestedProperty.getValue("type").jsonPrimitive.content)
+        assertFalse(nestedProperty.containsKey("additionalProperties"))
     }
 
     @Test
