@@ -241,6 +241,9 @@
     <string name="attach_file">Attach File</string>
     <string name="add_platform">Add Platform</string>
     <string name="add_platform_description">Configure a new API platform</string>
+    <string name="choose_platform_type_step_description">Select the API this platform should use.</string>
+    <string name="platform_details">Platform details</string>
+    <string name="platform_details_description">Name this %1$s platform and enter its connection details.</string>
     <string name="platform_name">Platform Name</string>
     <string name="platform_name_hint">My Custom Platform</string>
     <string name="platform_name_supporting">Give your platform a memorable name</string>
@@ -287,7 +290,7 @@
     <string name="api_key_description">Enter your API key. This is stored locally on your device.</string>
     <string name="api_key_optional_note">API key is optional for local providers like Ollama</string>
     <string name="model_description">Enter the model identifier you want to use</string>
-    <string name="model_examples">Examples: gpt-4o, claude-sonnet-4-20250514, gemini-1.5-pro</string>
+    <string name="model_examples">Examples: gpt-5.6, claude-sonnet-5, gemini-3.7-flash</string>
     <string name="back">Back</string>
     <string name="finish">Finish</string>
     <string name="openrouter" translatable="false">OpenRouter</string>

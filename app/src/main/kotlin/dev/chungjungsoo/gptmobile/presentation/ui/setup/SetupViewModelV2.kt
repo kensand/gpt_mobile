@@ -68,7 +68,7 @@ class SetupViewModelV2 @Inject constructor(
         _platformName.value = getDefaultPlatformName(clientType)
         _apiUrl.value = getDefaultApiUrl(clientType)
         _apiKey.value = ""
-        _model.value = ""
+        _model.value = ModelConstants.defaultModel(clientType)
         _wizardStep.value = 0
     }
 
