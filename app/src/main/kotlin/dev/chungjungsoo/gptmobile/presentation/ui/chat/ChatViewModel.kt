@@ -476,6 +476,7 @@ class ChatViewModel @Inject constructor(
         }
 
         // Start new conversation from the edited question
+        _chatRoom.value.id.takeIf { it > 0 }?.let(agentRunCoordinator::cancelChat)
         completeChat(persistSnapshotFirst = true)
         return true
     }
