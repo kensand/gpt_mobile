@@ -109,12 +109,20 @@ class ChatRepositoryImpl @Inject constructor(
                 when (runEvent) {
                     is AgentRunEvent.Provider -> when (val providerEvent = runEvent.event) {
                         is ProviderEvent.ThinkingDelta -> emit(ApiState.Thinking(providerEvent.text))
+
                         is ProviderEvent.TextDelta -> emit(ApiState.Success(providerEvent.text))
+
                         is ProviderEvent.Failed -> emit(ApiState.Error(providerEvent.message))
-                        is ProviderEvent.ToolCall, ProviderEvent.Completed -> Unit
+
+                        is ProviderEvent.ToolCall -> {
+                            val toolEvent = trace.start(providerEvent)
+                            emit(ApiState.ToolCall(toolEvent.sequence))
+                        }
+
+                        ProviderEvent.Completed -> Unit
                     }
 
-                    is AgentRunEvent.ToolStarted -> trace.start(runEvent.call)
+                    is AgentRunEvent.ToolStarted -> Unit
 
                     is AgentRunEvent.ToolFinished -> trace.finish(runEvent.call, runEvent.result)
 
@@ -402,7 +410,7 @@ private class ToolTraceSession(
     private val pendingEventIds = mutableMapOf<String, ArrayDeque<String>>()
     private var sequence = 0
 
-    suspend fun start(call: ProviderEvent.ToolCall) {
+    suspend fun start(call: ProviderEvent.ToolCall): ToolEvent {
         val resolved = toolsByName[call.name]
         val event = recorder.startTool(
             runId = runId,
@@ -416,6 +424,7 @@ private class ToolTraceSession(
             startedAt = currentEpochSeconds()
         )
         pendingEventIds.getOrPut(call.callId, ::ArrayDeque).addLast(event.eventId)
+        return event
     }
 
     suspend fun finish(call: ProviderEvent.ToolCall, result: AgentToolResult) {

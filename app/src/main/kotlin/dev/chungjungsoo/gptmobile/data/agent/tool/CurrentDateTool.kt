@@ -17,7 +17,11 @@ class CurrentDateTool(
     override val definition = AgentToolDefinition(
         name = "current_date",
         description = "Returns the current local date, time, and time zone.",
-        inputSchema = JsonObject(emptyMap())
+        inputSchema = buildJsonObject {
+            put("type", "object")
+            put("properties", JsonObject(emptyMap()))
+            put("additionalProperties", false)
+        }
     )
 
     override suspend fun execute(callId: String, arguments: JsonObject): AgentToolResult {

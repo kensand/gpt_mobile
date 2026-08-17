@@ -46,7 +46,14 @@ class AgentToolResolverTest {
         val result = tool.execute("call-date", buildJsonObject {})
 
         assertEquals("current_date", tool.definition.name)
-        assertEquals(buildJsonObject {}, tool.definition.inputSchema)
+        assertEquals(
+            buildJsonObject {
+                put("type", "object")
+                put("properties", buildJsonObject {})
+                put("additionalProperties", false)
+            },
+            tool.definition.inputSchema
+        )
         assertEquals("call-date", result.callId)
         assertEquals(false, result.isError)
         assertEquals(

@@ -27,7 +27,11 @@ data class GenerateContentRequest(
 
     @SerialName("tools")
     @EncodeDefault(EncodeDefault.Mode.NEVER)
-    val tools: List<GoogleTool>? = null
+    val tools: List<GoogleTool>? = null,
+
+    @SerialName("toolConfig")
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val toolConfig: GoogleToolConfig? = null
 )
 
 @Serializable
@@ -98,4 +102,16 @@ data class ThinkingConfig(
     @SerialName("includeThoughts")
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val includeThoughts: Boolean = false
+)
+
+@Serializable
+data class GoogleToolConfig(
+    @SerialName("functionCallingConfig")
+    val functionCallingConfig: GoogleFunctionCallingConfig
+)
+
+@Serializable
+data class GoogleFunctionCallingConfig(
+    @SerialName("mode")
+    val mode: String
 )

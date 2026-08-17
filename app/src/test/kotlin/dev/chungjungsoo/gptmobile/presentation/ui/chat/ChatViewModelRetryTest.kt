@@ -6,6 +6,8 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItem
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItemType
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
@@ -13,6 +15,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
+import dev.chungjungsoo.gptmobile.data.database.entity.rebuildAssistantTimelineForEdit
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.selectRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.snapshotLatestAssistantRevision
@@ -326,6 +329,86 @@ class ChatViewModelRetryTest {
 
         assertNull(message.effectiveRunId())
         assertFalse(formatAssistantExport("OpenAI", message, traces).contains("new result"))
+    }
+
+    @Test
+    fun `assistant export preserves interleaved text thinking and tool order`() {
+        val message = MessageV2(
+            content = "BeforeBetweenAfter",
+            thoughts = "Checking",
+            timeline = listOf(
+                AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "Before"),
+                AssistantTimelineItem(AssistantTimelineItemType.TOOL, toolSequence = 0),
+                AssistantTimelineItem(AssistantTimelineItemType.THINKING, content = "Checking"),
+                AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "Between"),
+                AssistantTimelineItem(AssistantTimelineItemType.TOOL, toolSequence = 1),
+                AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "After")
+            ),
+            platformType = "platform-1",
+            currentRunId = "run-new"
+        )
+        val traces = mapOf(
+            "run-new" to listOf(
+                toolEvent("new-event", "first result"),
+                toolEvent("new-event-2", "second result").copy(sequence = 1)
+            )
+        )
+
+        val markdown = formatAssistantExport("OpenAI", message, traces)
+
+        val orderedMarkers = listOf("Before", "first result", "Checking", "Between", "second result", "After")
+        assertTrue(orderedMarkers.zipWithNext().all { (first, second) -> markdown.indexOf(first) < markdown.indexOf(second) })
+    }
+
+    @Test
+    fun `legacy assistant export preserves data while declaring unknown event order`() {
+        val message = MessageV2(
+            content = "Legacy answer",
+            thoughts = "Legacy reasoning",
+            platformType = "platform-1",
+            currentRunId = "run-new"
+        )
+        val traces = mapOf("run-new" to listOf(toolEvent("new-event", "legacy tool result")))
+
+        val markdown = formatAssistantExport("OpenAI", message, traces)
+
+        assertTrue(markdown.contains("Original event order is unavailable"))
+        assertTrue(markdown.contains("Legacy reasoning"))
+        assertTrue(markdown.contains("Legacy answer"))
+        assertTrue(markdown.contains("legacy tool result"))
+    }
+
+    @Test
+    fun `edited assistant export uses rebuilt state and preserves tool trace without stale text`() {
+        val originalTimeline = listOf(
+            AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "Old before"),
+            AssistantTimelineItem(AssistantTimelineItemType.TOOL, toolSequence = 0),
+            AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "Old after")
+        )
+        val edited = MessageV2(
+            content = "Edited answer",
+            thoughts = "Edited reasoning",
+            timeline = rebuildAssistantTimelineForEdit(
+                currentTimeline = originalTimeline,
+                updatedContent = "Edited answer",
+                updatedThoughts = "Edited reasoning"
+            ),
+            platformType = "platform-1",
+            currentRunId = "run-new"
+        )
+
+        val markdown = formatAssistantExport(
+            "OpenAI",
+            edited,
+            mapOf("run-new" to listOf(toolEvent("new-event", "preserved tool result")))
+        )
+
+        assertTrue(markdown.contains("Original event order is unavailable"))
+        assertTrue(markdown.contains("Edited reasoning"))
+        assertTrue(markdown.contains("Edited answer"))
+        assertTrue(markdown.contains("preserved tool result"))
+        assertFalse(markdown.contains("Old before"))
+        assertFalse(markdown.contains("Old after"))
     }
 
     private fun toolEvent(eventId: String, result: String) = ToolEvent(

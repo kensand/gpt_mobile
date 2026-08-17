@@ -341,6 +341,20 @@ object ChatDatabaseV2Migrations {
         }
     }
 
+    val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `messages_v2` ADD COLUMN `timeline` TEXT NOT NULL DEFAULT '[]'")
+            db.execSQL(
+                """
+                UPDATE `messages_v2`
+                SET `timeline` = '[{"type":"LEGACY_ORDER"}]'
+                WHERE `platform_type` IS NOT NULL
+                  AND (`content` != '' OR `thoughts` != '' OR `current_run_id` IS NOT NULL)
+                """.trimIndent()
+            )
+        }
+    }
+
     private fun installAgentToolBindingConstraints(db: SupportSQLiteDatabase) {
         db.execSQL(
             """

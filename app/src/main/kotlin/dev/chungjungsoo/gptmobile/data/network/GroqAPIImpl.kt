@@ -46,8 +46,8 @@ class GroqAPIImpl @Inject constructor(
                 config.token?.let { bearerAuth(it) }
             }.execute { response ->
                 if (!response.status.isSuccess()) {
-                    throwIfToolDefinitionsRejected(response.status.value, !request.tools.isNullOrEmpty())
                     val errorBody = response.body<String>()
+                    throwIfToolDefinitionsRejected(response.status.value, !request.tools.isNullOrEmpty(), errorBody)
                     val errorMessage = try {
                         val errorResponse = NetworkClient.openAIJson.decodeFromString<GroqErrorResponse>(errorBody)
                         errorResponse.error.message

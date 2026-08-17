@@ -112,16 +112,18 @@ fun ToolTraceBlock(
                         .fillMaxWidth()
                         .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
                 ) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        label = { Text(searchToolTrace) },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .semantics { contentDescription = searchToolTrace }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    if (events.size > 1) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            label = { Text(searchToolTrace) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics { contentDescription = searchToolTrace }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                     val filteredEvents = filterToolEvents(events, query)
                     if (filteredEvents.isEmpty()) {
                         Text(

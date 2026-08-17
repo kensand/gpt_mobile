@@ -46,7 +46,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItem
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItemType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
+import dev.chungjungsoo.gptmobile.data.database.entity.hasUnavailableAssistantOrder
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
 import java.io.File
 
@@ -93,6 +96,7 @@ fun OpponentChatBubble(
     isError: Boolean = false,
     text: String,
     thoughts: String = "",
+    timeline: List<AssistantTimelineItem> = emptyList(),
     attachments: List<String> = emptyList(),
     agentRun: AgentRun? = null,
     toolEvents: List<ToolEvent> = emptyList(),
@@ -115,52 +119,42 @@ fun OpponentChatBubble(
         disabledContainerColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.38f)
     )
 
-    // Show thinking block while loading if we have thoughts but no text yet
-    val isThinking = isLoading && thoughts.isNotBlank() && text.isBlank()
-
     Column(modifier = modifier) {
         AgentRunStatusBlock(
             run = agentRun,
             modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp)
         )
 
-        // Thinking block (collapsed by default)
-        if (thoughts.isNotBlank()) {
-            ThinkingBlock(
-                modifier = Modifier.padding(top = 16.dp, start = 8.dp, end = 8.dp),
-                thoughts = thoughts,
-                contentIdentity = contentIdentity,
-                isLoading = isThinking
-            )
-        }
-
-        ToolTraceBlock(
-            events = toolEvents,
-            modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp),
-            contentIdentity = contentIdentity
-        )
-
         Column {
-            Card(
-                shape = RoundedCornerShape(0.dp),
-                colors = cardColor
-            ) {
-                Column {
-                    val displayText = if (isLoading) text + "●" else text
-
-                    ChatMarkdown(
-                        content = displayText,
-                        contentIdentity = contentIdentity,
-                        modifier = Modifier
-                            .padding(16.dp)
-                    )
-
-                    MessageFileThumbnailRow(
-                        files = attachments,
-                        usePrimaryColors = false,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                }
+            val hasUnavailableOrder = hasUnavailableAssistantOrder(
+                timeline = timeline,
+                content = text,
+                thoughts = thoughts,
+                hasToolEvents = toolEvents.isNotEmpty()
+            )
+            if (timeline.isNotEmpty() && !hasUnavailableOrder) {
+                AssistantTimelineContent(
+                    timeline = timeline,
+                    toolEvents = toolEvents,
+                    isLoading = isLoading,
+                    contentIdentity = contentIdentity
+                )
+                MessageFileThumbnailRow(
+                    files = attachments,
+                    usePrimaryColors = false,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            } else {
+                LegacyAssistantContent(
+                    cardColor = cardColor,
+                    text = text,
+                    thoughts = thoughts,
+                    toolEvents = toolEvents,
+                    attachments = attachments,
+                    isLoading = isLoading,
+                    contentIdentity = contentIdentity,
+                    showOrderNotice = hasUnavailableOrder
+                )
             }
 
             if (!isLoading) {
@@ -221,6 +215,100 @@ fun OpponentChatBubble(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AssistantTimelineContent(
+    timeline: List<AssistantTimelineItem>,
+    toolEvents: List<ToolEvent>,
+    isLoading: Boolean,
+    contentIdentity: Any
+) {
+    val toolEventsBySequence = toolEvents.associateBy(ToolEvent::sequence)
+    timeline.forEachIndexed { index, item ->
+        when (item.type) {
+            AssistantTimelineItemType.THINKING -> ThinkingBlock(
+                modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp),
+                thoughts = item.content,
+                contentIdentity = "$contentIdentity:thinking:$index",
+                isLoading = isLoading && index == timeline.lastIndex
+            )
+
+            AssistantTimelineItemType.TEXT -> {
+                val displayText = if (isLoading && index == timeline.lastIndex) item.content + "●" else item.content
+                ChatMarkdown(
+                    content = displayText,
+                    contentIdentity = "$contentIdentity:text:$index",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+
+            AssistantTimelineItemType.TOOL ->
+                item.toolSequence
+                    ?.let(toolEventsBySequence::get)
+                    ?.let { event ->
+                        ToolTraceBlock(
+                            events = listOf(event),
+                            modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp),
+                            contentIdentity = "$contentIdentity:tool:${event.sequence}"
+                        )
+                    }
+
+            AssistantTimelineItemType.LEGACY_ORDER -> Unit
+        }
+    }
+}
+
+@Composable
+private fun LegacyAssistantContent(
+    cardColor: CardColors,
+    text: String,
+    thoughts: String,
+    toolEvents: List<ToolEvent>,
+    attachments: List<String>,
+    isLoading: Boolean,
+    contentIdentity: Any,
+    showOrderNotice: Boolean
+) {
+    val isThinking = isLoading && thoughts.isNotBlank() && text.isBlank()
+    if (showOrderNotice) {
+        Text(
+            text = stringResource(R.string.legacy_assistant_order_unavailable),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 12.dp, start = 16.dp, end = 16.dp)
+        )
+    }
+    if (thoughts.isNotBlank()) {
+        ThinkingBlock(
+            modifier = Modifier.padding(top = 16.dp, start = 8.dp, end = 8.dp),
+            thoughts = thoughts,
+            contentIdentity = contentIdentity,
+            isLoading = isThinking
+        )
+    }
+    ToolTraceBlock(
+        events = toolEvents,
+        modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp),
+        contentIdentity = contentIdentity
+    )
+    Card(
+        shape = RoundedCornerShape(0.dp),
+        colors = cardColor
+    ) {
+        Column {
+            ChatMarkdown(
+                content = if (isLoading) text + "●" else text,
+                contentIdentity = contentIdentity,
+                modifier = Modifier.padding(16.dp)
+            )
+            MessageFileThumbnailRow(
+                files = attachments,
+                usePrimaryColors = false,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
         }
     }
 }

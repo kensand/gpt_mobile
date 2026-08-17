@@ -14,6 +14,7 @@ import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.ToolUseContent
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.request.AnthropicTool
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.request.InputMessage
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.request.MessageRequest
+import dev.chungjungsoo.gptmobile.data.dto.anthropic.request.ThinkingConfig as AnthropicThinkingConfig
 import dev.chungjungsoo.gptmobile.data.dto.google.common.Content
 import dev.chungjungsoo.gptmobile.data.dto.google.common.FunctionCall
 import dev.chungjungsoo.gptmobile.data.dto.google.common.FunctionResponse
@@ -22,7 +23,9 @@ import dev.chungjungsoo.gptmobile.data.dto.google.common.Role as GoogleRole
 import dev.chungjungsoo.gptmobile.data.dto.google.request.FunctionDeclaration
 import dev.chungjungsoo.gptmobile.data.dto.google.request.GenerateContentRequest
 import dev.chungjungsoo.gptmobile.data.dto.google.request.GenerationConfig
+import dev.chungjungsoo.gptmobile.data.dto.google.request.GoogleFunctionCallingConfig
 import dev.chungjungsoo.gptmobile.data.dto.google.request.GoogleTool
+import dev.chungjungsoo.gptmobile.data.dto.google.request.GoogleToolConfig
 import dev.chungjungsoo.gptmobile.data.dto.google.request.SafetySetting
 import dev.chungjungsoo.gptmobile.data.dto.google.request.ThinkingConfig as GoogleThinkingConfig
 import dev.chungjungsoo.gptmobile.data.dto.groq.request.GroqChatCompletionRequest
@@ -208,35 +211,44 @@ class AnthropicMessagesAdapter @Inject constructor(
 ) {
     suspend fun openSession(turns: List<ConversationTurn>, platform: PlatformV2): AgentProviderSession {
         val initialMessages = attachmentEncoder.anthropicMessages(turns, platform.uid)
-        val config = ProviderRequestConfig(platform.apiUrl, platform.token)
         val assistantContentByRound = mutableMapOf<Int, List<MessageContent>>()
         return object : AgentProviderSession {
             override fun streamRound(
                 tools: List<AgentToolDefinition>,
                 exchanges: List<AgentToolExchange>
             ): Flow<ProviderEvent> = flow {
+                val thinkingPolicy = anthropicThinkingPolicy(
+                    model = platform.model,
+                    reasoningEnabled = platform.reasoning,
+                    hasTools = tools.isNotEmpty()
+                )
+                val isThinkingActive = thinkingPolicy.config?.type?.let { it != "disabled" } == true
                 val request = MessageRequest(
                     model = platform.model,
                     messages = initialMessages + exchanges.flatMapIndexed { index, exchange ->
                         exchange.toAnthropicMessages(assistantContentByRound[index])
                     },
-                    maxTokens = if (platform.reasoning) 16000 else 4096,
+                    maxTokens = if (isThinkingActive) 16000 else 4096,
                     stream = platform.stream,
                     systemPrompt = platform.systemPrompt,
-                    temperature = if (platform.reasoning) null else platform.temperature,
-                    topP = if (platform.reasoning) null else platform.topP,
-                    thinking = if (platform.reasoning) {
-                        dev.chungjungsoo.gptmobile.data.dto.anthropic.request.ThinkingConfig()
-                    } else {
-                        null
-                    },
+                    temperature = if (isThinkingActive) null else platform.temperature,
+                    topP = if (isThinkingActive) null else platform.topP,
+                    thinking = thinkingPolicy.config,
                     tools = tools.takeIf { it.isNotEmpty() }?.map { definition ->
                         AnthropicTool(definition.name, definition.description, definition.inputSchema)
                     }
                 )
                 val assembler = AnthropicEventAssembler()
                 var failed = false
-                api.streamChatMessage(request, platform.timeout, config).collect { chunk ->
+                api.streamChatMessage(
+                    request,
+                    platform.timeout,
+                    ProviderRequestConfig(
+                        apiUrl = platform.apiUrl,
+                        token = platform.token,
+                        anthropicBetaFeatures = thinkingPolicy.betaFeatures
+                    )
+                ).collect { chunk ->
                     assembler.accept(chunk).forEach { mapped ->
                         when (mapped) {
                             ProviderEvent.Completed -> Unit
@@ -256,6 +268,54 @@ class AnthropicMessagesAdapter @Inject constructor(
         }
     }
 }
+
+internal data class AnthropicThinkingPolicy(
+    val config: AnthropicThinkingConfig?,
+    val betaFeatures: Set<String>
+)
+
+internal fun anthropicThinkingPolicy(
+    model: String,
+    reasoningEnabled: Boolean,
+    hasTools: Boolean
+): AnthropicThinkingPolicy {
+    val normalizedModel = model.lowercase()
+    if (!reasoningEnabled) {
+        val config = AnthropicThinkingConfig(type = "disabled")
+            .takeIf { DEFAULT_ON_DISABLEABLE_ANTHROPIC_MODEL_PATTERN.containsMatchIn(normalizedModel) }
+        return AnthropicThinkingPolicy(config = config, betaFeatures = emptySet())
+    }
+
+    val usesAdaptiveThinking = ADAPTIVE_ANTHROPIC_MODEL_PATTERN.containsMatchIn(normalizedModel) ||
+        normalizedModel.contains("mythos") ||
+        normalizedModel.contains("fable")
+    if (usesAdaptiveThinking) {
+        return AnthropicThinkingPolicy(
+            config = AnthropicThinkingConfig(type = "adaptive", display = "summarized"),
+            betaFeatures = emptySet()
+        )
+    }
+    if (!MANUAL_THINKING_ANTHROPIC_MODEL_PATTERN.containsMatchIn(normalizedModel)) {
+        return AnthropicThinkingPolicy(config = null, betaFeatures = emptySet())
+    }
+
+    val supportsManualInterleaving = hasTools &&
+        (normalizedModel.contains("opus") || normalizedModel.contains("sonnet")) &&
+        MANUAL_INTERLEAVED_ANTHROPIC_MODEL_PATTERN.containsMatchIn(normalizedModel)
+    return AnthropicThinkingPolicy(
+        config = AnthropicThinkingConfig(type = "enabled", budgetTokens = 10_000, display = "summarized"),
+        betaFeatures = if (supportsManualInterleaving) setOf(ANTHROPIC_INTERLEAVED_THINKING_BETA) else emptySet()
+    )
+}
+
+internal const val ANTHROPIC_INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14"
+private val ADAPTIVE_ANTHROPIC_MODEL_PATTERN = Regex(
+    "(?:^|-)4-(?:6|7|8)(?:-|$)|claude-(?:opus|sonnet|haiku)-5(?:-|$)|claude-5-(?:opus|sonnet|haiku)(?:-|$)"
+)
+private val DEFAULT_ON_DISABLEABLE_ANTHROPIC_MODEL_PATTERN =
+    Regex("claude-(?:opus|sonnet)-5(?:-|$)|claude-5-(?:opus|sonnet)(?:-|$)")
+private val MANUAL_THINKING_ANTHROPIC_MODEL_PATTERN = Regex("(?:^|-)3-7(?:-|$)|(?:^|-)4(?:-|$)")
+private val MANUAL_INTERLEAVED_ANTHROPIC_MODEL_PATTERN = Regex("(?:^|-)4(?:-|$)")
 
 class GeminiAdapter @Inject constructor(
     private val api: GoogleAPI,
@@ -295,6 +355,9 @@ class GeminiAdapter @Inject constructor(
                                 }
                             )
                         )
+                    },
+                    toolConfig = tools.takeIf { it.isNotEmpty() }?.let {
+                        GoogleToolConfig(GoogleFunctionCallingConfig(mode = "AUTO"))
                     }
                 )
                 var failed = false

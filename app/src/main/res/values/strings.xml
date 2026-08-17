@@ -304,6 +304,7 @@
     <string name="tool_connections">Tool connections</string>
     <string name="web_tools_description">Web search and MCP connections</string>
     <string name="add_tool_connection">Add tool connection</string>
+    <string name="no_tool_connections">Add a Web Search or MCP Server connection to give agents extra tools.</string>
     <string name="edit_tool_connection">Edit tool connection</string>
     <string name="save_tool_connection">Save tool connection</string>
     <string name="delete_tool_connection">Delete tool connection</string>
@@ -362,6 +363,18 @@
     <string name="provider_option">Provider %1$s</string>
     <string name="streamable_http" translatable="false">Streamable HTTP</string>
     <string name="connection_name">Connection name</string>
+    <string name="choose_connection_type">What do you want to connect?</string>
+    <string name="choose_connection_type_description">Choose one connection type to get started.</string>
+    <string name="web_search">Web Search</string>
+    <string name="web_search_connection_description">Search the web with Firecrawl, Perplexity, or Exa.</string>
+    <string name="mcp_server">MCP Server</string>
+    <string name="mcp_server_connection_description">Connect tools exposed by a Streamable HTTP MCP server.</string>
+    <string name="choose_search_provider">Choose a web search provider</string>
+    <string name="choose_search_provider_description">Select the service this connection will use.</string>
+    <string name="connection_details">Connection details</string>
+    <string name="web_search_details_description">Name this %1$s connection and add its API key.</string>
+    <string name="mcp_details_description">Name this %1$s connection and enter its endpoint.</string>
+    <string name="mcp_authentication_description">Choose how the MCP server authenticates requests.</string>
     <string name="mcp_endpoint_error">Use an HTTP(S) MCP endpoint. Approve cleartext HTTP below.</string>
     <string name="authentication">Authentication</string>
     <string name="bearer_token">Bearer token</string>
@@ -386,6 +399,7 @@
         <item quantity="other">%1$d s</item>
     </plurals>
     <string name="retry_tools_warning">Retry may run assigned tools again.</string>
+    <string name="legacy_assistant_order_unavailable">Original event order is unavailable. Reasoning, response text, and tool calls are shown without implying chronology.</string>
     <string name="no_matching_tool_calls">No matching tool calls.</string>
     <string name="cancel_active_runs">Cancel active runs</string>
     <string name="agent_run_queued">Agent run queued</string>

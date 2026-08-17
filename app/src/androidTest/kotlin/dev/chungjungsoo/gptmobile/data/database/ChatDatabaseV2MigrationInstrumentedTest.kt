@@ -219,6 +219,77 @@ class ChatDatabaseV2MigrationInstrumentedTest {
 
     @Test
     @Throws(IOException::class)
+    fun migrate7To8_marksLegacyAssistantTimelineOrderAsUnavailableWithoutChangingMessages() {
+        helper.createDatabase(TIMELINE_DATABASE, 7).apply {
+            execSQL(
+                "INSERT INTO chats_v2 (chat_id, title, enabled_platform, created_at, updated_at) " +
+                    "VALUES (8, 'Timeline chat', '', 100, 101)"
+            )
+            execSQL(
+                """
+                INSERT INTO messages_v2 (
+                    message_id, chat_id, thoughts, content, attachments, revisions,
+                    active_revision_index, linked_message_id, platform_type, current_run_id, created_at
+                ) VALUES (11, 8, '', 'Question', '[]', '[]', -1, 0, NULL, NULL, 101)
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO messages_v2 (
+                    message_id, chat_id, thoughts, content, attachments, revisions,
+                    active_revision_index, linked_message_id, platform_type, current_run_id, created_at
+                ) VALUES (12, 8, 'Checking', 'Existing answer', '[]', '[]', -1, 11, 'profile-1', 'run-1', 102)
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO agent_runs (
+                    run_id, chat_id, user_message_id, assistant_message_id, profile_uid,
+                    provider_snapshot, model_snapshot, status, created_at
+                ) VALUES ('run-1', 8, 11, 12, 'profile-1', 'OPENAI', 'model', 'COMPLETED', 101)
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO tool_events (
+                    event_id, run_id, sequence, call_id, connection_uid_snapshot,
+                    connection_name_snapshot, tool_name, model_tool_name, arguments,
+                    result, result_type, status, is_error
+                ) VALUES (
+                    'event-1', 'run-1', 0, 'call-1', NULL, NULL, 'search', 'search', '{}',
+                    'Tool result', 'TEXT', 'COMPLETED', 0
+                )
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val database = helper.runMigrationsAndValidate(
+            TIMELINE_DATABASE,
+            8,
+            true,
+            ChatDatabaseV2Migrations.MIGRATION_7_8
+        )
+
+        database.query(
+            "SELECT thoughts, content, current_run_id, timeline FROM messages_v2 WHERE message_id = 12"
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("Checking", cursor.getString(0))
+            assertEquals("Existing answer", cursor.getString(1))
+            assertEquals("run-1", cursor.getString(2))
+            assertEquals("""[{"type":"LEGACY_ORDER"}]""", cursor.getString(3))
+        }
+        database.query("SELECT sequence, result FROM tool_events WHERE run_id = 'run-1'").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
+            assertEquals("Tool result", cursor.getString(1))
+        }
+        database.close()
+    }
+
+    @Test
+    @Throws(IOException::class)
     fun migrate6To7_cascadesConnectionBindingsAndRunHistoryAtTheirOwners() {
         helper.createDatabase(CASCADE_DATABASE, 6).close()
         val database = helper.runMigrationsAndValidate(
@@ -292,6 +363,7 @@ class ChatDatabaseV2MigrationInstrumentedTest {
         const val TEST_DATABASE = "agent-migration-test"
         const val DUPLICATE_PROFILE_DATABASE = "agent-migration-duplicate-profile-test"
         const val CASCADE_DATABASE = "agent-migration-cascade-test"
+        const val TIMELINE_DATABASE = "agent-migration-timeline-test"
         const val BROKEN_VERSION_2_DATABASE = "agent-migration-broken-v2-test"
     }
 }

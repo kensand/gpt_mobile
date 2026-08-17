@@ -16,7 +16,9 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunDraft
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItemType
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
+import dev.chungjungsoo.gptmobile.data.database.entity.LEGACY_ORDER_NOTICE
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
@@ -25,6 +27,9 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
+import dev.chungjungsoo.gptmobile.data.database.entity.effectiveTimeline
+import dev.chungjungsoo.gptmobile.data.database.entity.hasUnavailableAssistantOrder
+import dev.chungjungsoo.gptmobile.data.database.entity.rebuildAssistantTimelineForEdit
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.selectRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.snapshotLatestAssistantRevision
@@ -498,6 +503,19 @@ class ChatViewModel @Inject constructor(
         val updatedAttachments = attachments.mapNotNull { it.attachment }
 
         val textChanged = currentMessage.content != updatedContent || currentMessage.thoughts != updatedThoughts
+        val updatedTimeline = if (textChanged) {
+            rebuildAssistantTimelineForEdit(
+                currentTimeline = currentMessage.timeline,
+                updatedContent = updatedContent,
+                updatedThoughts = updatedThoughts,
+                hasToolTrace = currentMessage.currentRunId
+                    ?.let(_toolEventsByRun.value::get)
+                    .orEmpty()
+                    .isNotEmpty()
+            )
+        } else {
+            currentMessage.timeline
+        }
         val updatedRevisions = if (textChanged) {
             currentMessage.snapshotLatestAssistantRevision(currentTimeStamp)
                 ?.let { listOf(it) + currentMessage.revisions }
@@ -515,6 +533,7 @@ class ChatViewModel @Inject constructor(
                 assistantMessage.copy(
                     content = updatedContent,
                     thoughts = updatedThoughts,
+                    timeline = updatedTimeline,
                     attachments = updatedAttachments,
                     revisions = updatedRevisions,
                     createdAt = assistantMessage.createdAt
@@ -1219,14 +1238,61 @@ internal fun formatAssistantExport(
     toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default
 ): String = buildString {
     appendLine("**Assistant ($platformName):**")
-    appendLine(message.effectiveContent())
-    appendLine()
     val trace = message.effectiveRunId()
         ?.let(toolEventsByRun::get)
         .orEmpty()
-    formatToolTraceMarkdown(trace, toolTraceLabels).takeIf { it.isNotBlank() }?.let {
-        appendLine(it)
+    val timeline = message.effectiveTimeline()
+    val content = message.effectiveContent()
+    val thoughts = message.effectiveThoughts()
+    if (hasUnavailableAssistantOrder(timeline, content, thoughts, trace.isNotEmpty())) {
+        appendLine("> $LEGACY_ORDER_NOTICE")
         appendLine()
+        thoughts.takeIf(String::isNotBlank)?.let {
+            appendLine("<details><summary>Thinking (order unavailable)</summary>")
+            appendLine()
+            appendLine(it)
+            appendLine()
+            appendLine("</details>")
+            appendLine()
+        }
+        content.takeIf(String::isNotBlank)?.let {
+            appendLine(it)
+            appendLine()
+        }
+        formatToolTraceMarkdown(trace, toolTraceLabels).takeIf { it.isNotBlank() }?.let {
+            appendLine(it)
+            appendLine()
+        }
+    } else if (timeline.isEmpty()) {
+        appendLine(content)
+        appendLine()
+        formatToolTraceMarkdown(trace, toolTraceLabels).takeIf { it.isNotBlank() }?.let {
+            appendLine(it)
+            appendLine()
+        }
+    } else {
+        val traceBySequence = trace.associateBy(ToolEvent::sequence)
+        timeline.forEach { item ->
+            when (item.type) {
+                AssistantTimelineItemType.TEXT -> appendLine(item.content)
+
+                AssistantTimelineItemType.THINKING -> {
+                    appendLine("<details><summary>Thinking</summary>")
+                    appendLine()
+                    appendLine(item.content)
+                    appendLine()
+                    appendLine("</details>")
+                }
+
+                AssistantTimelineItemType.TOOL ->
+                    item.toolSequence
+                        ?.let(traceBySequence::get)
+                        ?.let { appendLine(formatToolTraceMarkdown(listOf(it), toolTraceLabels)) }
+
+                AssistantTimelineItemType.LEGACY_ORDER -> Unit
+            }
+            appendLine()
+        }
     }
 }
 
@@ -1236,6 +1302,7 @@ internal fun persistableMessages(groupedMessages: ChatViewModel.GroupedMessages)
         .filter {
             it.effectiveContent().isNotBlank() ||
                 it.effectiveThoughts().isNotBlank() ||
+                it.effectiveTimeline().isNotEmpty() ||
                 it.attachments.isNotEmpty() ||
                 it.currentRunId != null
         }

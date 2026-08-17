@@ -1,5 +1,8 @@
 package dev.chungjungsoo.gptmobile.data.agent
 
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItem
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItemType
+import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
@@ -64,5 +67,41 @@ class AgentRunCoordinatorTest {
         assertEquals(listOf("finish"), rejectedEvents)
         assertTrue(accepted)
         assertEquals(listOf("finish", "message"), acceptedEvents)
+    }
+
+    @Test
+    fun `coordinator terminal failure appends error after the authoritative timeline`() {
+        val partial = MessageV2(
+            content = "Partial",
+            timeline = listOf(
+                AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "Partial"),
+                AssistantTimelineItem(AssistantTimelineItemType.TOOL, toolSequence = 0)
+            ),
+            platformType = "profile"
+        )
+
+        val terminal = terminalAgentMessage(partial, "Provider failed.", completedAt = 42L)
+
+        assertEquals("Partial\n\n[Response stopped: Provider failed.]", terminal.content)
+        assertEquals(
+            AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "\n\n[Response stopped: Provider failed.]"),
+            terminal.timeline.last()
+        )
+        assertEquals(42L, terminal.createdAt)
+    }
+
+    @Test
+    fun `coordinator failure before streaming creates an authoritative error timeline`() {
+        val terminal = terminalAgentMessage(
+            MessageV2(content = "", platformType = "profile"),
+            "Service start failed.",
+            completedAt = 42L
+        )
+
+        assertEquals("Error: Service start failed.", terminal.content)
+        assertEquals(
+            listOf(AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "Error: Service start failed.")),
+            terminal.timeline
+        )
     }
 }

@@ -418,6 +418,7 @@ class ChatRepositoryImplTest {
                                 Choice(
                                     index = 0,
                                     delta = Delta(
+                                        content = "before",
                                         toolCalls = listOf(
                                             ChatToolCallDelta(
                                                 index = 0,
@@ -431,7 +432,7 @@ class ChatRepositoryImplTest {
                             )
                         )
                     ),
-                    flowOf(ChatCompletionChunk(choices = listOf(Choice(0, Delta(content = "done"), finishReason = "stop"))))
+                    flowOf(ChatCompletionChunk(choices = listOf(Choice(0, Delta(content = "after"), finishReason = "stop"))))
                 )
             )
         )
@@ -448,7 +449,16 @@ class ChatRepositoryImplTest {
             runId = "run-web"
         ).toList()
 
-        assertEquals(listOf(ApiState.Loading, ApiState.Success("done"), ApiState.Done), states)
+        assertEquals(
+            listOf(
+                ApiState.Loading,
+                ApiState.Success("before"),
+                ApiState.ToolCall(toolSequence = 0),
+                ApiState.Success("after"),
+                ApiState.Done
+            ),
+            states
+        )
         assertEquals(listOf("current_date", "web_search"), openAIAPI.requests.first().tools!!.map { it.function.name }.sorted())
         assertEquals("call_exact", openAIAPI.requests.last().messages.takeLast(2).first().toolCalls!!.single().id)
         val event = traceDao.events.single()

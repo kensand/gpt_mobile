@@ -53,7 +53,10 @@ data class MessageV2(
     val currentRunId: String? = null,
 
     @ColumnInfo(name = "created_at")
-    val createdAt: Long = System.currentTimeMillis() / 1000
+    val createdAt: Long = System.currentTimeMillis() / 1000,
+
+    @ColumnInfo(name = "timeline", defaultValue = "'[]'")
+    val timeline: List<AssistantTimelineItem> = emptyList()
 )
 
 @Serializable
@@ -61,7 +64,8 @@ data class AssistantRevision(
     val content: String,
     val thoughts: String = "",
     val createdAt: Long,
-    val runId: String? = null
+    val runId: String? = null,
+    val timeline: List<AssistantTimelineItem> = emptyList()
 )
 
 const val ACTIVE_REVISION_LATEST = -1
@@ -78,13 +82,21 @@ fun MessageV2.effectiveThoughts(): String = revisions
     ?.thoughts
     ?: thoughts
 
+fun MessageV2.effectiveTimeline(): List<AssistantTimelineItem> = revisions
+    .getOrNull(activeRevisionIndex)
+    ?.timeline
+    ?: timeline
+
 fun MessageV2.effectiveRunId(): String? = if (hasHistoricalRevisionSelected()) {
     revisions[activeRevisionIndex].runId
 } else {
     currentRunId
 }
 
-fun MessageV2.isEffectivelyBlank(): Boolean = effectiveContent().isBlank() && attachments.isEmpty()
+fun MessageV2.isEffectivelyBlank(): Boolean = effectiveContent().isBlank() &&
+    effectiveThoughts().isBlank() &&
+    effectiveTimeline().isEmpty() &&
+    attachments.isEmpty()
 
 fun MessageV2.resetActiveRevision(): MessageV2 = copy(activeRevisionIndex = ACTIVE_REVISION_LATEST)
 
@@ -94,12 +106,13 @@ fun MessageV2.selectRevision(index: Int): MessageV2 = copy(
 
 fun MessageV2.snapshotLatestAssistantRevision(timestamp: Long = System.currentTimeMillis() / 1000): AssistantRevision? {
     if (platformType == null) return null
-    if (content.isBlank() && thoughts.isBlank()) return null
+    if (content.isBlank() && thoughts.isBlank() && timeline.isEmpty()) return null
 
     return AssistantRevision(
         content = content,
         thoughts = thoughts,
         createdAt = timestamp,
-        runId = currentRunId
+        runId = currentRunId,
+        timeline = timeline
     )
 }

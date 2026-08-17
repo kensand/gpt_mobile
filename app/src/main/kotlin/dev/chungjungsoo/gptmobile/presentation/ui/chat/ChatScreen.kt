@@ -106,6 +106,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
+import dev.chungjungsoo.gptmobile.data.database.entity.effectiveTimeline
 import dev.chungjungsoo.gptmobile.util.isAssistantErrorMessage
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -480,6 +481,7 @@ private fun ChatMessagePair(
     val selectedAssistantMessage = assistantMessages.getOrNull(platformIndexState)
     val assistantContent = selectedAssistantMessage?.effectiveContent() ?: ""
     val assistantThoughts = selectedAssistantMessage?.effectiveThoughts() ?: ""
+    val assistantTimeline = selectedAssistantMessage?.effectiveTimeline().orEmpty()
     val selectedRunId = selectedAssistantMessage?.effectiveRunId()
     val agentRun = selectedRunId?.let(agentRunsById::get)
     val toolEvents = selectedRunId?.let(toolEventsByRun::get).orEmpty()
@@ -562,6 +564,7 @@ private fun ChatMessagePair(
                 isError = agentRun?.status == AgentRunStatus.FAILED && isAssistantErrorMessage(assistantContent),
                 text = assistantContent,
                 thoughts = assistantThoughts,
+                timeline = assistantTimeline,
                 attachments = selectedAssistantMessage?.attachments.orEmpty().map { it.filePathForDisplay },
                 agentRun = agentRun,
                 toolEvents = toolEvents,

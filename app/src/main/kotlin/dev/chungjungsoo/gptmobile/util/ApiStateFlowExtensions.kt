@@ -1,6 +1,8 @@
 package dev.chungjungsoo.gptmobile.util
 
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItem
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItemType
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
 import dev.chungjungsoo.gptmobile.presentation.ui.chat.ChatViewModel
@@ -29,8 +31,8 @@ suspend fun Flow<ApiState>.handleStates(
 ): ApiStateFlowOutcome {
     try {
         val outcome = collectApiStateUpdates(
-            onUpdate = { content, thoughts ->
-                messageFlow.setBufferedText(turnIndex, platformIdx, content, thoughts)
+            onUpdate = { content, thoughts, timeline ->
+                messageFlow.setBufferedText(turnIndex, platformIdx, content, thoughts, timeline)
             },
             onNotice = onNotice,
             nanoTimeProvider = nanoTimeProvider
@@ -60,7 +62,7 @@ suspend fun Flow<ApiState>.handleStates(
 }
 
 internal suspend fun Flow<ApiState>.collectApiStateUpdates(
-    onUpdate: suspend (content: String, thoughts: String) -> Unit,
+    onUpdate: suspend (content: String, thoughts: String, timeline: List<AssistantTimelineItem>) -> Unit,
     onNotice: (String) -> Unit = {},
     nanoTimeProvider: () -> Long = System::nanoTime,
     publishIntervalMillis: Long = STREAM_PUBLISH_INTERVAL_MILLIS
@@ -79,6 +81,11 @@ internal suspend fun Flow<ApiState>.collectApiStateUpdates(
 
                 is ApiState.Success -> {
                     buffer.appendContent(chunk.textChunk)
+                    buffer.publishIfDue(onUpdate)
+                }
+
+                is ApiState.ToolCall -> {
+                    buffer.appendTool(chunk.toolSequence)
                     buffer.publishIfDue(onUpdate)
                 }
 
@@ -112,23 +119,38 @@ private class StreamingMessageBuffer(
 ) {
     private val thoughts = StringBuilder()
     private val content = StringBuilder()
+    private val timeline = mutableListOf<AssistantTimelineItem>()
     private var lastPublishedAtNanos = 0L
     private var publishedThoughtLength = 0
     private var publishedContentLength = 0
+    private var timelineVersion = 0
+    private var publishedTimelineVersion = 0
 
     fun appendThought(chunk: String) {
         if (chunk.isNotEmpty()) {
             thoughts.append(chunk)
+            appendTimelineText(AssistantTimelineItemType.THINKING, chunk)
         }
     }
 
     fun appendContent(chunk: String) {
         if (chunk.isNotEmpty()) {
             content.append(chunk)
+            appendTimelineText(AssistantTimelineItemType.TEXT, chunk)
         }
     }
 
-    suspend fun publishIfDue(onUpdate: suspend (content: String, thoughts: String) -> Unit) {
+    fun appendTool(toolSequence: Int) {
+        timeline += AssistantTimelineItem(
+            type = AssistantTimelineItemType.TOOL,
+            toolSequence = toolSequence
+        )
+        timelineVersion += 1
+    }
+
+    suspend fun publishIfDue(
+        onUpdate: suspend (content: String, thoughts: String, timeline: List<AssistantTimelineItem>) -> Unit
+    ) {
         if (!hasPendingChanges()) return
 
         val now = nanoTimeProvider()
@@ -139,29 +161,45 @@ private class StreamingMessageBuffer(
         }
     }
 
-    suspend fun flush(onUpdate: suspend (content: String, thoughts: String) -> Unit) {
+    suspend fun flush(
+        onUpdate: suspend (content: String, thoughts: String, timeline: List<AssistantTimelineItem>) -> Unit
+    ) {
         if (!hasPendingChanges()) return
         publish(onUpdate, nanoTimeProvider())
     }
 
     private suspend fun publish(
-        onUpdate: suspend (content: String, thoughts: String) -> Unit,
+        onUpdate: suspend (content: String, thoughts: String, timeline: List<AssistantTimelineItem>) -> Unit,
         publishedAtNanos: Long
     ) {
-        onUpdate(content.toString(), thoughts.toString())
+        onUpdate(content.toString(), thoughts.toString(), timeline.toList())
         publishedContentLength = content.length
         publishedThoughtLength = thoughts.length
+        publishedTimelineVersion = timelineVersion
         lastPublishedAtNanos = publishedAtNanos
     }
 
-    private fun hasPendingChanges(): Boolean = content.length != publishedContentLength || thoughts.length != publishedThoughtLength
+    private fun appendTimelineText(type: AssistantTimelineItemType, chunk: String) {
+        val last = timeline.lastOrNull()
+        if (last?.type == type && last.toolSequence == null) {
+            timeline[timeline.lastIndex] = last.copy(content = last.content + chunk)
+        } else {
+            timeline += AssistantTimelineItem(type = type, content = chunk)
+        }
+        timelineVersion += 1
+    }
+
+    private fun hasPendingChanges(): Boolean = content.length != publishedContentLength ||
+        thoughts.length != publishedThoughtLength ||
+        timelineVersion != publishedTimelineVersion
 }
 
 private fun MutableStateFlow<ChatViewModel.GroupedMessages>.setBufferedText(
     turnIndex: Int,
     platformIdx: Int,
     content: String,
-    thoughts: String
+    thoughts: String,
+    timeline: List<AssistantTimelineItem>
 ) {
     update { groupedMessages ->
         updateAssistantSlot(
@@ -169,12 +207,16 @@ private fun MutableStateFlow<ChatViewModel.GroupedMessages>.setBufferedText(
             turnIndex = turnIndex,
             platformIndex = platformIdx
         ) { currentMessage ->
-            if (currentMessage.content == content && currentMessage.thoughts == thoughts) {
+            if (currentMessage.content == content &&
+                currentMessage.thoughts == thoughts &&
+                currentMessage.timeline == timeline
+            ) {
                 currentMessage
             } else {
                 currentMessage.copy(
                     content = content,
-                    thoughts = thoughts
+                    thoughts = thoughts,
+                    timeline = timeline
                 )
             }
         }
@@ -194,14 +236,27 @@ private fun MutableStateFlow<ChatViewModel.GroupedMessages>.setErrorMessage(
             turnIndex = turnIndex,
             platformIndex = platformIdx
         ) { currentMessage ->
+            val updatedContent = buildAssistantErrorContent(currentMessage.content, error)
+            val appendedError = updatedContent.substring(currentMessage.content.length)
             currentMessage.copy(
-                content = buildAssistantErrorContent(currentMessage.content, error),
+                content = updatedContent,
+                timeline = currentMessage.timeline.appendErrorText(appendedError),
                 createdAt = currentTimeProvider(),
                 revisions = revisionToAppend
                     ?.let { listOf(it) + currentMessage.revisions }
                     ?: currentMessage.revisions
             )
         }
+    }
+}
+
+private fun List<AssistantTimelineItem>.appendErrorText(errorText: String): List<AssistantTimelineItem> {
+    if (isEmpty()) return this
+    val last = last()
+    return if (last.type == AssistantTimelineItemType.TEXT && last.toolSequence == null) {
+        dropLast(1) + last.copy(content = last.content + errorText)
+    } else {
+        this + AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = errorText)
     }
 }
 

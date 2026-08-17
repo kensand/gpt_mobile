@@ -79,6 +79,10 @@ data class ThinkingConfig(
     val type: String = "enabled",
 
     @SerialName("budget_tokens")
-    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    val budgetTokens: Int = 10000
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val budgetTokens: Int? = null,
+
+    @SerialName("display")
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val display: String? = null
 )
