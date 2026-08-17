@@ -317,6 +317,24 @@ private val DEFAULT_ON_DISABLEABLE_ANTHROPIC_MODEL_PATTERN =
 private val MANUAL_THINKING_ANTHROPIC_MODEL_PATTERN = Regex("(?:^|-)3-7(?:-|$)|(?:^|-)4(?:-|$)")
 private val MANUAL_INTERLEAVED_ANTHROPIC_MODEL_PATTERN = Regex("(?:^|-)4(?:-|$)")
 
+internal fun geminiToolParameters(schema: JsonObject): JsonObject {
+    if ("additionalProperties" !in schema && schema.values.none { it is JsonObject || it is JsonArray }) {
+        return schema
+    }
+    return buildJsonObject {
+        schema.forEach { (key, value) ->
+            if (key == "additionalProperties") return@forEach
+            put(key, stripAdditionalProperties(value))
+        }
+    }
+}
+
+private fun stripAdditionalProperties(value: JsonElement): JsonElement = when (value) {
+    is JsonObject -> geminiToolParameters(value)
+    is JsonArray -> JsonArray(value.map(::stripAdditionalProperties))
+    else -> value
+}
+
 class GeminiAdapter @Inject constructor(
     private val api: GoogleAPI,
     private val attachmentEncoder: ProviderAttachmentEncoder
@@ -350,7 +368,7 @@ class GeminiAdapter @Inject constructor(
                                     FunctionDeclaration(
                                         definition.name,
                                         definition.description,
-                                        definition.inputSchema
+                                        geminiToolParameters(definition.inputSchema)
                                     )
                                 }
                             )

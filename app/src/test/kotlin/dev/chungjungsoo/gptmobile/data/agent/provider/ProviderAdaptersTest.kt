@@ -647,6 +647,20 @@ class ProviderAdaptersTest {
     }
 
     @Test
+    fun `gemini strips additionalProperties from tool schemas`() {
+        val schema = buildJsonObject {
+            put("type", "object")
+            put("properties", JsonObject(emptyMap()))
+            put("additionalProperties", false)
+        }
+
+        val sanitized = geminiToolParameters(schema)
+
+        assertEquals("object", sanitized.getValue("type").toString().trim('"'))
+        assertFalse(sanitized.containsKey("additionalProperties"))
+    }
+
+    @Test
     fun `gemini omits tools for chat only profiles`() = runBlocking {
         val api = FakeGoogleAPI(ArrayDeque(listOf(emptyFlow())))
 
