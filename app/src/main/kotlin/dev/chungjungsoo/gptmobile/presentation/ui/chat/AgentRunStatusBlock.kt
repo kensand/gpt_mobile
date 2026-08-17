@@ -2,13 +2,9 @@ package dev.chungjungsoo.gptmobile.presentation.ui.chat
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,11 +23,15 @@ import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunTerminalError
 
 @Composable
 fun AgentRunStatusBlock(run: AgentRun?, modifier: Modifier = Modifier) {
-    if (run == null || run.status == AgentRunStatus.COMPLETED) return
+    if (run == null ||
+        run.status == AgentRunStatus.COMPLETED ||
+        run.status == AgentRunStatus.QUEUED ||
+        run.status == AgentRunStatus.RUNNING
+    ) {
+        return
+    }
 
     val status = when (run.status) {
-        AgentRunStatus.QUEUED -> stringResource(R.string.agent_run_queued)
-        AgentRunStatus.RUNNING -> stringResource(R.string.agent_run_running)
         AgentRunStatus.CANCELED -> stringResource(R.string.agent_run_canceled)
         AgentRunStatus.INTERRUPTED -> stringResource(R.string.agent_run_interrupted)
         else -> stringResource(R.string.agent_run_failed)
@@ -49,10 +49,6 @@ fun AgentRunStatusBlock(run: AgentRun?, modifier: Modifier = Modifier) {
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (run.status == AgentRunStatus.QUEUED || run.status == AgentRunStatus.RUNNING) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
                 Text(
                     text = status + duration,
                     style = MaterialTheme.typography.labelLarge,
