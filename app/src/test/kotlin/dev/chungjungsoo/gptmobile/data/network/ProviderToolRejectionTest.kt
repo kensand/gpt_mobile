@@ -36,6 +36,7 @@ import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderToolRejectionTest {
@@ -102,7 +103,7 @@ class ProviderToolRejectionTest {
             api.streamChatMessage(anthropicRequest(withTools = false), 5, config(baseUrl)).single()
         }
 
-        assertEquals("invalid request", (chunk as ErrorResponseChunk).error.message)
+        assertEquals("Tool use is not supported by this model", (chunk as ErrorResponseChunk).error.message)
     }
 
     @Test
@@ -119,6 +120,28 @@ class ProviderToolRejectionTest {
         }
 
         assertEquals(400, response.error?.code)
+    }
+
+    @Test
+    fun `anthropic validation errors are surfaced instead of silently disabling tools`() = withServer(400, anthropicValidationError()) { baseUrl ->
+        val chunk = runBlocking {
+            AnthropicAPIImpl(NetworkClient(CIO))
+                .streamChatMessage(anthropicRequest(withTools = true), 5, config(baseUrl))
+                .single()
+        }
+
+        assertEquals("tools.0.input_schema is invalid", (chunk as ErrorResponseChunk).error.message)
+    }
+
+    @Test
+    fun `gemini validation errors are surfaced instead of silently disabling tools`() = withServer(400, googleValidationError()) { baseUrl ->
+        val response = runBlocking {
+            GoogleAPIImpl(NetworkClient(CIO))
+                .streamGenerateContent(geminiRequest(withTools = true), "model", 5, config(baseUrl))
+                .single()
+        }
+
+        assertEquals("function_declarations[0].parameters is invalid", response.error?.message)
     }
 
     @Test
@@ -142,6 +165,66 @@ class ProviderToolRejectionTest {
 
         assertEquals("token", apiKeyHeader)
         assertFalse(query.orEmpty().split('&').any { it.startsWith("key=") })
+    }
+
+    @Test
+    fun `anthropic sends files and interleaved thinking beta features in one header`() {
+        var betaHeader: String? = null
+        withServer(
+            status = 400,
+            body = anthropicValidationError(),
+            onRequest = { exchange -> betaHeader = exchange.requestHeaders.getFirst("anthropic-beta") }
+        ) { baseUrl ->
+            runBlocking {
+                AnthropicAPIImpl(NetworkClient(CIO))
+                    .streamChatMessage(
+                        anthropicRequest(withTools = false),
+                        5,
+                        ProviderRequestConfig(
+                            apiUrl = baseUrl,
+                            token = "token",
+                            anthropicBetaFeatures = setOf("interleaved-thinking-2025-05-14")
+                        )
+                    )
+                    .single()
+            }
+        }
+
+        assertEquals("files-api-2025-04-14,interleaved-thinking-2025-05-14", betaHeader)
+    }
+
+    @Test
+    fun `openrouter unsupported tool endpoint response retries without tools`() {
+        val requestsWithTools = mutableListOf<Boolean>()
+        withOpenRouterFallbackServer(requestsWithTools) { baseUrl ->
+            val api = OpenAIAPIImpl(NetworkClient(CIO))
+            var retriedWithoutTools = false
+
+            val chunks = runBlocking {
+                try {
+                    api.streamChatCompletion(chatRequest(withTools = true), 5, config(baseUrl)).toList()
+                } catch (_: ToolDefinitionsRejectedException) {
+                    retriedWithoutTools = true
+                    api.streamChatCompletion(chatRequest(withTools = false), 5, config(baseUrl)).toList()
+                }
+            }
+
+            assertTrue(retriedWithoutTools)
+            assertEquals(listOf(true, false), requestsWithTools)
+            assertEquals("chat fallback", chunks.single().choices!!.single().delta.content)
+        }
+    }
+
+    @Test
+    fun `unrelated openrouter 404 remains a surfaced provider error`() = withServer(404, """{"error":{"message":"Model route was not found"}}""") { baseUrl ->
+        val chunk = runBlocking {
+            OpenAIAPIImpl(NetworkClient(CIO))
+                .streamChatCompletion(chatRequest(withTools = true), 5, config(baseUrl))
+                .single()
+        }
+
+        assertEquals("404", chunk.error?.code)
+        assertEquals("Model route was not found", chunk.error?.message)
     }
 
     private fun responsesRequest(withTools: Boolean) = ResponsesRequest(
@@ -189,16 +272,34 @@ class ProviderToolRejectionTest {
         body: String,
         onRequest: (HttpExchange) -> Unit = {},
         block: (String) -> T
-    ): T {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { exchange ->
-            onRequest(exchange)
-            exchange.requestBody.close()
-            val bytes = body.toByteArray()
-            exchange.responseHeaders.add("Content-Type", "application/json")
-            exchange.sendResponseHeaders(status, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
+    ): T = withHttpServer(block) { exchange ->
+        onRequest(exchange)
+        exchange.requestBody.close()
+        exchange.respond(status, "application/json", body)
+    }
+
+    private fun <T> withOpenRouterFallbackServer(
+        requestsWithTools: MutableList<Boolean>,
+        block: (String) -> T
+    ): T = withHttpServer(block) { exchange ->
+        val hasTools = exchange.requestBody.use { body ->
+            body.readBytes().decodeToString().contains("\"tools\"")
         }
+        requestsWithTools += hasTools
+        if (hasTools) {
+            exchange.respond(404, "application/json", """{"error":{"message":"No endpoints found that support tool use"}}""")
+        } else {
+            exchange.respond(
+                200,
+                "text/event-stream",
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"chat fallback\"}}]}\n\ndata: [DONE]\n\n"
+            )
+        }
+    }
+
+    private fun <T> withHttpServer(block: (String) -> T, handler: (HttpExchange) -> Unit): T {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange -> handler(exchange) }
         server.start()
         return try {
             block("http://127.0.0.1:${server.address.port}/")
@@ -207,9 +308,20 @@ class ProviderToolRejectionTest {
         }
     }
 
-    private fun openAIError() = """{"error":{"message":"invalid tools"}}"""
+    private fun HttpExchange.respond(status: Int, contentType: String, body: String) {
+        val bytes = body.toByteArray()
+        responseHeaders.add("Content-Type", contentType)
+        sendResponseHeaders(status, bytes.size.toLong())
+        responseBody.use { it.write(bytes) }
+    }
 
-    private fun anthropicError() = """{"type":"error","error":{"type":"invalid_request_error","message":"invalid request"}}"""
+    private fun openAIError() = """{"error":{"message":"This model does not support tools"}}"""
 
-    private fun googleError() = """{"error":{"code":400,"message":"invalid tools","status":"INVALID_ARGUMENT"}}"""
+    private fun anthropicError() = """{"type":"error","error":{"type":"invalid_request_error","message":"Tool use is not supported by this model"}}"""
+
+    private fun googleError() = """{"error":{"code":400,"message":"Tools are not supported by this model","status":"INVALID_ARGUMENT"}}"""
+
+    private fun anthropicValidationError() = """{"type":"error","error":{"type":"invalid_request_error","message":"tools.0.input_schema is invalid"}}"""
+
+    private fun googleValidationError() = """{"error":{"code":400,"message":"function_declarations[0].parameters is invalid","status":"INVALID_ARGUMENT"}}"""
 }

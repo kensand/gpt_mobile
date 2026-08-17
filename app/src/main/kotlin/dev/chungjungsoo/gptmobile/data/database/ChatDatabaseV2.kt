@@ -13,6 +13,7 @@ import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentToolBinding
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevisionListConverter
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineListConverter
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatAttachmentListConverter
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatPlatformModelV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
@@ -33,13 +34,14 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
         AgentRun::class,
         ToolEvent::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 @TypeConverters(
     StringListConverter::class,
     ChatAttachmentListConverter::class,
-    AssistantRevisionListConverter::class
+    AssistantRevisionListConverter::class,
+    AssistantTimelineListConverter::class
 )
 abstract class ChatDatabaseV2 : RoomDatabase() {
 

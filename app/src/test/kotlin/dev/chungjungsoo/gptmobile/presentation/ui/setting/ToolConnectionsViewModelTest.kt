@@ -58,6 +58,72 @@ class ToolConnectionsViewModelTest {
     }
 
     @Test
+    fun `new connection setup starts with exactly the two high level paths`() {
+        val flow = ToolConnectionSetupFlow()
+
+        assertEquals(ToolConnectionSetupStep.CONNECTION_TYPE, flow.step)
+        assertEquals(
+            listOf(ToolConnectionSetupPath.WEB_SEARCH, ToolConnectionSetupPath.MCP_SERVER),
+            ToolConnectionSetupPath.entries
+        )
+    }
+
+    @Test
+    fun `web search setup progresses through provider then relevant details`() {
+        val provider = ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.EXA }
+
+        val selected = ToolConnectionSetupFlow().selectPath(ToolConnectionSetupPath.WEB_SEARCH)
+        val providerStep = selected.next()
+        val detailsStep = providerStep.selectWebProvider(provider).next()
+
+        assertEquals(ToolConnectionSetupStep.CONNECTION_TYPE, selected.step)
+        assertEquals(ToolConnectionSetupPath.WEB_SEARCH, selected.path)
+        assertEquals(ToolConnectionSetupStep.WEB_SEARCH_PROVIDER, providerStep.step)
+        assertFalse(providerStep.canContinue)
+        assertEquals(ToolConnectionSetupStep.DETAILS, detailsStep.step)
+        assertEquals(provider, detailsStep.provider)
+        assertTrue(detailsStep.isSaveStep)
+        assertEquals(ToolConnectionSetupStep.WEB_SEARCH_PROVIDER, detailsStep.back().step)
+        assertEquals(ToolConnectionSetupStep.CONNECTION_TYPE, providerStep.back().step)
+    }
+
+    @Test
+    fun `MCP setup separates connection details from authentication`() {
+        val selected = ToolConnectionSetupFlow().selectPath(ToolConnectionSetupPath.MCP_SERVER)
+        val detailsStep = selected.next()
+        val authenticationStep = detailsStep.next()
+
+        assertEquals(ToolConnectionSetupStep.CONNECTION_TYPE, selected.step)
+        assertEquals(ToolConnectionSetupPath.MCP_SERVER, selected.path)
+        assertEquals(ToolConnectionSetupStep.DETAILS, detailsStep.step)
+        assertEquals(ToolConnectionType.MCP, detailsStep.provider?.type)
+        assertEquals(ToolConnectionSetupStep.AUTHENTICATION, authenticationStep.step)
+        assertTrue(authenticationStep.isSaveStep)
+        assertEquals(ToolConnectionSetupStep.DETAILS, authenticationStep.back().step)
+        assertEquals(ToolConnectionSetupStep.CONNECTION_TYPE, detailsStep.back().step)
+    }
+
+    @Test
+    fun `editing keeps a stored connection type instead of falling back to another provider`() {
+        val stored = ToolConnection(
+            connectionUid = "search-edit",
+            name = "Search",
+            alias = "search",
+            type = ToolConnectionType.EXA,
+            endpointUrl = "https://api.exa.ai/search",
+            authType = ToolConnectionAuthType.API_KEY,
+            secretRef = null,
+            oauthClientId = null
+        )
+
+        val known = ToolConnectionSetupFlow.editing(stored)
+
+        assertEquals(ToolConnectionType.EXA, known?.provider?.type)
+        assertEquals(ToolConnectionSetupPath.WEB_SEARCH, known?.path)
+        assertNull(ToolConnectionSetupFlow.editing(stored.copy(type = "UNSUPPORTED_PROVIDER")))
+    }
+
+    @Test
     fun `normalizeAlias keeps aliases lowercase model safe and validates boundaries`() {
         assertEquals("fire_crawl_1", ToolConnectionsViewModel.normalizeAlias(" Fire-Crawl 1 "))
 
@@ -86,6 +152,55 @@ class ToolConnectionsViewModelTest {
         assertNull(ToolConnectionsViewModel.credentialInput("   ", clearCredential = false))
         assertEquals("new-key", ToolConnectionsViewModel.credentialInput(" new-key ", clearCredential = false)?.decodeToString())
         assertNull(ToolConnectionsViewModel.credentialInput("new-key", clearCredential = true))
+    }
+
+    @Test
+    fun `credential editor distinguishes keep replace clear and missing states`() {
+        assertEquals(
+            CredentialEditState.KEEP,
+            credentialEditState(
+                hasExistingCredential = true,
+                canPreserveCredential = true,
+                credential = "",
+                clearCredential = false
+            )
+        )
+        assertEquals(
+            CredentialEditState.REPLACE,
+            credentialEditState(
+                hasExistingCredential = true,
+                canPreserveCredential = true,
+                credential = "replacement",
+                clearCredential = false
+            )
+        )
+        assertEquals(
+            CredentialEditState.CLEAR,
+            credentialEditState(
+                hasExistingCredential = true,
+                canPreserveCredential = true,
+                credential = "",
+                clearCredential = true
+            )
+        )
+        assertEquals(
+            CredentialEditState.MISSING,
+            credentialEditState(
+                hasExistingCredential = true,
+                canPreserveCredential = false,
+                credential = "",
+                clearCredential = false
+            )
+        )
+        assertEquals(
+            CredentialEditState.MISSING,
+            credentialEditState(
+                hasExistingCredential = false,
+                canPreserveCredential = false,
+                credential = "",
+                clearCredential = true
+            )
+        )
     }
 
     @Test
@@ -209,6 +324,88 @@ class ToolConnectionsViewModelTest {
 
         assertNull(dao.getConnection("search-1")!!.secretRef)
         assertNull(vault.read("connection_search-1"))
+        manager.closeAll()
+        networkClient().close()
+    }
+
+    @Test
+    fun `explicit credential clear removes saved secret without replacement`() = runTest {
+        val dao = FakeToolConnectionDao()
+        val vault = FakeSecretVault()
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        val repository = ToolConnectionRepository(dao, vault)
+        val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        val existing = ToolConnection(
+            connectionUid = "search-clear",
+            name = "Search",
+            alias = "search",
+            type = ToolConnectionType.FIRECRAWL,
+            endpointUrl = "https://api.firecrawl.dev/v2/search",
+            authType = ToolConnectionAuthType.BEARER,
+            secretRef = "connection_search-clear",
+            oauthClientId = null
+        )
+        dao.upsertConnection(existing)
+        vault.put("connection_search-clear", "saved-secret".encodeToByteArray())
+        val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+
+        viewModel.saveConnection(
+            existing = existing,
+            provider = ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.FIRECRAWL },
+            name = "Search",
+            alias = "search",
+            endpointUrl = "",
+            authType = ToolConnectionAuthType.BEARER,
+            credential = "",
+            oauthClientId = "",
+            allowCleartext = false,
+            clearCredential = true
+        )
+
+        assertNull(dao.getConnection("search-clear")!!.secretRef)
+        assertNull(vault.read("connection_search-clear"))
+        manager.closeAll()
+        networkClient().close()
+    }
+
+    @Test
+    fun `explicit MCP bearer clear removes saved token`() = runTest {
+        val dao = FakeToolConnectionDao()
+        val vault = FakeSecretVault()
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        val repository = ToolConnectionRepository(dao, vault)
+        val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        val existing = ToolConnection(
+            connectionUid = "mcp-clear",
+            name = "MCP",
+            alias = "mcp",
+            type = ToolConnectionType.MCP,
+            endpointUrl = "https://example.com/mcp",
+            authType = ToolConnectionAuthType.BEARER,
+            secretRef = "connection_mcp-clear",
+            oauthClientId = null
+        )
+        dao.upsertConnection(existing)
+        vault.put("connection_mcp-clear", "saved-token".encodeToByteArray())
+        val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+
+        viewModel.saveConnection(
+            existing = existing,
+            provider = ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.MCP },
+            name = "MCP",
+            alias = "mcp",
+            endpointUrl = "https://example.com/mcp",
+            authType = ToolConnectionAuthType.BEARER,
+            credential = "",
+            oauthClientId = "",
+            allowCleartext = false,
+            clearCredential = true
+        )
+
+        assertNull(dao.getConnection("mcp-clear")!!.secretRef)
+        assertNull(vault.read("connection_mcp-clear"))
         manager.closeAll()
         networkClient().close()
     }

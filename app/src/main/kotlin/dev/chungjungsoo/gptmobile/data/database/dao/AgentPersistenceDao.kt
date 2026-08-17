@@ -199,6 +199,7 @@ interface AgentPersistenceDao {
         val assistantMessage = request.assistantMessage.copy(
             content = "",
             thoughts = "",
+            timeline = emptyList(),
             attachments = emptyList(),
             revisions = previousRevision
                 ?.let { listOf(it) + request.assistantMessage.revisions }

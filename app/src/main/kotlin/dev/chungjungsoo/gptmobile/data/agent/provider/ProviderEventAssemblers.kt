@@ -2,6 +2,7 @@ package dev.chungjungsoo.gptmobile.data.agent.provider
 
 import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.MessageContent
+import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.RedactedThinkingContent
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.TextContent
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.ThinkingContent
 import dev.chungjungsoo.gptmobile.data.dto.anthropic.common.ToolUseContent
@@ -130,6 +131,7 @@ class AnthropicEventAssembler {
     private val pending = mutableMapOf<Int, PendingCall>()
     private val pendingText = mutableMapOf<Int, StringBuilder>()
     private val pendingThinking = mutableMapOf<Int, Pair<StringBuilder, StringBuilder>>()
+    private val pendingRedactedThinking = mutableMapOf<Int, String>()
     private val completed = sortedMapOf<Int, MessageContent>()
 
     fun accept(event: MessageResponseChunk): List<ProviderEvent> = when (event) {
@@ -140,13 +142,23 @@ class AnthropicEventAssembler {
                 ContentBlockType.THINKING -> pendingThinking[event.index] =
                     StringBuilder(event.contentBlock.thinking.orEmpty()) to StringBuilder(event.contentBlock.signature.orEmpty())
 
+                // Anthropic rejects a replayed redacted_thinking block without its encrypted payload.
+                ContentBlockType.REDACTED_THINKING ->
+                    event.contentBlock.data
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { pendingRedactedThinking[event.index] = it }
+
                 ContentBlockType.TOOL_USE -> {
                     val callId = event.contentBlock.id
                     val name = event.contentBlock.name
                     if (callId == null || name == null) {
                         return listOf(ProviderEvent.Failed("Anthropic returned an incomplete tool use block."))
                     }
-                    pending[event.index] = PendingCall(callId, name)
+                    val initialInput = event.contentBlock.input
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.toString()
+                        .orEmpty()
+                    pending[event.index] = PendingCall(callId, name, StringBuilder(initialInput))
                 }
 
                 else -> Unit
@@ -182,6 +194,9 @@ class AnthropicEventAssembler {
             pendingText.remove(event.index)?.let { completed[event.index] = TextContent(it.toString()) }
             pendingThinking.remove(event.index)?.let { (thinking, signature) ->
                 completed[event.index] = ThinkingContent(thinking.toString(), signature.toString())
+            }
+            pendingRedactedThinking.remove(event.index)?.let { data ->
+                completed[event.index] = RedactedThinkingContent(data)
             }
             val call = pending.remove(event.index) ?: return emptyList()
             val events = toolCall(call.callId, call.name, call.arguments.toString())

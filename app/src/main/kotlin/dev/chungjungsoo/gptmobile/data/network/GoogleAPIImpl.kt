@@ -111,8 +111,12 @@ class GoogleAPIImpl @Inject constructor(
                 setBody(NetworkClient.json.encodeToString(request))
             }.execute { response ->
                 if (!response.status.isSuccess()) {
-                    throwIfToolDefinitionsRejected(response.status.value, !request.tools.isNullOrEmpty())
                     val errorBody = response.body<String>()
+                    throwIfToolDefinitionsRejected(
+                        response.status.value,
+                        !request.tools.isNullOrEmpty(),
+                        errorBody
+                    )
 
                     // Parse error - Google returns array format: [{"error": {...}}]
                     val errorMessage = try {

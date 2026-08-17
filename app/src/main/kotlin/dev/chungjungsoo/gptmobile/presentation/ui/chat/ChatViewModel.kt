@@ -16,7 +16,9 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunDraft
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItemType
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
+import dev.chungjungsoo.gptmobile.data.database.entity.LEGACY_ORDER_NOTICE
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentRetryRequest
 import dev.chungjungsoo.gptmobile.data.database.entity.PersistAgentTurnRequest
@@ -25,6 +27,9 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
+import dev.chungjungsoo.gptmobile.data.database.entity.effectiveTimeline
+import dev.chungjungsoo.gptmobile.data.database.entity.hasUnavailableAssistantOrder
+import dev.chungjungsoo.gptmobile.data.database.entity.rebuildAssistantTimelineForEdit
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.selectRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.snapshotLatestAssistantRevision
@@ -471,6 +476,7 @@ class ChatViewModel @Inject constructor(
         }
 
         // Start new conversation from the edited question
+        cancelActiveRuns()
         completeChat(persistSnapshotFirst = true)
         return true
     }
@@ -498,6 +504,19 @@ class ChatViewModel @Inject constructor(
         val updatedAttachments = attachments.mapNotNull { it.attachment }
 
         val textChanged = currentMessage.content != updatedContent || currentMessage.thoughts != updatedThoughts
+        val updatedTimeline = if (textChanged) {
+            rebuildAssistantTimelineForEdit(
+                currentTimeline = currentMessage.timeline,
+                updatedContent = updatedContent,
+                updatedThoughts = updatedThoughts,
+                hasToolTrace = currentMessage.currentRunId
+                    ?.let(_toolEventsByRun.value::get)
+                    .orEmpty()
+                    .isNotEmpty()
+            )
+        } else {
+            currentMessage.timeline
+        }
         val updatedRevisions = if (textChanged) {
             currentMessage.snapshotLatestAssistantRevision(currentTimeStamp)
                 ?.let { listOf(it) + currentMessage.revisions }
@@ -515,6 +534,7 @@ class ChatViewModel @Inject constructor(
                 assistantMessage.copy(
                     content = updatedContent,
                     thoughts = updatedThoughts,
+                    timeline = updatedTimeline,
                     attachments = updatedAttachments,
                     revisions = updatedRevisions,
                     createdAt = assistantMessage.createdAt
@@ -546,7 +566,10 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun exportChat(toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default): Pair<String, String> {
+    fun exportChat(
+        toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default,
+        legacyOrderNotice: String = LEGACY_ORDER_NOTICE
+    ): Pair<String, String> {
         // Build the chat history in Markdown format
         val chatHistoryMarkdown = buildString {
             appendLine("# Chat Export: \"${chatRoom.value.title}\"")
@@ -566,7 +589,7 @@ class ChatViewModel @Inject constructor(
                     val platformName = message.platformType
                         ?.let { _platformsInApp.value.getPlatformName(it) }
                         ?: "Unknown"
-                    append(formatAssistantExport(platformName, message, _toolEventsByRun.value, toolTraceLabels))
+                    append(formatAssistantExport(platformName, message, _toolEventsByRun.value, toolTraceLabels, legacyOrderNotice))
                 }
             }
         }
@@ -1216,17 +1239,72 @@ internal fun formatAssistantExport(
     platformName: String,
     message: MessageV2,
     toolEventsByRun: Map<String, List<ToolEvent>>,
-    toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default
+    toolTraceLabels: ToolTraceLabels = ToolTraceLabels.Default,
+    legacyOrderNotice: String = LEGACY_ORDER_NOTICE
 ): String = buildString {
     appendLine("**Assistant ($platformName):**")
-    appendLine(message.effectiveContent())
-    appendLine()
     val trace = message.effectiveRunId()
         ?.let(toolEventsByRun::get)
         .orEmpty()
-    formatToolTraceMarkdown(trace, toolTraceLabels).takeIf { it.isNotBlank() }?.let {
-        appendLine(it)
+    val timeline = message.effectiveTimeline()
+    val content = message.effectiveContent()
+    val thoughts = message.effectiveThoughts()
+    if (hasUnavailableAssistantOrder(timeline, content, thoughts, trace.isNotEmpty())) {
+        appendLine("> $legacyOrderNotice")
         appendLine()
+        thoughts.takeIf(String::isNotBlank)?.let {
+            appendLine("<details><summary>Thinking (order unavailable)</summary>")
+            appendLine()
+            appendLine(it)
+            appendLine()
+            appendLine("</details>")
+            appendLine()
+        }
+        content.takeIf(String::isNotBlank)?.let {
+            appendLine(it)
+            appendLine()
+        }
+        formatToolTraceMarkdown(trace, toolTraceLabels).takeIf { it.isNotBlank() }?.let {
+            appendLine(it)
+            appendLine()
+        }
+    } else if (timeline.isEmpty()) {
+        appendLine(content)
+        appendLine()
+        formatToolTraceMarkdown(trace, toolTraceLabels).takeIf { it.isNotBlank() }?.let {
+            appendLine(it)
+            appendLine()
+        }
+    } else {
+        val traceBySequence = trace.associateBy(ToolEvent::sequence)
+        val renderedSequences = timeline.mapNotNull { it.toolSequence }.toSet()
+        timeline.forEach { item ->
+            when (item.type) {
+                AssistantTimelineItemType.TEXT -> appendLine(item.content)
+
+                AssistantTimelineItemType.THINKING -> {
+                    appendLine("<details><summary>Thinking</summary>")
+                    appendLine()
+                    appendLine(item.content)
+                    appendLine()
+                    appendLine("</details>")
+                }
+
+                AssistantTimelineItemType.TOOL ->
+                    item.toolSequence
+                        ?.let(traceBySequence::get)
+                        ?.let { appendLine(formatToolTraceMarkdown(listOf(it), toolTraceLabels)) }
+
+                AssistantTimelineItemType.LEGACY_ORDER -> Unit
+            }
+            appendLine()
+        }
+        trace.filterNot { it.sequence in renderedSequences }
+            .takeIf { it.isNotEmpty() }
+            ?.let {
+                appendLine(formatToolTraceMarkdown(it, toolTraceLabels))
+                appendLine()
+            }
     }
 }
 
@@ -1236,6 +1314,7 @@ internal fun persistableMessages(groupedMessages: ChatViewModel.GroupedMessages)
         .filter {
             it.effectiveContent().isNotBlank() ||
                 it.effectiveThoughts().isNotBlank() ||
+                it.effectiveTimeline().isNotEmpty() ||
                 it.attachments.isNotEmpty() ||
                 it.currentRunId != null
         }

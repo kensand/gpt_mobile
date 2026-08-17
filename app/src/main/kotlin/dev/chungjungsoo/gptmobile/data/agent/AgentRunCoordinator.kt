@@ -6,10 +6,12 @@ import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunTerminalError
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.database.entity.appendChronologicalText
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
 import dev.chungjungsoo.gptmobile.presentation.service.AgentRunForegroundService
 import dev.chungjungsoo.gptmobile.util.ApiStateFlowOutcome
+import dev.chungjungsoo.gptmobile.util.assistantErrorAppendedText
 import dev.chungjungsoo.gptmobile.util.buildAssistantErrorContent
 import dev.chungjungsoo.gptmobile.util.collectApiStateUpdates
 import java.util.concurrent.ConcurrentHashMap
@@ -185,10 +187,7 @@ class AgentRunCoordinator @Inject constructor(
             requests.forEach { request ->
                 runCatching {
                     chatRepository.updateAgentMessage(
-                        request.assistantMessage.copy(
-                            content = buildAssistantErrorContent(request.assistantMessage.content, message),
-                            createdAt = completedAt
-                        ).resetActiveRevision()
+                        terminalAgentMessage(request.assistantMessage, message, completedAt)
                     )
                 }
                 runCatching {
@@ -214,8 +213,12 @@ class AgentRunCoordinator @Inject constructor(
                 request.platform,
                 request.runId
             ).collectApiStateUpdates(
-                onUpdate = { content, thoughts ->
-                    assistantMessage = assistantMessage.copy(content = content, thoughts = thoughts)
+                onUpdate = { content, thoughts, timeline ->
+                    assistantMessage = assistantMessage.copy(
+                        content = content,
+                        thoughts = thoughts,
+                        timeline = timeline
+                    )
                     chatRepository.updateAgentMessage(assistantMessage)
                 },
                 onNotice = { notice -> _notices.tryEmit(AgentRunNotice(request.chatId, notice)) },
@@ -223,12 +226,7 @@ class AgentRunCoordinator @Inject constructor(
             )
             val terminal = outcome.toTerminalUpdate()
             val completedAt = currentEpochSeconds()
-            val terminalMessage = assistantMessage.copy(
-                content = terminal.error
-                    ?.let { buildAssistantErrorContent(assistantMessage.content, it) }
-                    ?: assistantMessage.content,
-                createdAt = completedAt
-            ).resetActiveRevision()
+            val terminalMessage = terminalAgentMessage(assistantMessage, terminal.error, completedAt)
             commitTerminalAgentRun(
                 finishRun = {
                     chatRepository.finishAgentRun(
@@ -268,10 +266,7 @@ class AgentRunCoordinator @Inject constructor(
                 val completedAt = currentEpochSeconds()
                 val message = error.message ?: "Unknown provider error."
                 runCatching {
-                    val terminalMessage = assistantMessage.copy(
-                        content = buildAssistantErrorContent(assistantMessage.content, message),
-                        createdAt = completedAt
-                    ).resetActiveRevision()
+                    val terminalMessage = terminalAgentMessage(assistantMessage, message, completedAt)
                     commitTerminalAgentRun(
                         finishRun = {
                             chatRepository.finishAgentRun(
@@ -290,6 +285,18 @@ class AgentRunCoordinator @Inject constructor(
 }
 
 internal data class AgentRunTerminalUpdate(val status: String, val error: String?)
+
+internal fun terminalAgentMessage(message: MessageV2, error: String?, completedAt: Long): MessageV2 {
+    if (error == null) return message.copy(createdAt = completedAt).resetActiveRevision()
+
+    val updatedContent = buildAssistantErrorContent(message.content, error)
+    val appendedError = assistantErrorAppendedText(message.content, updatedContent)
+    return message.copy(
+        content = updatedContent,
+        timeline = message.timeline.appendChronologicalText(appendedError),
+        createdAt = completedAt
+    ).resetActiveRevision()
+}
 
 internal fun ApiStateFlowOutcome.toTerminalUpdate(): AgentRunTerminalUpdate = when (this) {
     ApiStateFlowOutcome.Completed -> AgentRunTerminalUpdate(AgentRunStatus.COMPLETED, null)

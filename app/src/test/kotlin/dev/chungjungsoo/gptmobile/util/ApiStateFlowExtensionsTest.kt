@@ -2,6 +2,8 @@ package dev.chungjungsoo.gptmobile.util
 
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantRevision
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItem
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItemType
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
 import dev.chungjungsoo.gptmobile.presentation.ui.chat.ChatViewModel
@@ -26,12 +28,54 @@ class ApiStateFlowExtensionsTest {
             ApiState.Success("answer"),
             ApiState.Done
         ).collectApiStateUpdates(
-            onUpdate = { content, thoughts -> updates += content to thoughts },
+            onUpdate = { content, thoughts, _ -> updates += content to thoughts },
             nanoTimeProvider = { 1L }
         )
 
         assertEquals(ApiStateFlowOutcome.Completed, outcome)
         assertEquals("Final answer" to "Checking", updates.last())
+    }
+
+    @Test
+    fun `collectApiStateUpdates preserves interleaved reasoning chat and tool chronology`() = runBlocking {
+        data class Update(
+            val content: String,
+            val thoughts: String,
+            val timeline: List<AssistantTimelineItem>
+        )
+
+        val updates = mutableListOf<Update>()
+
+        flowOf(
+            ApiState.Thinking("Check "),
+            ApiState.Thinking("sources"),
+            ApiState.Success("I will search."),
+            ApiState.ToolCall(toolSequence = 0),
+            ApiState.Thinking("Compare results."),
+            ApiState.Success("First result."),
+            ApiState.ToolCall(toolSequence = 1),
+            ApiState.Success("Final answer."),
+            ApiState.Done
+        ).collectApiStateUpdates(
+            onUpdate = { content, thoughts, timeline -> updates += Update(content, thoughts, timeline) },
+            nanoTimeProvider = { 1L },
+            publishIntervalMillis = 0L
+        )
+
+        assertEquals("I will search.First result.Final answer.", updates.last().content)
+        assertEquals("Check sourcesCompare results.", updates.last().thoughts)
+        assertEquals(
+            listOf(
+                AssistantTimelineItem(AssistantTimelineItemType.THINKING, content = "Check sources"),
+                AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "I will search."),
+                AssistantTimelineItem(AssistantTimelineItemType.TOOL, toolSequence = 0),
+                AssistantTimelineItem(AssistantTimelineItemType.THINKING, content = "Compare results."),
+                AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "First result."),
+                AssistantTimelineItem(AssistantTimelineItemType.TOOL, toolSequence = 1),
+                AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "Final answer.")
+            ),
+            updates.last().timeline
+        )
     }
 
     @Test
@@ -45,7 +89,7 @@ class ApiStateFlowExtensionsTest {
                 emit(ApiState.Success("answer"))
                 throw CancellationException("stop")
             }.collectApiStateUpdates(
-                onUpdate = { content, thoughts -> updates += content to thoughts },
+                onUpdate = { content, thoughts, _ -> updates += content to thoughts },
                 nanoTimeProvider = { 1L }
             )
         } catch (_: CancellationException) {
@@ -111,9 +155,11 @@ class ApiStateFlowExtensionsTest {
             onLoadingComplete = {}
         )
 
-        val assistantContent = messageFlow.value.assistantMessages.last().first().content
+        val assistantMessage = messageFlow.value.assistantMessages.last().first()
+        val assistantContent = assistantMessage.content
         assertTrue(assistantContent.contains("Partial answer"))
         assertTrue(assistantContent.contains("[Response stopped: Request timed out.]"))
+        assertEquals(assistantContent, assistantMessage.timeline.single().content)
         assertEquals(ApiStateFlowOutcome.Failed("Request timed out."), outcome)
     }
 

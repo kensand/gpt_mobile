@@ -1,6 +1,10 @@
 package dev.chungjungsoo.gptmobile.data.agent.provider
 
 import android.content.ContextWrapper
+import dev.chungjungsoo.gptmobile.data.ModelConstants
+import dev.chungjungsoo.gptmobile.data.agent.AgentRunEvent
+import dev.chungjungsoo.gptmobile.data.agent.AgentRunner
+import dev.chungjungsoo.gptmobile.data.agent.AgentTool
 import dev.chungjungsoo.gptmobile.data.agent.AgentToolDefinition
 import dev.chungjungsoo.gptmobile.data.agent.AgentToolExchange
 import dev.chungjungsoo.gptmobile.data.agent.AgentToolResult
@@ -52,6 +56,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -279,6 +284,171 @@ class ProviderAdaptersTest {
     }
 
     @Test
+    fun `anthropic 4_6 reasoning uses adaptive thinking without a token budget`() = runBlocking {
+        listOf("claude-sonnet-4-6", "claude-opus-4-6-20260205").forEach { model ->
+            val api = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
+
+            AnthropicMessagesAdapter(api, attachmentEncoder())
+                .openSession(turns(), platform(ClientType.ANTHROPIC).copy(model = model, reasoning = true))
+                .streamRound(listOf(definition), emptyList())
+                .toList()
+
+            val thinking = requestJson(api.requests.single())["thinking"]!!.jsonObject
+            assertEquals("adaptive", thinking["type"]!!.jsonPrimitive.content)
+            assertEquals("summarized", thinking["display"]!!.jsonPrimitive.content)
+            assertFalse(thinking.containsKey("budget_tokens"))
+            assertEquals(emptySet<String>(), api.configs.single().anthropicBetaFeatures)
+        }
+    }
+
+    @Test
+    fun `anthropic reasoning disabled omits thinking configuration`() = runBlocking {
+        listOf("claude-sonnet-4-5-20250929", "claude-opus-4-6").forEach { model ->
+            val api = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
+
+            AnthropicMessagesAdapter(api, attachmentEncoder())
+                .openSession(turns(), platform(ClientType.ANTHROPIC).copy(model = model, reasoning = false))
+                .streamRound(listOf(definition), emptyList())
+                .toList()
+
+            assertFalse(requestJson(api.requests.single()).containsKey("thinking"))
+            assertEquals(emptySet<String>(), api.configs.single().anthropicBetaFeatures)
+        }
+    }
+
+    @Test
+    fun `anthropic omits reasoning configuration for models without thinking support`() = runBlocking {
+        val api = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
+
+        AnthropicMessagesAdapter(api, attachmentEncoder())
+            .openSession(
+                turns(),
+                platform(ClientType.ANTHROPIC).copy(model = "claude-3-5-sonnet-20240620", reasoning = true)
+            )
+            .streamRound(listOf(definition), emptyList())
+            .toList()
+
+        assertFalse(requestJson(api.requests.single()).containsKey("thinking"))
+        assertEquals(emptySet<String>(), api.configs.single().anthropicBetaFeatures)
+    }
+
+    @Test
+    fun `anthropic reasoning disabled respects default on model capabilities`() = runBlocking {
+        listOf("claude-opus-5", "claude-sonnet-5-20260801").forEach { model ->
+            val api = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
+
+            AnthropicMessagesAdapter(api, attachmentEncoder())
+                .openSession(turns(), platform(ClientType.ANTHROPIC).copy(model = model, reasoning = false))
+                .streamRound(listOf(definition), emptyList())
+                .toList()
+
+            val thinking = requestJson(api.requests.single())["thinking"]!!.jsonObject
+            assertEquals("disabled", thinking["type"]!!.jsonPrimitive.content)
+            assertFalse(thinking.containsKey("budget_tokens"))
+            assertEquals(emptySet<String>(), api.configs.single().anthropicBetaFeatures)
+        }
+
+        listOf("claude-fable-5", "claude-mythos-5").forEach { model ->
+            val api = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
+
+            AnthropicMessagesAdapter(api, attachmentEncoder())
+                .openSession(turns(), platform(ClientType.ANTHROPIC).copy(model = model, reasoning = false))
+                .streamRound(listOf(definition), emptyList())
+                .toList()
+
+            assertFalse(requestJson(api.requests.single()).containsKey("thinking"))
+        }
+    }
+
+    @Test
+    fun `every declared anthropic model resolves a summarized thinking policy`() {
+        ModelConstants.anthropicModels.forEach { model ->
+            val policy = anthropicThinkingPolicy(model, reasoningEnabled = true, hasTools = true)
+
+            assertEquals("$model should summarize reasoning", "summarized", policy.config?.display)
+        }
+    }
+
+    @Test
+    fun `anthropic manual thinking enables interleaving only for supported tool models`() = runBlocking {
+        listOf("claude-sonnet-4-5-20250929", "claude-opus-4-1-20250805").forEach { model ->
+            val api = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
+
+            AnthropicMessagesAdapter(api, attachmentEncoder())
+                .openSession(turns(), platform(ClientType.ANTHROPIC).copy(model = model, reasoning = true))
+                .streamRound(listOf(definition), emptyList())
+                .toList()
+
+            val thinking = requestJson(api.requests.single())["thinking"]!!.jsonObject
+            assertEquals("enabled", thinking["type"]!!.jsonPrimitive.content)
+            assertEquals(10_000, thinking["budget_tokens"]!!.jsonPrimitive.content.toInt())
+            assertEquals("summarized", thinking["display"]!!.jsonPrimitive.content)
+            assertEquals(setOf(ANTHROPIC_INTERLEAVED_THINKING_BETA), api.configs.single().anthropicBetaFeatures)
+        }
+
+        val haikuApi = FakeAnthropicAPI(ArrayDeque(listOf(emptyFlow())))
+        AnthropicMessagesAdapter(haikuApi, attachmentEncoder())
+            .openSession(
+                turns(),
+                platform(ClientType.ANTHROPIC).copy(model = "claude-haiku-4-5-20251001", reasoning = true)
+            )
+            .streamRound(listOf(definition), emptyList())
+            .toList()
+
+        assertEquals(emptySet<String>(), haikuApi.configs.single().anthropicBetaFeatures)
+    }
+
+    @Test
+    fun `anthropic streamed tool call executes and continues through the agent runner`() = runBlocking {
+        val api = FakeAnthropicAPI(
+            ArrayDeque(
+                listOf(
+                    flowOf(
+                        ContentStartResponseChunk(
+                            index = 0,
+                            contentBlock = ContentBlock(
+                                type = ContentBlockType.TOOL_USE,
+                                id = "call_exact",
+                                name = "weather"
+                            )
+                        ),
+                        ContentDeltaResponseChunk(
+                            index = 0,
+                            delta = ContentBlock(
+                                type = ContentBlockType.INPUT_JSON_DELTA,
+                                partialJson = "{\"city\":\"Tokyo\"}"
+                            )
+                        ),
+                        ContentStopResponseChunk(0),
+                        MessageStopResponseChunk
+                    ),
+                    flowOf(
+                        ContentDeltaResponseChunk(
+                            index = 0,
+                            delta = ContentBlock(type = ContentBlockType.DELTA, text = "sunny")
+                        ),
+                        MessageStopResponseChunk
+                    )
+                )
+            )
+        )
+        val session = AnthropicMessagesAdapter(api, attachmentEncoder())
+            .openSession(turns(), platform(ClientType.ANTHROPIC))
+        val tool = RecordingAgentTool(definition)
+
+        val events = AgentRunner().run(session, listOf(tool)).toList()
+
+        assertEquals(call.arguments, tool.arguments)
+        assertEquals("call_exact", events.filterIsInstance<AgentRunEvent.ToolFinished>().single().result.callId)
+        assertEquals("sunny", events.providerText())
+        val continuation = api.requests.last().messages.takeLast(2)
+        assertEquals(
+            "call_exact",
+            (continuation[1].content.single() as dev.chungjungsoo.gptmobile.data.dto.anthropic.common.ToolResultContent).toolUseId
+        )
+    }
+
+    @Test
     fun `anthropic adapter replays signed thinking block before tool use`() = runBlocking {
         val firstRound = listOf(
             """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}""",
@@ -299,7 +469,10 @@ class ProviderAdaptersTest {
             )
         )
         val session = AnthropicMessagesAdapter(api, attachmentEncoder())
-            .openSession(turns(), platform(ClientType.ANTHROPIC).copy(reasoning = true))
+            .openSession(
+                turns(),
+                platform(ClientType.ANTHROPIC).copy(model = "claude-opus-4-6", reasoning = true)
+            )
 
         val emittedCall = session.streamRound(listOf(definition), emptyList()).toList()
             .filterIsInstance<ProviderEvent.ToolCall>()
@@ -314,6 +487,46 @@ class ProviderAdaptersTest {
         assertEquals("thinking", assistantContent[0].jsonObject["type"]!!.jsonPrimitive.content)
         assertEquals("checking", assistantContent[0].jsonObject["thinking"]!!.jsonPrimitive.content)
         assertEquals("sig_exact", assistantContent[0].jsonObject["signature"]!!.jsonPrimitive.content)
+        assertEquals("tool_use", assistantContent[1].jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals("adaptive", requestJson(api.requests.last())["thinking"]!!.jsonObject["type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `anthropic adapter replays redacted thinking unchanged before tool results`() = runBlocking {
+        val firstRound = listOf(
+            """{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"encrypted_exact"}}""",
+            """{"type":"content_block_stop","index":0}""",
+            """{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_exact","name":"weather","input":{}}}""",
+            """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Tokyo\"}"}}""",
+            """{"type":"content_block_stop","index":1}""",
+            """{"type":"message_stop"}"""
+        ).map { NetworkClient.json.decodeFromString<MessageResponseChunk>(it) }
+        val api = FakeAnthropicAPI(
+            ArrayDeque(
+                listOf(
+                    flowOf(*firstRound.toTypedArray()),
+                    flowOf(MessageStopResponseChunk)
+                )
+            )
+        )
+        val session = AnthropicMessagesAdapter(api, attachmentEncoder())
+            .openSession(
+                turns(),
+                platform(ClientType.ANTHROPIC).copy(model = "claude-sonnet-4-6", reasoning = true)
+            )
+
+        val emittedCall = session.streamRound(listOf(definition), emptyList()).toList()
+            .filterIsInstance<ProviderEvent.ToolCall>()
+            .single()
+        session.streamRound(
+            listOf(definition),
+            listOf(AgentToolExchange(listOf(emittedCall), listOf(result)))
+        ).toList()
+
+        val messages = requestJson(api.requests.last())["messages"]!!.jsonArray
+        val assistantContent = messages[messages.lastIndex - 1].jsonObject["content"]!!.jsonArray
+        assertEquals("redacted_thinking", assistantContent[0].jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals("encrypted_exact", assistantContent[0].jsonObject["data"]!!.jsonPrimitive.content)
         assertEquals("tool_use", assistantContent[1].jsonObject["type"]!!.jsonPrimitive.content)
     }
 
@@ -364,8 +577,50 @@ class ProviderAdaptersTest {
             listOf(ProviderEvent.TextDelta("done"), ProviderEvent.Completed),
             session.streamRound(listOf(definition), listOf(AgentToolExchange(listOf(call), listOf(result)))).toList()
         )
+        assertEquals("AUTO", api.requests.first().toolConfig?.functionCallingConfig?.mode)
+        assertEquals("weather", api.requests.first().tools!!.single().functionDeclarations.single().name)
         val continuation = api.requests.last().contents.takeLast(2)
         assertEquals("call_exact", continuation[0].parts.single().functionCall!!.id)
+        assertEquals("call_exact", continuation[1].parts.single().functionResponse!!.id)
+    }
+
+    @Test
+    fun `gemini streamed function call executes and continues through the agent runner`() = runBlocking {
+        val api = FakeGoogleAPI(
+            ArrayDeque(
+                listOf(
+                    flowOf(
+                        GenerateContentResponse(
+                            candidates = listOf(
+                                Candidate(
+                                    content = Content(
+                                        role = GoogleRole.MODEL,
+                                        parts = listOf(Part(functionCall = FunctionCall("call_exact", "weather", call.arguments)))
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    flowOf(
+                        GenerateContentResponse(
+                            candidates = listOf(
+                                Candidate(content = Content(role = GoogleRole.MODEL, parts = listOf(Part.text("sunny"))))
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val session = GeminiAdapter(api, attachmentEncoder())
+            .openSession(turns(), platform(ClientType.GOOGLE))
+        val tool = RecordingAgentTool(definition)
+
+        val events = AgentRunner().run(session, listOf(tool)).toList()
+
+        assertEquals(call.arguments, tool.arguments)
+        assertEquals("call_exact", events.filterIsInstance<AgentRunEvent.ToolFinished>().single().result.callId)
+        assertEquals("sunny", events.providerText())
+        val continuation = api.requests.last().contents.takeLast(2)
         assertEquals("call_exact", continuation[1].parts.single().functionResponse!!.id)
     }
 
@@ -402,6 +657,69 @@ class ProviderAdaptersTest {
     }
 
     @Test
+    fun `gemini strips additionalProperties from tool schemas`() {
+        val schema = buildJsonObject {
+            put("type", "object")
+            put("properties", JsonObject(emptyMap()))
+            put("additionalProperties", false)
+        }
+
+        val sanitized = geminiToolParameters(schema)
+
+        assertEquals("object", sanitized.getValue("type").toString().trim('"'))
+        assertFalse(sanitized.containsKey("additionalProperties"))
+    }
+
+    @Test
+    fun `gemini keeps nested properties named additionalProperties`() {
+        val schema = buildJsonObject {
+            put("type", "object")
+            put("additionalProperties", false)
+            put(
+                "properties",
+                buildJsonObject {
+                    put(
+                        "additionalProperties",
+                        buildJsonObject {
+                            put("type", "string")
+                        }
+                    )
+                    put(
+                        "nested",
+                        buildJsonObject {
+                            put("type", "object")
+                            put("additionalProperties", false)
+                            put(
+                                "properties",
+                                buildJsonObject {
+                                    put(
+                                        "additionalProperties",
+                                        buildJsonObject {
+                                            put("type", "boolean")
+                                            put("additionalProperties", false)
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    )
+                }
+            )
+        }
+
+        val sanitized = geminiToolParameters(schema)
+
+        assertFalse(sanitized.containsKey("additionalProperties"))
+        val properties = sanitized.getValue("properties").jsonObject
+        assertEquals("string", properties.getValue("additionalProperties").jsonObject.getValue("type").jsonPrimitive.content)
+        val nested = properties.getValue("nested").jsonObject
+        assertFalse(nested.containsKey("additionalProperties"))
+        val nestedProperty = nested.getValue("properties").jsonObject.getValue("additionalProperties").jsonObject
+        assertEquals("boolean", nestedProperty.getValue("type").jsonPrimitive.content)
+        assertFalse(nestedProperty.containsKey("additionalProperties"))
+    }
+
+    @Test
     fun `gemini omits tools for chat only profiles`() = runBlocking {
         val api = FakeGoogleAPI(ArrayDeque(listOf(emptyFlow())))
 
@@ -435,6 +753,25 @@ class ProviderAdaptersTest {
     )
 
     private fun attachmentEncoder() = ProviderAttachmentEncoder(ContextWrapper(null))
+
+    private fun List<AgentRunEvent>.providerText(): String = mapNotNull { event ->
+        ((event as? AgentRunEvent.Provider)?.event as? ProviderEvent.TextDelta)?.text
+    }.joinToString("")
+
+    private class RecordingAgentTool(
+        override val definition: AgentToolDefinition
+    ) : AgentTool {
+        var arguments: JsonObject? = null
+
+        override suspend fun execute(callId: String, arguments: JsonObject): AgentToolResult {
+            this.arguments = arguments
+            return AgentToolResult(
+                callId = callId,
+                content = ToolResultContent.Text("sunny"),
+                isError = false
+            )
+        }
+    }
 
     private class FakeOpenAIAPI(
         private val chatRounds: ArrayDeque<Flow<ChatCompletionChunk>> = ArrayDeque(),
@@ -495,6 +832,7 @@ class ProviderAdaptersTest {
         private val rounds: ArrayDeque<Flow<MessageResponseChunk>>
     ) : AnthropicAPI {
         val requests = mutableListOf<dev.chungjungsoo.gptmobile.data.dto.anthropic.request.MessageRequest>()
+        val configs = mutableListOf<ProviderRequestConfig>()
 
         override fun streamChatMessage(
             messageRequest: dev.chungjungsoo.gptmobile.data.dto.anthropic.request.MessageRequest,
@@ -502,6 +840,7 @@ class ProviderAdaptersTest {
             config: ProviderRequestConfig
         ): Flow<MessageResponseChunk> {
             requests += messageRequest
+            configs += config
             return rounds.removeFirst()
         }
 

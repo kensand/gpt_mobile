@@ -341,6 +341,29 @@ object ChatDatabaseV2Migrations {
         }
     }
 
+    val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `messages_v2` ADD COLUMN `timeline` TEXT NOT NULL DEFAULT '[]'")
+            // Mirrors hasUnavailableAssistantOrder: only rows that interleaved reasoning with text,
+            // or ran tools, have an order that cannot be reconstructed. A plain reply keeps an empty
+            // timeline so it renders without the chronology notice.
+            db.execSQL(
+                """
+                UPDATE `messages_v2`
+                SET `timeline` = '[{"type":"LEGACY_ORDER"}]'
+                WHERE `platform_type` IS NOT NULL
+                  AND (
+                      (TRIM(`content`) != '' AND TRIM(`thoughts`) != '')
+                      OR EXISTS (
+                          SELECT 1 FROM `tool_events`
+                          WHERE `tool_events`.`run_id` = `messages_v2`.`current_run_id`
+                      )
+                  )
+                """.trimIndent()
+            )
+        }
+    }
+
     private fun installAgentToolBindingConstraints(db: SupportSQLiteDatabase) {
         db.execSQL(
             """

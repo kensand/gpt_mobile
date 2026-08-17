@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -106,6 +107,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveRunId
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
+import dev.chungjungsoo.gptmobile.data.database.entity.effectiveTimeline
 import dev.chungjungsoo.gptmobile.util.isAssistantErrorMessage
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -191,8 +193,9 @@ fun ChatScreen(
     }
 
     suspend fun animateScrollToLatestMessage() {
-        if (lastMessageIndex >= 0) {
-            listState.animateScrollToItem(lastMessageIndex + 1)
+        val latestItemIndex = listState.layoutInfo.totalItemsCount - 1
+        if (latestItemIndex >= 0) {
+            listState.animateScrollToItem(latestItemIndex)
         }
     }
 
@@ -256,15 +259,13 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxSize(),
                     state = listState
                 ) {
-                    val historicalMessageCount = lastMessageIndex.coerceAtLeast(0)
-
-                    items(
-                        count = historicalMessageCount,
-                        key = { index -> chatMessagePairKey(groupedMessages.userMessages[index], index) }
-                    ) { index ->
+                    itemsIndexed(
+                        items = groupedMessages.userMessages,
+                        key = { index, message -> chatMessagePairKey(message, index) }
+                    ) { index, message ->
                         ChatMessagePair(
                             messageIndex = index,
-                            message = groupedMessages.userMessages[index],
+                            message = message,
                             assistantMessages = groupedMessages.assistantMessages.getOrNull(index) ?: emptyList(),
                             agentRunsById = agentRunsById,
                             toolEventsByRun = toolEventsByRun,
@@ -274,7 +275,7 @@ fun ChatScreen(
                             enabledPlatformLookup = enabledPlatformLookup,
                             canUseChat = canUseChat,
                             isIdle = isIdle,
-                            isActiveMessage = false,
+                            isActiveMessage = index == lastMessageIndex,
                             maximumUserChatBubbleWidth = maximumUserChatBubbleWidth,
                             maximumOpponentChatBubbleWidth = maximumOpponentChatBubbleWidth,
                             onEditQuestion = chatViewModel::openUserMessageEditDialog,
@@ -291,39 +292,7 @@ fun ChatScreen(
                             onShowNextRevision = chatViewModel::showNextAssistantRevision
                         )
                     }
-
-                    if (lastMessageIndex >= 0) {
-                        item(key = chatMessagePairKey(groupedMessages.userMessages[lastMessageIndex], lastMessageIndex)) {
-                            ChatMessagePair(
-                                messageIndex = lastMessageIndex,
-                                message = groupedMessages.userMessages[lastMessageIndex],
-                                assistantMessages = groupedMessages.assistantMessages.getOrNull(lastMessageIndex) ?: emptyList(),
-                                agentRunsById = agentRunsById,
-                                toolEventsByRun = toolEventsByRun,
-                                platformIndexState = indexStates.getOrElse(lastMessageIndex) { 0 },
-                                loadingStates = loadingStates,
-                                enabledPlatformsInChat = chatViewModel.enabledPlatformsInChat,
-                                enabledPlatformLookup = enabledPlatformLookup,
-                                canUseChat = canUseChat,
-                                isIdle = isIdle,
-                                isActiveMessage = true,
-                                maximumUserChatBubbleWidth = maximumUserChatBubbleWidth,
-                                maximumOpponentChatBubbleWidth = maximumOpponentChatBubbleWidth,
-                                onEditQuestion = chatViewModel::openUserMessageEditDialog,
-                                onEditAssistant = chatViewModel::openAssistantMessageEditDialog,
-                                onCopyText = { copiedText ->
-                                    scope.launch {
-                                        clipboardManager.setClipEntry(ClipEntry(ClipData.newPlainText(copiedText, copiedText)))
-                                    }
-                                },
-                                onPlatformClick = chatViewModel::updateChatPlatformIndex,
-                                onSelectText = chatViewModel::openSelectTextSheet,
-                                onRetry = chatViewModel::retryChat,
-                                onShowPreviousRevision = chatViewModel::showPreviousAssistantRevision,
-                                onShowNextRevision = chatViewModel::showNextAssistantRevision
-                            )
-                        }
-
+                    if (groupedMessages.userMessages.isNotEmpty()) {
                         item(key = "chat-bottom-anchor") {
                             Spacer(Modifier.size(1.dp))
                         }
@@ -480,6 +449,7 @@ private fun ChatMessagePair(
     val selectedAssistantMessage = assistantMessages.getOrNull(platformIndexState)
     val assistantContent = selectedAssistantMessage?.effectiveContent() ?: ""
     val assistantThoughts = selectedAssistantMessage?.effectiveThoughts() ?: ""
+    val assistantTimeline = selectedAssistantMessage?.effectiveTimeline().orEmpty()
     val selectedRunId = selectedAssistantMessage?.effectiveRunId()
     val agentRun = selectedRunId?.let(agentRunsById::get)
     val toolEvents = selectedRunId?.let(toolEventsByRun::get).orEmpty()
@@ -562,6 +532,7 @@ private fun ChatMessagePair(
                 isError = agentRun?.status == AgentRunStatus.FAILED && isAssistantErrorMessage(assistantContent),
                 text = assistantContent,
                 thoughts = assistantThoughts,
+                timeline = assistantTimeline,
                 attachments = selectedAssistantMessage?.attachments.orEmpty().map { it.filePathForDisplay },
                 agentRun = agentRun,
                 toolEvents = toolEvents,
@@ -730,7 +701,10 @@ fun ChatBubbleDropdownMenu(
 
 private fun exportChat(context: Context, chatViewModel: ChatViewModel) {
     try {
-        val (fileName, fileContent) = chatViewModel.exportChat(context.toolTraceLabels())
+        val (fileName, fileContent) = chatViewModel.exportChat(
+            toolTraceLabels = context.toolTraceLabels(),
+            legacyOrderNotice = context.getString(R.string.legacy_assistant_order_unavailable)
+        )
         val file = File(context.getExternalFilesDir(null), fileName)
         file.writeText(fileContent)
         val uri = getUriForFile(context, "${context.packageName}.fileprovider", file)
