@@ -7,6 +7,7 @@ import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClient
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCoordinator
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogDefaultConfig
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
+import dev.chungjungsoo.gptmobile.data.catalog.SocModelFile
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentToolBinding
@@ -37,6 +38,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -191,7 +193,7 @@ class PlatformSettingViewModelTest {
     }
 
     @Test
-    fun `accelerator options omit NPU even when the catalog lists it`() = runTest {
+    fun `accelerator options omit NPU when the device has no matching SOC variant`() = runTest {
         val viewModel = localSettingsViewModel(
             settings = FakeSettingRepository(localPlatform(model = "cpu-gpu")),
             catalog = FakeModelCatalogRepository(
@@ -200,6 +202,68 @@ class PlatformSettingViewModelTest {
         )
 
         assertEquals(listOf(LocalAccelerators.CPU, LocalAccelerators.GPU), viewModel.acceleratorOptions.value)
+    }
+
+    @Test
+    fun `accelerator options include NPU when the model and device SOC qualify`() = runTest {
+        val viewModel = localSettingsViewModel(
+            settings = FakeSettingRepository(localPlatform(model = "cpu-gpu")),
+            catalog = FakeModelCatalogRepository(
+                listOf(
+                    catalogEntry(
+                        id = "cpu-gpu",
+                        supportedAccelerators = listOf("npu", "cpu", "gpu"),
+                        socToModelFiles = mapOf("SM8650" to SocModelFile(modelFile = "npu.litertlm"))
+                    )
+                )
+            ),
+            deviceSocModel = "SM8650"
+        )
+
+        assertEquals(
+            listOf(LocalAccelerators.CPU, LocalAccelerators.GPU, LocalAccelerators.NPU),
+            viewModel.acceleratorOptions.value
+        )
+    }
+
+    @Test
+    fun `updating accelerator persists NPU when the device qualifies`() = runTest {
+        val settings = FakeSettingRepository(localPlatform(model = "cpu-gpu"))
+        val viewModel = localSettingsViewModel(
+            settings = settings,
+            catalog = FakeModelCatalogRepository(
+                listOf(
+                    catalogEntry(
+                        id = "cpu-gpu",
+                        supportedAccelerators = listOf("cpu", "gpu", "npu"),
+                        socToModelFiles = mapOf("SM8650" to SocModelFile(modelFile = "npu.litertlm"))
+                    )
+                )
+            ),
+            deviceSocModel = "SM8650"
+        )
+
+        viewModel.updateAccelerator(LocalAccelerators.NPU)
+
+        assertEquals(LocalAccelerators.NPU, viewModel.platformState.value?.accelerator)
+        assertEquals(LocalAccelerators.NPU, settings.updatedPlatforms.single().accelerator)
+        assertFalse(viewModel.dialogState.value.isAcceleratorDialogOpen)
+    }
+
+    @Test
+    fun `updating accelerator ignores NPU when the device does not qualify`() = runTest {
+        val settings = FakeSettingRepository(localPlatform(model = "cpu-gpu", accelerator = LocalAccelerators.GPU))
+        val viewModel = localSettingsViewModel(
+            settings = settings,
+            catalog = FakeModelCatalogRepository(
+                listOf(catalogEntry("cpu-gpu", supportedAccelerators = listOf("cpu", "gpu", "npu")))
+            )
+        )
+
+        viewModel.updateAccelerator(LocalAccelerators.NPU)
+
+        assertEquals(LocalAccelerators.GPU, viewModel.platformState.value?.accelerator)
+        assertTrue(settings.updatedPlatforms.isEmpty())
     }
 
     @Test
@@ -248,13 +312,15 @@ class PlatformSettingViewModelTest {
         catalog: FakeModelCatalogRepository = FakeModelCatalogRepository(
             listOf(catalogEntry("gemma3-1b-it", supportedAccelerators = listOf("cpu", "gpu")))
         ),
-        localModels: LocalModelRepository = FakeLocalModelRepository()
+        localModels: LocalModelRepository = FakeLocalModelRepository(),
+        deviceSocModel: String = ""
     ): PlatformSettingViewModel = testViewModel(
         dao = FakeToolConnectionDao(),
         settingRepository = settings,
         catalogRepository = catalog,
         localModelRepository = localModels,
-        platformUid = "local-1"
+        platformUid = "local-1",
+        deviceSocModel = deviceSocModel
     )
 
     private fun testViewModel(
@@ -262,7 +328,8 @@ class PlatformSettingViewModelTest {
         settingRepository: SettingRepository = FakeSettingRepository(),
         catalogRepository: ModelCatalogRepository = FakeModelCatalogRepository(),
         localModelRepository: LocalModelRepository = FakeLocalModelRepository(),
-        platformUid: String = "profile-1"
+        platformUid: String = "profile-1",
+        deviceSocModel: String = ""
     ): PlatformSettingViewModel {
         val vault = FakeSecretVault()
         val repository = ToolConnectionRepository(dao, vault)
@@ -282,6 +349,7 @@ class PlatformSettingViewModelTest {
             agentToolResolver = resolver,
             modelCatalogRepository = catalogRepository,
             localModelRepository = localModelRepository,
+            deviceSocModel = deviceSocModel,
             savedStateHandle = SavedStateHandle(mapOf("platformUid" to platformUid))
         )
     }
@@ -437,10 +505,12 @@ private fun localPlatform(
 private fun catalogEntry(
     id: String,
     supportedAccelerators: List<String>,
-    defaults: CatalogDefaultConfig = CatalogDefaultConfig()
+    defaults: CatalogDefaultConfig = CatalogDefaultConfig(),
+    socToModelFiles: Map<String, SocModelFile> = emptyMap()
 ) = CatalogEntry(
     id = id,
     displayName = id,
     supportedAccelerators = supportedAccelerators,
-    defaultConfig = defaults
+    defaultConfig = defaults,
+    socToModelFiles = socToModelFiles
 )

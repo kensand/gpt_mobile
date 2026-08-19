@@ -2,6 +2,7 @@ package dev.chungjungsoo.gptmobile.data.localruntime
 
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogDefaultConfig
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
+import dev.chungjungsoo.gptmobile.data.catalog.SocModelFile
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -24,11 +25,24 @@ class LocalSamplingDefaultsTest {
     }
 
     @Test
-    fun `falls back to the first supported accelerator`() {
+    fun `falls back to the first eligible accelerator`() {
+        val defaults = localSamplingDefaults(
+            entry = CatalogEntry(
+                supportedAccelerators = listOf("npu", "cpu"),
+                socToModelFiles = mapOf("SM8650" to SocModelFile(modelFile = "npu.litertlm"))
+            ),
+            deviceSocModel = "SM8650"
+        )
+
+        assertEquals(LocalAccelerators.NPU, defaults.accelerator)
+    }
+
+    @Test
+    fun `does not default to NPU when the device has no SOC variant`() {
         val defaults = localSamplingDefaults(
             CatalogEntry(supportedAccelerators = listOf("npu", "cpu"))
         )
 
-        assertEquals(LocalAccelerators.NPU, defaults.accelerator)
+        assertEquals(LocalAccelerators.CPU, defaults.accelerator)
     }
 }

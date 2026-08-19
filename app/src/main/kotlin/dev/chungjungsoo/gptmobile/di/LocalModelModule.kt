@@ -47,9 +47,11 @@ object LocalModelModule {
     @Singleton
     fun provideLocalModelRepository(
         @ApplicationContext context: Context,
-        localModelDao: LocalModelDao
+        localModelDao: LocalModelDao,
+        @DeviceSocModel deviceSocModel: String
     ): LocalModelRepository = LocalModelRepositoryImpl(
         context = context,
-        localModelDao = localModelDao
+        localModelDao = localModelDao,
+        deviceSocModel = deviceSocModel
     )
 }

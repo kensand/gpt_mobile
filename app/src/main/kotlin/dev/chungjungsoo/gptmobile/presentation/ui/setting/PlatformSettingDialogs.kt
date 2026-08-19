@@ -724,6 +724,7 @@ private fun AcceleratorDialog(
 @Composable
 private fun acceleratorTitle(accelerator: String): String = when (accelerator) {
     LocalAccelerators.GPU -> stringResource(R.string.accelerator_gpu)
+    LocalAccelerators.NPU -> stringResource(R.string.accelerator_npu)
     else -> stringResource(R.string.accelerator_cpu)
 }
 

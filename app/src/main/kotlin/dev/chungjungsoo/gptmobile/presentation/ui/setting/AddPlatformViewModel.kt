@@ -9,6 +9,7 @@ import dev.chungjungsoo.gptmobile.data.localruntime.LocalSamplingDefaults
 import dev.chungjungsoo.gptmobile.data.localruntime.localSamplingDefaults
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
+import dev.chungjungsoo.gptmobile.di.DeviceSocModel
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.DownloadedLocalModelOption
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +22,8 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class AddPlatformViewModel @Inject constructor(
     private val localModelRepository: LocalModelRepository,
-    private val modelCatalogRepository: ModelCatalogRepository
+    private val modelCatalogRepository: ModelCatalogRepository,
+    @param:DeviceSocModel private val deviceSocModel: String
 ) : ViewModel() {
     private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
 
@@ -46,5 +48,5 @@ class AddPlatformViewModel @Inject constructor(
 
     fun defaultsFor(catalogEntryId: String): LocalSamplingDefaults? = catalogEntries.value
         .firstOrNull { it.id == catalogEntryId }
-        ?.let(::localSamplingDefaults)
+        ?.let { localSamplingDefaults(it, deviceSocModel) }
 }

@@ -31,9 +31,11 @@ class LiteRtLocalRuntime(
 ) : LocalRuntime {
     private var engine: Engine? = null
     private var conversation: Conversation? = null
+    private var loadedAccelerator: String = LocalAccelerators.CPU
 
     override suspend fun loadEngine(spec: LocalEngineSpec) {
         withContext(Dispatchers.IO) {
+            loadedAccelerator = spec.accelerator
             val engineConfig = EngineConfig(
                 modelPath = spec.modelPath,
                 backend = backendFor(spec.accelerator),
@@ -71,11 +73,15 @@ class LiteRtLocalRuntime(
                             }
                         },
                         tools = toolProviders,
-                        samplerConfig = SamplerConfig(
-                            topK = config.sampler.topK,
-                            topP = config.sampler.topP.toDouble(),
-                            temperature = config.sampler.temperature.toDouble()
-                        )
+                        samplerConfig = if (LocalAccelerators.shouldApplySampler(loadedAccelerator)) {
+                            SamplerConfig(
+                                topK = config.sampler.topK,
+                                topP = config.sampler.topP.toDouble(),
+                                temperature = config.sampler.temperature.toDouble()
+                            )
+                        } else {
+                            null
+                        }
                     )
                 )
             } finally {
@@ -150,12 +156,13 @@ class LiteRtLocalRuntime(
             conversation = null
             runCatching { engine?.close() }
             engine = null
+            loadedAccelerator = LocalAccelerators.CPU
         }
     }
 
     private fun backendFor(accelerator: String): Backend = when (LocalAccelerators.normalize(accelerator)) {
         LocalAccelerators.GPU -> Backend.GPU()
-        LocalAccelerators.NPU -> Backend.NPU(context.applicationInfo.nativeLibraryDir)
+        LocalAccelerators.NPU -> Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
         else -> Backend.CPU()
     }
 
@@ -163,6 +170,7 @@ class LiteRtLocalRuntime(
         if (!spec.enableVision) return null
         return when (LocalAccelerators.normalize(spec.accelerator)) {
             LocalAccelerators.CPU -> Backend.CPU()
+            LocalAccelerators.NPU -> Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
             else -> Backend.GPU()
         }
     }

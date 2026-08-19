@@ -591,6 +591,7 @@ fun PlatformTopAppBar(
 private fun acceleratorLabel(accelerator: String?): String = when (accelerator?.lowercase()) {
     LocalAccelerators.GPU -> stringResource(R.string.accelerator_gpu)
     LocalAccelerators.CPU -> stringResource(R.string.accelerator_cpu)
+    LocalAccelerators.NPU -> stringResource(R.string.accelerator_npu)
     else -> stringResource(R.string.not_set)
 }
 

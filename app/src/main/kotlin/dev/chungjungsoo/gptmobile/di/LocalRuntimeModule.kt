@@ -1,6 +1,7 @@
 package dev.chungjungsoo.gptmobile.di
 
 import android.content.Context
+import android.os.Build
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -19,4 +20,9 @@ object LocalRuntimeModule {
     fun provideLocalRuntime(
         @ApplicationContext context: Context
     ): LocalRuntime = LocalEngineHolder(LiteRtLocalRuntime(context))
+
+    @Provides
+    @Singleton
+    @DeviceSocModel
+    fun provideDeviceSocModel(): String = Build.SOC_MODEL.orEmpty()
 }

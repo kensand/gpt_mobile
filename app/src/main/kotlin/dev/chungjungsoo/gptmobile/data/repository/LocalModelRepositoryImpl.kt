@@ -14,6 +14,7 @@ import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadPaths
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelReconciler
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.localmodel.ReconcileAction
+import dev.chungjungsoo.gptmobile.data.localmodel.SocModelFileResolver
 import dev.chungjungsoo.gptmobile.data.worker.LocalModelDownloadWorker
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +23,8 @@ import kotlinx.coroutines.withContext
 
 class LocalModelRepositoryImpl(
     private val context: Context,
-    private val localModelDao: LocalModelDao
+    private val localModelDao: LocalModelDao,
+    private val deviceSocModel: String
 ) : LocalModelRepository {
 
     private val workManager: WorkManager
@@ -46,18 +48,17 @@ class LocalModelRepositoryImpl(
 
     override suspend fun startDownload(entry: CatalogEntry) {
         withContext(Dispatchers.IO) {
-            val commitHash = LocalModelDownloadPaths.commitHashFromUrl(entry.downloadUrl)
-            val fileName = LocalModelDownloadPaths.fileNameFromUrl(entry.downloadUrl)
-            val relativeDirectory = LocalModelDownloadPaths.relativeDirectory(entry.id, commitHash)
+            val resolved = SocModelFileResolver.resolve(entry, deviceSocModel)
+            val relativeDirectory = LocalModelDownloadPaths.relativeDirectory(entry.id, resolved.commitHash)
             val now = System.currentTimeMillis() / 1000
             val existing = localModelDao.getById(entry.id)
             localModelDao.upsert(
                 LocalModel(
                     catalogEntryId = entry.id,
-                    commitHash = commitHash,
-                    fileName = fileName,
+                    commitHash = resolved.commitHash,
+                    fileName = resolved.fileName,
                     relativeDirectory = relativeDirectory,
-                    totalBytes = entry.sizeInBytes,
+                    totalBytes = resolved.sizeInBytes,
                     status = LocalModelStatus.DOWNLOADING,
                     createdAt = existing?.createdAt ?: now,
                     updatedAt = now
@@ -67,10 +68,10 @@ class LocalModelRepositoryImpl(
             val inputData = Data.Builder()
                 .putString(LocalModelDownloadWorker.KEY_CATALOG_ENTRY_ID, entry.id)
                 .putString(LocalModelDownloadWorker.KEY_DISPLAY_NAME, entry.displayName)
-                .putString(LocalModelDownloadWorker.KEY_DOWNLOAD_URL, entry.downloadUrl)
-                .putString(LocalModelDownloadWorker.KEY_COMMIT_HASH, commitHash)
-                .putString(LocalModelDownloadWorker.KEY_FILE_NAME, fileName)
-                .putLong(LocalModelDownloadWorker.KEY_TOTAL_BYTES, entry.sizeInBytes)
+                .putString(LocalModelDownloadWorker.KEY_DOWNLOAD_URL, resolved.downloadUrl)
+                .putString(LocalModelDownloadWorker.KEY_COMMIT_HASH, resolved.commitHash)
+                .putString(LocalModelDownloadWorker.KEY_FILE_NAME, resolved.fileName)
+                .putLong(LocalModelDownloadWorker.KEY_TOTAL_BYTES, resolved.sizeInBytes)
                 .putBoolean(LocalModelDownloadWorker.KEY_REQUIRES_HF_AUTH, entry.isGated)
                 .build()
 

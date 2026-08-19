@@ -72,6 +72,20 @@ class LocalEngineHolderTest {
     }
 
     @Test
+    fun `reloads engine when accelerator changes from GPU to NPU`() = runTest {
+        val fake = FakeLocalRuntime()
+        val holder = LocalEngineHolder(fake)
+        val gpu = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024)
+        val npu = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.NPU, 1024)
+
+        holder.loadEngine(gpu)
+        holder.loadEngine(npu)
+
+        assertEquals(listOf(gpu, npu), fake.loadEngineCalls)
+        assertEquals(1, fake.unloadEngineCalls)
+    }
+
+    @Test
     fun `forwards image payloads to the delegate`() = runTest {
         val fake = FakeLocalRuntime()
         val holder = LocalEngineHolder(fake)

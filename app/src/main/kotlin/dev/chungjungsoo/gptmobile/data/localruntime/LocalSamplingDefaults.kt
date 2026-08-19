@@ -10,10 +10,17 @@ data class LocalSamplingDefaults(
     val accelerator: String
 )
 
-fun localSamplingDefaults(entry: CatalogEntry): LocalSamplingDefaults = LocalSamplingDefaults(
+fun localSamplingDefaults(
+    entry: CatalogEntry,
+    deviceSocModel: String = ""
+): LocalSamplingDefaults = LocalSamplingDefaults(
     temperature = entry.defaultConfig.temperature,
     topP = entry.defaultConfig.topP,
     topK = entry.defaultConfig.topK,
     maxTokens = entry.defaultConfig.maxTokens,
-    accelerator = LocalAccelerators.defaultFrom(entry.supportedAccelerators)
+    accelerator = LocalAccelerators.defaultFrom(
+        supported = entry.supportedAccelerators,
+        socToModelFiles = entry.socToModelFiles,
+        deviceSocModel = deviceSocModel
+    )
 )

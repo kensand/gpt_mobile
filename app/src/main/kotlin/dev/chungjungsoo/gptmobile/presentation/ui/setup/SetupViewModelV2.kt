@@ -13,6 +13,7 @@ import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
+import dev.chungjungsoo.gptmobile.di.DeviceSocModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -39,7 +40,8 @@ data class DownloadedLocalModelOption(
 class SetupViewModelV2 @Inject constructor(
     private val settingRepository: SettingRepository,
     private val localModelRepository: LocalModelRepository,
-    private val modelCatalogRepository: ModelCatalogRepository
+    private val modelCatalogRepository: ModelCatalogRepository,
+    @param:DeviceSocModel private val deviceSocModel: String
 ) : ViewModel() {
 
     private val _platforms = MutableStateFlow<List<PlatformV2>>(emptyList())
@@ -228,7 +230,7 @@ class SetupViewModelV2 @Inject constructor(
 
     private fun catalogDefaultsFor(modelId: String) = catalogEntries.value
         .firstOrNull { it.id == modelId }
-        ?.let(::localSamplingDefaults)
+        ?.let { localSamplingDefaults(it, deviceSocModel) }
 
     private fun getDefaultPlatformName(clientType: ClientType): String = ModelConstants.defaultPlatformName(clientType)
 

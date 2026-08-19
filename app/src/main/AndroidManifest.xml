@@ -26,6 +26,15 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         tools:targetApi="upside_down_cake">
+        <uses-native-library
+            android:name="libedgetpu_util.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libedgetpu_tachyon.google.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libedgetpu_client.google.so"
+            android:required="false" />
         <!-- AppAuth merges RedirectUriReceiverActivity using appAuthRedirectScheme.
              Register a scheme distinct from the MCP callback (dev.chungjungsoo.gptmobile://oauth/mcp/). -->
         <activity
