@@ -412,6 +412,14 @@
     <string name="agent_run_failed">Agent run failed</string>
     <string name="agent_run_error_service_stopped">Foreground agent service stopped.</string>
     <string name="tool_event_error_interrupted_app_stopped">Interrupted when the app stopped.</string>
+    <string name="local_models">Local Models</string>
+    <string name="local_models_description">Browse the Model Catalog</string>
+    <string name="local_models_empty">No Local Models are available.</string>
+    <string name="local_model_requirements">%1$s · %2$d GB RAM</string>
+    <string name="local_model_not_downloaded">Not downloaded</string>
+    <string name="capability_vision">Vision</string>
+    <string name="capability_tools">Tools</string>
+    <string name="capability_thinking">Thinking</string>
     <string name="local_network_permission_required">Local network access is required for this provider or MCP connection.</string>
     <string name="local_network_check_failed">Could not check MCP network access. Local network permission will be requested as a precaution.</string>
 </resources>

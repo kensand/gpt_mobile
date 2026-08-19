@@ -20,6 +20,7 @@ import dev.chungjungsoo.gptmobile.presentation.ui.migrate.MigrateScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.AboutScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.AddPlatformScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LicenseScreen
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelsScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.PlatformSettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.SettingViewModelV2
@@ -182,6 +183,7 @@ fun NavGraphBuilder.settingNavigation(
                         Route.PLATFORM_SETTINGS.replace("{platformUid}", platformUid)
                     )
                 },
+                onNavigateToLocalModels = { navController.navigate(Route.LOCAL_MODELS) },
                 onNavigateToToolConnections = { navController.navigate(Route.TOOL_CONNECTIONS) },
                 onNavigateToAboutPage = { navController.navigate(Route.ABOUT_PAGE) }
             )
@@ -204,6 +206,11 @@ fun NavGraphBuilder.settingNavigation(
             arguments = listOf(navArgument("platformUid") { type = NavType.StringType })
         ) {
             PlatformSettingScreen(
+                onNavigationClick = { navController.navigateUp() }
+            )
+        }
+        composable(Route.LOCAL_MODELS) {
+            LocalModelsScreen(
                 onNavigationClick = { navController.navigateUp() }
             )
         }

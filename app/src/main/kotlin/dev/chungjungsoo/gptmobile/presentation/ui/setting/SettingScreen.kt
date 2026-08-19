@@ -56,6 +56,7 @@ fun SettingScreen(
     onNavigationClick: () -> Unit,
     onNavigateToAddPlatform: () -> Unit,
     onNavigateToPlatformSetting: (String) -> Unit,
+    onNavigateToLocalModels: () -> Unit,
     onNavigateToToolConnections: () -> Unit,
     onNavigateToAboutPage: () -> Unit
 ) {
@@ -110,6 +111,13 @@ fun SettingScreen(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
+            )
+            SettingItem(
+                title = stringResource(R.string.local_models),
+                description = stringResource(R.string.local_models_description),
+                onItemClick = onNavigateToLocalModels,
+                showTrailingIcon = true,
+                showLeadingIcon = false
             )
             SettingItem(
                 title = stringResource(R.string.web_tools),

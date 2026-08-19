@@ -56,6 +56,7 @@ extensions.configure<ApplicationExtension> {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
