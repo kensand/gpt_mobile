@@ -54,7 +54,7 @@ class LiteRtLmAdapter(
     )
 
     private var openConversation: OpenConversation? = null
-    private var conversationDirty = false
+    private var isConversationDirty = false
     private var exclusiveToolsByName: Map<String, AgentTool> = emptyMap()
     private var exclusiveToolEventSink: (suspend (ProviderEvent) -> Unit)? = null
 
@@ -111,7 +111,7 @@ class LiteRtLmAdapter(
                     modelPath = modelPath,
                     accelerator = LocalAccelerators.normalize(platform.accelerator),
                     maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
-                    enableVision = visionCapable
+                    isVisionEnabled = visionCapable
                 )
                 val sampler = LocalSamplerConfig(
                     topK = platform.topK ?: DEFAULT_TOP_K,
@@ -133,7 +133,7 @@ class LiteRtLmAdapter(
                         }
                         loadEngine(spec)
                         val snapshot = openConversation
-                        val canReuse = !conversationDirty &&
+                        val canReuse = !isConversationDirty &&
                             hasOpenConversation() &&
                             snapshot != null &&
                             snapshot.profileUid == platform.uid &&
@@ -161,7 +161,7 @@ class LiteRtLmAdapter(
                                     systemPrompt = platform.systemPrompt,
                                     initialMessages = seedHistory,
                                     tools = descriptors,
-                                    enableConstrainedDecoding = descriptors.isNotEmpty(),
+                                    isConstrainedDecodingEnabled = descriptors.isNotEmpty(),
                                     toolExecutor = if (descriptors.isNotEmpty()) {
                                         LocalToolExecutor { name, argumentsJson ->
                                             executeBoundTool(
@@ -185,7 +185,7 @@ class LiteRtLmAdapter(
                                 consumed = incomingPrior
                             )
                         }
-                        conversationDirty = true
+                        isConversationDirty = true
                         sendMessage(latestUserText, latestImages)
                     }.collect { event ->
                         when (event) {
@@ -198,7 +198,7 @@ class LiteRtLmAdapter(
 
                             is LocalRuntimeEvent.Error -> {
                                 failed = true
-                                conversationDirty = true
+                                isConversationDirty = true
                                 send(ProviderEvent.Failed(event.message))
                             }
 
@@ -223,15 +223,15 @@ class LiteRtLmAdapter(
                                     )
                                 )
                             )
-                            conversationDirty = false
+                            isConversationDirty = false
                         }
                     }
                 } catch (error: CancellationException) {
                     localRuntime.cancelActive()
-                    conversationDirty = true
+                    isConversationDirty = true
                     throw error
                 } catch (error: Exception) {
-                    conversationDirty = true
+                    isConversationDirty = true
                     send(ProviderEvent.Failed(error.message ?: "Local inference failed"))
                 }
             }

@@ -1,15 +1,15 @@
 package dev.chungjungsoo.gptmobile.data.localmodel
 
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
-import dev.chungjungsoo.gptmobile.data.catalog.SocModelFile
+import dev.chungjungsoo.gptmobile.data.catalog.SocVariant
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class SocModelFileResolverTest {
+class SocVariantResolverTest {
 
     @Test
     fun `matching device SOC selects the variant file url and size`() {
-        val resolved = SocModelFileResolver.resolve(entryWithVariant(), deviceSocModel = "SM8650")
+        val resolved = SocVariantResolver.resolve(entryWithVariant(), deviceSocModel = "SM8650")
 
         assertEquals("qwen-sm8650.litertlm", resolved.fileName)
         assertEquals(VARIANT_URL, resolved.downloadUrl)
@@ -19,7 +19,7 @@ class SocModelFileResolverTest {
 
     @Test
     fun `SOC match is case insensitive`() {
-        val resolved = SocModelFileResolver.resolve(entryWithVariant(), deviceSocModel = "sm8650")
+        val resolved = SocVariantResolver.resolve(entryWithVariant(), deviceSocModel = "sm8650")
 
         assertEquals("qwen-sm8650.litertlm", resolved.fileName)
         assertEquals(VARIANT_URL, resolved.downloadUrl)
@@ -27,7 +27,7 @@ class SocModelFileResolverTest {
 
     @Test
     fun `unknown device SOC falls back to the default file`() {
-        val resolved = SocModelFileResolver.resolve(entryWithVariant(), deviceSocModel = "SM8750")
+        val resolved = SocVariantResolver.resolve(entryWithVariant(), deviceSocModel = "SM8750")
 
         assertEquals(DEFAULT_FILE, resolved.fileName)
         assertEquals(DEFAULT_URL, resolved.downloadUrl)
@@ -37,7 +37,7 @@ class SocModelFileResolverTest {
 
     @Test
     fun `blank device SOC falls back to the default file`() {
-        val resolved = SocModelFileResolver.resolve(entryWithVariant(), deviceSocModel = "")
+        val resolved = SocVariantResolver.resolve(entryWithVariant(), deviceSocModel = "")
 
         assertEquals(DEFAULT_FILE, resolved.fileName)
         assertEquals(DEFAULT_URL, resolved.downloadUrl)
@@ -45,7 +45,7 @@ class SocModelFileResolverTest {
 
     @Test
     fun `entry without variants always uses the default file`() {
-        val resolved = SocModelFileResolver.resolve(entryWithoutVariants(), deviceSocModel = "SM8650")
+        val resolved = SocVariantResolver.resolve(entryWithoutVariants(), deviceSocModel = "SM8650")
 
         assertEquals(DEFAULT_FILE, resolved.fileName)
         assertEquals(DEFAULT_URL, resolved.downloadUrl)
@@ -58,7 +58,7 @@ class SocModelFileResolverTest {
         downloadUrl = DEFAULT_URL,
         sizeInBytes = DEFAULT_SIZE,
         socToModelFiles = mapOf(
-            "SM8650" to SocModelFile(
+            "SM8650" to SocVariant(
                 modelFile = "qwen-sm8650.litertlm",
                 downloadUrl = VARIANT_URL,
                 commitHash = "abc",

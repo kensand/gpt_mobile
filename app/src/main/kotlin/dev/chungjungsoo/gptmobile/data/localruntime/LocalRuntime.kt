@@ -7,7 +7,7 @@ data class LocalEngineSpec(
     val modelPath: String,
     val accelerator: String,
     val maxTokens: Int,
-    val enableVision: Boolean = false
+    val isVisionEnabled: Boolean = false
 )
 
 data class LocalSamplerConfig(
@@ -56,7 +56,7 @@ data class LocalConversationConfig(
     val systemPrompt: String?,
     val initialMessages: List<LocalHistoryMessage>,
     val tools: List<LocalToolDescriptor> = emptyList(),
-    val enableConstrainedDecoding: Boolean = false,
+    val isConstrainedDecodingEnabled: Boolean = false,
     val toolExecutor: LocalToolExecutor? = null
 )
 

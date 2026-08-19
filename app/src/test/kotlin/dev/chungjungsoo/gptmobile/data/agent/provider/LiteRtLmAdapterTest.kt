@@ -367,7 +367,7 @@ class LiteRtLmAdapterTest {
         )
         assertEquals(listOf("describe this"), runtime.sendMessageCalls)
         assertTrue(runtime.sendMessageImages.single().isEmpty())
-        assertEquals(false, runtime.loadEngineCalls.single().enableVision)
+        assertEquals(false, runtime.loadEngineCalls.single().isVisionEnabled)
     }
 
     @Test
@@ -389,7 +389,7 @@ class LiteRtLmAdapterTest {
         )
         assertEquals(listOf("describe this"), runtime.sendMessageCalls)
         assertImageBytes(listOf("/tmp/photo.png".toByteArray()), runtime.sendMessageImages.single())
-        assertEquals(true, runtime.loadEngineCalls.single().enableVision)
+        assertEquals(true, runtime.loadEngineCalls.single().isVisionEnabled)
     }
 
     @Test
@@ -465,7 +465,7 @@ class LiteRtLmAdapterTest {
             events
         )
         assertTrue(runtime.sendMessageImages.single().isEmpty())
-        assertEquals(false, runtime.loadEngineCalls.single().enableVision)
+        assertEquals(false, runtime.loadEngineCalls.single().isVisionEnabled)
     }
 
     @Test
@@ -684,7 +684,7 @@ class LiteRtLmAdapterTest {
         assertEquals(listOf("lookup"), config.tools.map { it.name })
         assertEquals("Look things up", config.tools.single().description)
         assertTrue(config.tools.single().inputSchemaJson.contains("query"))
-        assertTrue(config.enableConstrainedDecoding)
+        assertTrue(config.isConstrainedDecodingEnabled)
         assertTrue(config.toolExecutor != null)
     }
 
@@ -750,7 +750,7 @@ class LiteRtLmAdapterTest {
 
         val config = runtime.createConversationCalls.single()
         assertTrue(config.tools.isEmpty())
-        assertFalse(config.enableConstrainedDecoding)
+        assertFalse(config.isConstrainedDecodingEnabled)
         assertEquals(null, config.toolExecutor)
     }
 
@@ -767,7 +767,7 @@ class LiteRtLmAdapterTest {
 
         val config = runtime.createConversationCalls.single()
         assertTrue(config.tools.isEmpty())
-        assertFalse(config.enableConstrainedDecoding)
+        assertFalse(config.isConstrainedDecodingEnabled)
         assertEquals(null, config.toolExecutor)
     }
 
@@ -812,7 +812,7 @@ class LiteRtLmAdapterTest {
 
         assertEquals(0, catalog.visibleEntriesCalls)
         assertEquals(1, catalog.cachedVisibleEntriesCalls)
-        assertEquals(true, runtime.loadEngineCalls.single().enableVision)
+        assertEquals(true, runtime.loadEngineCalls.single().isVisionEnabled)
         assertImageBytes(listOf("/tmp/photo.png".toByteArray()), runtime.sendMessageImages.single())
     }
 
@@ -973,7 +973,7 @@ class LiteRtLmAdapterTest {
         assertEquals(1, runtime.closeConversationCalls)
         assertEquals(listOf("lookup"), runtime.createConversationCalls[0].tools.map { it.name })
         assertEquals(listOf("echo"), runtime.createConversationCalls[1].tools.map { it.name })
-        assertTrue(runtime.createConversationCalls[1].enableConstrainedDecoding)
+        assertTrue(runtime.createConversationCalls[1].isConstrainedDecodingEnabled)
     }
 
     @Test

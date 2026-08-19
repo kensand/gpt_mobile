@@ -38,7 +38,7 @@ internal fun wizardCatalogEntry(
 
 internal fun wizardStoredModel(
     catalogEntryId: String,
-    status: String = LocalModelStatus.DOWNLOADED
+    status: String = LocalModelStatus.READY
 ) = LocalModel(
     catalogEntryId = catalogEntryId,
     commitHash = "hash",

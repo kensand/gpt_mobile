@@ -12,7 +12,7 @@ class LocalModelDownloadProberTest {
     @Test
     fun `probe sends a ranged get and returns the status code`() {
         ProbeServer(statusCode = 206).use { server ->
-            val status = HttpLocalModelDownloadProber().probe(server.url, accessToken = null)
+            val status = LocalModelDownloadProberImpl().probe(server.url, accessToken = null)
 
             assertEquals(206, status)
             assertEquals("bytes=0-0", server.rangeHeader)
@@ -23,7 +23,7 @@ class LocalModelDownloadProberTest {
     @Test
     fun `probe attaches a bearer token when present`() {
         ProbeServer(statusCode = 200).use { server ->
-            val status = HttpLocalModelDownloadProber().probe(server.url, accessToken = "hf_secret")
+            val status = LocalModelDownloadProberImpl().probe(server.url, accessToken = "hf_secret")
 
             assertEquals(200, status)
             assertEquals("Bearer hf_secret", server.authorizationHeader)
@@ -33,7 +33,7 @@ class LocalModelDownloadProberTest {
     @Test
     fun `probe returns 401 without attaching a missing token`() {
         ProbeServer(statusCode = 401).use { server ->
-            val status = HttpLocalModelDownloadProber().probe(server.url, accessToken = null)
+            val status = LocalModelDownloadProberImpl().probe(server.url, accessToken = null)
 
             assertEquals(401, status)
             assertEquals(null, server.authorizationHeader)
@@ -42,15 +42,15 @@ class LocalModelDownloadProberTest {
 
     @Test
     fun `unreachable url is a network error`() {
-        val status = HttpLocalModelDownloadProber().probe("http://127.0.0.1:1/missing", accessToken = null)
-        assertEquals(HttpLocalModelDownloadProber.NETWORK_ERROR, status)
+        val status = LocalModelDownloadProberImpl().probe("http://127.0.0.1:1/missing", accessToken = null)
+        assertEquals(LocalModelDownloadProberImpl.NETWORK_ERROR, status)
     }
 
     @Test
     fun `probe does not log the token`() {
         val output = capturingStderr {
             ProbeServer(statusCode = 200).use { server ->
-                HttpLocalModelDownloadProber().probe(server.url, accessToken = "hf_must_not_appear")
+                LocalModelDownloadProberImpl().probe(server.url, accessToken = "hf_must_not_appear")
             }
         }
         assertTrue("token leaked in logs:\n$output", !output.contains("hf_must_not_appear"))

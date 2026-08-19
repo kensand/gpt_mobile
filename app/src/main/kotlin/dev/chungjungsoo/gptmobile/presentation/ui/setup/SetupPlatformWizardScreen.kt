@@ -159,7 +159,7 @@ fun SetupPlatformWizardScreen(
                             onPlatformNameChange = setupViewModel::updatePlatformName,
                             apiUrl = currentApiUrl,
                             onApiUrlChange = setupViewModel::updateApiUrl,
-                            showApiUrl = selectedClientType != ClientType.LITERT_LM
+                            isApiUrlVisible = selectedClientType != ClientType.LITERT_LM
                         )
                     }
 
@@ -222,7 +222,7 @@ fun SetupPlatformWizardScreen(
                     }
                 },
                 isLastStep = wizardStep == WIZARD_STEP_MODEL,
-                waitingForDownload = isWaitingForDownload
+                isWaitingForDownload = isWaitingForDownload
             )
         }
     }
@@ -333,7 +333,7 @@ private fun BasicsStep(
     onPlatformNameChange: (String) -> Unit,
     apiUrl: String,
     onApiUrlChange: (String) -> Unit,
-    showApiUrl: Boolean = true,
+    isApiUrlVisible: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -377,7 +377,7 @@ private fun BasicsStep(
             }
         )
 
-        if (showApiUrl) {
+        if (isApiUrlVisible) {
             Spacer(modifier = Modifier.height(20.dp))
 
             // API URL
@@ -565,7 +565,7 @@ private fun WizardNavigationButtons(
     onBack: () -> Unit,
     onNext: () -> Unit,
     isLastStep: Boolean,
-    waitingForDownload: Boolean = false,
+    isWaitingForDownload: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -596,7 +596,7 @@ private fun WizardNavigationButtons(
         ) {
             Text(
                 text = when {
-                    isLastStep && waitingForDownload -> stringResource(R.string.local_platform_waiting_for_download)
+                    isLastStep && isWaitingForDownload -> stringResource(R.string.local_platform_waiting_for_download)
                     isLastStep -> stringResource(R.string.finish)
                     else -> stringResource(R.string.next)
                 }

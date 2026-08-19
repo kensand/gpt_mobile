@@ -14,7 +14,7 @@ import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadPaths
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelReconciler
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.localmodel.ReconcileAction
-import dev.chungjungsoo.gptmobile.data.localmodel.SocModelFileResolver
+import dev.chungjungsoo.gptmobile.data.localmodel.SocVariantResolver
 import dev.chungjungsoo.gptmobile.data.worker.LocalModelDownloadWorker
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +38,7 @@ class LocalModelRepositoryImpl(
 
     override suspend fun resolveDownloadedPath(catalogEntryId: String): String? = withContext(Dispatchers.IO) {
         val model = localModelDao.getById(catalogEntryId) ?: return@withContext null
-        if (model.status != LocalModelStatus.DOWNLOADED) return@withContext null
+        if (model.status != LocalModelStatus.READY) return@withContext null
         val file = File(
             storageRoot(),
             LocalModelDownloadPaths.relativeFilePath(model.catalogEntryId, model.commitHash, model.fileName)
@@ -52,7 +52,7 @@ class LocalModelRepositoryImpl(
             if (existing?.status == LocalModelStatus.DOWNLOADING && entry.id in activeDownloadIds()) {
                 return@withContext
             }
-            val resolved = SocModelFileResolver.resolve(entry, deviceSocModel)
+            val resolved = SocVariantResolver.resolve(entry, deviceSocModel)
             val relativeDirectory = LocalModelDownloadPaths.relativeDirectory(entry.id, resolved.commitHash)
             val now = System.currentTimeMillis() / 1000
             localModelDao.upsert(
@@ -130,7 +130,7 @@ class LocalModelRepositoryImpl(
 
     override suspend fun totalStorageUsed(): Long = withContext(Dispatchers.IO) {
         localModelDao.getAll()
-            .filter { it.status == LocalModelStatus.DOWNLOADED }
+            .filter { it.status == LocalModelStatus.READY }
             .sumOf { diskBytes(it) }
     }
 

@@ -128,13 +128,14 @@ class ChatViewModel @Inject constructor(
     private val _chatPlatformModels = MutableStateFlow<Map<String, String>>(emptyMap())
     val chatPlatformModels = _chatPlatformModels.asStateFlow()
 
-    private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    private val _catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    val catalogEntries = _catalogEntries.asStateFlow()
     val downloadedLocalModels: StateFlow<List<DownloadedLocalModelOption>> = combine(
         localModelRepository.observeAll(),
-        catalogEntries
+        _catalogEntries
     ) { models, catalog ->
         val names = catalog.associate { it.id to it.displayName }
-        models.filter { it.status == LocalModelStatus.DOWNLOADED }.map { model ->
+        models.filter { it.status == LocalModelStatus.READY }.map { model ->
             DownloadedLocalModelOption(
                 catalogEntryId = model.catalogEntryId,
                 displayName = names[model.catalogEntryId]?.takeIf { it.isNotBlank() } ?: model.catalogEntryId
@@ -201,7 +202,7 @@ class ChatViewModel @Inject constructor(
         observeToolEvents()
         observeAgentNotices()
         viewModelScope.launch {
-            catalogEntries.value = modelCatalogRepository.getCachedVisibleEntries()
+            _catalogEntries.value = modelCatalogRepository.getCachedVisibleEntries()
         }
     }
 

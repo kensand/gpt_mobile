@@ -34,7 +34,8 @@ class AddPlatformViewModel @Inject constructor(
     huggingFaceAuthClient: HuggingFaceAuthClient,
     @param:DeviceSocModel private val deviceSocModel: String
 ) : ViewModel() {
-    private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    private val _catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    val catalogEntries = _catalogEntries.asStateFlow()
     private val _selectedCatalogEntryId = MutableStateFlow("")
     private val downloadActions = LocalModelDownloadActions(
         localModelRepository = localModelRepository,
@@ -48,7 +49,7 @@ class AddPlatformViewModel @Inject constructor(
     val selectedCatalogEntryId: StateFlow<String> = _selectedCatalogEntryId.asStateFlow()
 
     val catalogLocalModels: StateFlow<List<LocalModelListItem>> = combine(
-        catalogEntries,
+        _catalogEntries,
         localModelRepository.observeAll(),
         localModelRepository.observeWorkInfos()
     ) { catalog, models, workInfos ->
@@ -59,7 +60,7 @@ class AddPlatformViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            catalogEntries.value = modelCatalogRepository.getVisibleEntries()
+            _catalogEntries.value = modelCatalogRepository.getVisibleEntries()
         }
     }
 
@@ -95,15 +96,15 @@ class AddPlatformViewModel @Inject constructor(
         downloadActions.retryAfterLicense()
     }
 
-    fun canSaveLocalModel(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.DOWNLOADED
+    fun canSaveLocalModel(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.READY
 
     fun isWaitingForModelDownload(): Boolean {
         val catalogEntryId = _selectedCatalogEntryId.value
         if (catalogEntryId.isBlank()) return false
-        return selectedLocalModelStatus()?.let { it != LocalModelItemStatus.DOWNLOADED } == true
+        return selectedLocalModelStatus()?.let { it != LocalModelItemStatus.READY } == true
     }
 
-    fun defaultsFor(catalogEntryId: String): LocalSamplingDefaults? = catalogEntries.value
+    fun defaultsFor(catalogEntryId: String): LocalSamplingDefaults? = _catalogEntries.value
         .firstOrNull { it.id == catalogEntryId }
         ?.let { localSamplingDefaults(it, deviceSocModel) }
 

@@ -45,7 +45,7 @@ class AddPlatformViewModelTest {
         assertEquals(listOf("ready-model", "pending-model", "gated-model"), items.map { it.entry.id })
         assertEquals(8, items.first { it.entry.id == "pending-model" }.entry.minRamGb)
         assertEquals(5_000_000L, items.first { it.entry.id == "pending-model" }.entry.sizeInBytes)
-        assertEquals(LocalModelItemStatus.DOWNLOADED, items.first { it.entry.id == "ready-model" }.status)
+        assertEquals(LocalModelItemStatus.READY, items.first { it.entry.id == "ready-model" }.status)
         assertEquals(LocalModelItemStatus.NOT_DOWNLOADED, items.first { it.entry.id == "pending-model" }.status)
     }
 
@@ -81,7 +81,7 @@ class AddPlatformViewModelTest {
         assertFalse(viewModel.canSaveLocalModel())
         assertTrue(viewModel.isWaitingForModelDownload())
 
-        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.DOWNLOADED)))
+        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.READY)))
 
         assertTrue(viewModel.canSaveLocalModel())
         assertFalse(viewModel.isWaitingForModelDownload())

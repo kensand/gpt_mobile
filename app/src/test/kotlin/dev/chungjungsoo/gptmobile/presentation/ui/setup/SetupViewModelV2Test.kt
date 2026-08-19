@@ -44,7 +44,7 @@ class SetupViewModelV2Test {
         assertEquals(listOf("Ready", "Pending", "Gated"), items.map { it.entry.displayName })
         assertEquals(2_000_000L, items[0].entry.sizeInBytes)
         assertEquals(8, items[1].entry.minRamGb)
-        assertEquals(LocalModelItemStatus.DOWNLOADED, items[0].status)
+        assertEquals(LocalModelItemStatus.READY, items[0].status)
         assertEquals(LocalModelItemStatus.NOT_DOWNLOADED, items[1].status)
         assertEquals(LocalModelItemStatus.NOT_DOWNLOADED, items[2].status)
     }
@@ -88,7 +88,7 @@ class SetupViewModelV2Test {
         assertFalse(viewModel.canProceedFromStep(SetupViewModelV2.WIZARD_STEP_MODEL))
         assertTrue(viewModel.isWaitingForModelDownload())
 
-        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.DOWNLOADED)))
+        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.READY)))
 
         assertTrue(viewModel.canProceedFromStep(SetupViewModelV2.WIZARD_STEP_MODEL))
         assertFalse(viewModel.isWaitingForModelDownload())
@@ -132,7 +132,7 @@ class SetupViewModelV2Test {
 
         val signIn = signInViewModel.localModelDownloadState.value.dialog
         assertTrue(signIn is LocalModelsDialog.SignIn)
-        assertFalse((signIn as LocalModelsDialog.SignIn).sessionExpired)
+        assertFalse((signIn as LocalModelsDialog.SignIn).isSessionExpired)
 
         val licenseTokenStore = huggingFaceTokenStoreWithToken("hf_ok")
         val licenseViewModel = setupViewModel(
@@ -161,7 +161,7 @@ class SetupViewModelV2Test {
 
         assertTrue(settings.addedPlatforms.isEmpty())
 
-        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.DOWNLOADED)))
+        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.READY)))
         viewModel.savePlatform()
 
         val saved = settings.addedPlatforms.single()

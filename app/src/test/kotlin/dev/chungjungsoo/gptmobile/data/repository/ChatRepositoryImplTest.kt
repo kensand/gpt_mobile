@@ -232,7 +232,7 @@ class ChatRepositoryImplTest {
         )
         assertEquals(1, runtime.sendMessageCalls.size)
         assertEquals(listOf("current_date"), runtime.createConversationCalls.single().tools.map { it.name })
-        assertTrue(runtime.createConversationCalls.single().enableConstrainedDecoding)
+        assertTrue(runtime.createConversationCalls.single().isConstrainedDecodingEnabled)
         val event = traceDao.events.single()
         assertEquals("run-local-tool", event.runId)
         assertEquals("current_date", event.toolName)

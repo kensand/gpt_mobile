@@ -2,7 +2,7 @@ package dev.chungjungsoo.gptmobile.data.localmodel
 
 object LocalModelStatus {
     const val DOWNLOADING = "DOWNLOADING"
-    const val DOWNLOADED = "DOWNLOADED"
+    const val READY = "READY"
     const val FAILED = "FAILED"
 }
 
@@ -42,7 +42,7 @@ object LocalModelReconciler {
             val partialPath = LocalModelDownloadPaths.relativePartialFilePath(row.catalogEntryId, row.commitHash, row.fileName)
             val isActive = row.catalogEntryId in activeDownloadIds
             when (row.status) {
-                LocalModelStatus.DOWNLOADED -> {
+                LocalModelStatus.READY -> {
                     if (finalPath !in diskFiles) {
                         actions += ReconcileAction.DeleteRow(row.catalogEntryId)
                     }

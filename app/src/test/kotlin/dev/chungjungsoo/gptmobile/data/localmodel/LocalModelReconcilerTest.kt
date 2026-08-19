@@ -119,7 +119,7 @@ class LocalModelReconcilerTest {
         commitHash = "19edb84c69a0212f29a6ef17ba0d6f278b6a1614",
         fileName = "model.litertlm",
         relativeDirectory = "models/qwen2.5-1.5b-instruct/19edb84c69a0212f29a6ef17ba0d6f278b6a1614",
-        status = LocalModelStatus.DOWNLOADED
+        status = LocalModelStatus.READY
     )
 
     private fun downloadingRow() = downloadedRow().copy(status = LocalModelStatus.DOWNLOADING)

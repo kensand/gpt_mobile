@@ -58,14 +58,15 @@ class PlatformSettingViewModel @Inject constructor(
     private val _platformState = MutableStateFlow<PlatformV2?>(null)
     val platformState: StateFlow<PlatformV2?> = _platformState.asStateFlow()
 
-    private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    private val _catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    val catalogEntries = _catalogEntries.asStateFlow()
 
     val downloadedLocalModels: StateFlow<List<DownloadedLocalModelOption>> = combine(
         localModelRepository.observeAll(),
-        catalogEntries
+        _catalogEntries
     ) { models, catalog ->
         val names = catalog.associate { it.id to it.displayName }
-        models.filter { it.status == LocalModelStatus.DOWNLOADED }.map { model ->
+        models.filter { it.status == LocalModelStatus.READY }.map { model ->
             DownloadedLocalModelOption(
                 catalogEntryId = model.catalogEntryId,
                 displayName = names[model.catalogEntryId]?.takeIf { it.isNotBlank() } ?: model.catalogEntryId
@@ -73,7 +74,7 @@ class PlatformSettingViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val acceleratorOptions: StateFlow<List<String>> = combine(_platformState, catalogEntries) { platform, catalog ->
+    val acceleratorOptions: StateFlow<List<String>> = combine(_platformState, _catalogEntries) { platform, catalog ->
         val entry = catalog.firstOrNull { it.id == platform?.model }
         LocalAccelerators.selectable(
             supported = entry?.supportedAccelerators.orEmpty(),
@@ -100,7 +101,7 @@ class PlatformSettingViewModel @Inject constructor(
 
     private fun loadCatalog() {
         viewModelScope.launch {
-            catalogEntries.value = modelCatalogRepository.getVisibleEntries()
+            _catalogEntries.value = modelCatalogRepository.getVisibleEntries()
         }
     }
 
@@ -229,7 +230,7 @@ class PlatformSettingViewModel @Inject constructor(
     }
 
     private fun reseedLocalModelDefaults(platform: PlatformV2, catalogEntryId: String): PlatformV2 {
-        val defaults = catalogEntries.value
+        val defaults = _catalogEntries.value
             .firstOrNull { it.id == catalogEntryId }
             ?.let { localSamplingDefaults(it, deviceSocModel) }
         return platform.copy(

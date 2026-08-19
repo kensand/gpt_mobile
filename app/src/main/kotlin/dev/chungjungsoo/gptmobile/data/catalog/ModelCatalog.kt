@@ -20,7 +20,7 @@ data class CatalogEntry(
     val supportedAccelerators: List<String> = emptyList(),
     val defaultConfig: CatalogDefaultConfig = CatalogDefaultConfig(),
     val minAppVersion: String = "0.0.0",
-    val socToModelFiles: Map<String, SocModelFile> = emptyMap()
+    val socToModelFiles: Map<String, SocVariant> = emptyMap()
 )
 
 @Serializable
@@ -39,7 +39,7 @@ data class CatalogDefaultConfig(
 )
 
 @Serializable
-data class SocModelFile(
+data class SocVariant(
     val modelFile: String = "",
     val downloadUrl: String = "",
     val commitHash: String = "",

@@ -2,7 +2,7 @@ package dev.chungjungsoo.gptmobile.data.localruntime
 
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogDefaultConfig
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
-import dev.chungjungsoo.gptmobile.data.catalog.SocModelFile
+import dev.chungjungsoo.gptmobile.data.catalog.SocVariant
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -29,7 +29,7 @@ class LocalSamplingDefaultsTest {
         val defaults = localSamplingDefaults(
             entry = CatalogEntry(
                 supportedAccelerators = listOf("npu", "cpu"),
-                socToModelFiles = mapOf("SM8650" to SocModelFile(modelFile = "npu.litertlm"))
+                socToModelFiles = mapOf("SM8650" to SocVariant(modelFile = "npu.litertlm"))
             ),
             deviceSocModel = "SM8650"
         )

@@ -39,7 +39,7 @@ class GatedDownloadCoordinatorTest {
         val coordinator = coordinator(prober = RecordingProber(statusCode = 401))
 
         assertEquals(
-            GatedDownloadStep.NeedsSignIn(sessionExpired = false),
+            GatedDownloadStep.NeedsSignIn(isSessionExpired = false),
             coordinator.resolve(gatedEntry())
         )
     }
@@ -53,7 +53,7 @@ class GatedDownloadCoordinatorTest {
         )
 
         assertEquals(
-            GatedDownloadStep.NeedsSignIn(sessionExpired = true),
+            GatedDownloadStep.NeedsSignIn(isSessionExpired = true),
             coordinator.resolve(gatedEntry())
         )
         assertNull(vault.values[HuggingFaceTokenStore.SECRET_REF])
@@ -90,7 +90,7 @@ class GatedDownloadCoordinatorTest {
         val coordinator = coordinator(prober = RecordingProber(statusCode = 403))
 
         assertEquals(
-            GatedDownloadStep.NeedsSignIn(sessionExpired = false),
+            GatedDownloadStep.NeedsSignIn(isSessionExpired = false),
             coordinator.resolve(gatedEntry())
         )
     }

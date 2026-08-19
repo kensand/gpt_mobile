@@ -6,7 +6,7 @@ import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceUrls
 
 sealed class GatedDownloadStep {
     data object Proceed : GatedDownloadStep()
-    data class NeedsSignIn(val sessionExpired: Boolean) : GatedDownloadStep()
+    data class NeedsSignIn(val isSessionExpired: Boolean) : GatedDownloadStep()
     data class NeedsLicense(val modelPageUrl: String) : GatedDownloadStep()
     data object OAuthNotConfigured : GatedDownloadStep()
     data object Error : GatedDownloadStep()
@@ -37,7 +37,7 @@ class GatedDownloadCoordinator(
                 if (!isOAuthConfigured()) {
                     GatedDownloadStep.OAuthNotConfigured
                 } else {
-                    GatedDownloadStep.NeedsSignIn(sessionExpired = decision.isSessionExpired)
+                    GatedDownloadStep.NeedsSignIn(isSessionExpired = decision.isSessionExpired)
                 }
             }
 

@@ -35,7 +35,7 @@ data class LocalModelListItem(
 enum class LocalModelItemStatus {
     NOT_DOWNLOADED,
     DOWNLOADING,
-    DOWNLOADED,
+    READY,
     FAILED
 }
 
@@ -44,7 +44,7 @@ sealed class LocalModelsDialog {
     data class RamWarning(val entry: CatalogEntry) : LocalModelsDialog()
     data class MeteredConfirm(val entry: CatalogEntry) : LocalModelsDialog()
     data class DeleteConfirm(val entry: CatalogEntry) : LocalModelsDialog()
-    data class SignIn(val entry: CatalogEntry, val sessionExpired: Boolean) : LocalModelsDialog()
+    data class SignIn(val entry: CatalogEntry, val isSessionExpired: Boolean) : LocalModelsDialog()
     data class License(val entry: CatalogEntry, val modelPageUrl: String) : LocalModelsDialog()
     data object OAuthNotConfigured : LocalModelsDialog()
     data object ProbeError : LocalModelsDialog()
@@ -83,9 +83,9 @@ fun toLocalModelListItem(
         workState == WorkInfo.State.ENQUEUED ||
         workState == WorkInfo.State.BLOCKED
     return when {
-        record?.status == LocalModelStatus.DOWNLOADED -> LocalModelListItem(
+        record?.status == LocalModelStatus.READY -> LocalModelListItem(
             entry = entry,
-            status = LocalModelItemStatus.DOWNLOADED,
+            status = LocalModelItemStatus.READY,
             diskBytes = record.totalBytes
         )
 

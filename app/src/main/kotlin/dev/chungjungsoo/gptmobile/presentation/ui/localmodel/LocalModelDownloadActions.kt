@@ -32,7 +32,7 @@ class LocalModelDownloadActions(
 
     fun requestDownload(entry: CatalogEntry, currentStatus: LocalModelItemStatus? = null) {
         if (_uiState.value.checkingAccessEntryId != null) return
-        if (currentStatus == LocalModelItemStatus.DOWNLOADING || currentStatus == LocalModelItemStatus.DOWNLOADED) {
+        if (currentStatus == LocalModelItemStatus.DOWNLOADING || currentStatus == LocalModelItemStatus.READY) {
             return
         }
         when {
@@ -121,7 +121,7 @@ class LocalModelDownloadActions(
     private fun beginDownload(entry: CatalogEntry) {
         scope.launch {
             val existing = localModelRepository.getById(entry.id)
-            if (existing?.status == LocalModelStatus.DOWNLOADING || existing?.status == LocalModelStatus.DOWNLOADED) {
+            if (existing?.status == LocalModelStatus.DOWNLOADING || existing?.status == LocalModelStatus.READY) {
                 return@launch
             }
             if (!entry.isGated) {
@@ -137,7 +137,7 @@ class LocalModelDownloadActions(
 
                 is GatedDownloadStep.NeedsSignIn -> {
                     pendingGatedEntry = entry
-                    _uiState.update { it.copy(dialog = LocalModelsDialog.SignIn(entry, step.sessionExpired)) }
+                    _uiState.update { it.copy(dialog = LocalModelsDialog.SignIn(entry, step.isSessionExpired)) }
                 }
 
                 is GatedDownloadStep.NeedsLicense -> {

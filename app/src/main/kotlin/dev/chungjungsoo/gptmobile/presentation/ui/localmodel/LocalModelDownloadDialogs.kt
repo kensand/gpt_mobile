@@ -114,7 +114,7 @@ fun LocalModelDownloadDialogHost(
 
         is LocalModelsDialog.SignIn -> {
             HuggingFaceSignInSheet(
-                sessionExpired = dialog.sessionExpired,
+                isSessionExpired = dialog.isSessionExpired,
                 onSignIn = {
                     val intent = onStartSignIn()
                     if (intent != null) {
@@ -170,7 +170,7 @@ fun LocalModelDownloadDialogHost(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HuggingFaceSignInSheet(
-    sessionExpired: Boolean,
+    isSessionExpired: Boolean,
     onSignIn: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -187,7 +187,7 @@ private fun HuggingFaceSignInSheet(
             )
             Text(
                 text = stringResource(
-                    if (sessionExpired) {
+                    if (isSessionExpired) {
                         R.string.local_model_session_expired
                     } else {
                         R.string.local_model_sign_in_message

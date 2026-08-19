@@ -30,7 +30,7 @@ import dev.chungjungsoo.gptmobile.presentation.ui.setting.downloadFailureMessage
 fun LocalModelRequirements(
     item: LocalModelListItem,
     modifier: Modifier = Modifier,
-    showCapabilities: Boolean = true
+    isCapabilitiesVisible: Boolean = true
 ) {
     val entry = item.entry
     Column(modifier = modifier.fillMaxWidth()) {
@@ -44,7 +44,7 @@ fun LocalModelRequirements(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp)
         )
-        val capabilityLabels = if (showCapabilities) capabilityLabels(entry.capabilities) else emptyList()
+        val capabilityLabels = if (isCapabilitiesVisible) capabilityLabels(entry.capabilities) else emptyList()
         if (capabilityLabels.isNotEmpty()) {
             FlowRow(
                 modifier = Modifier.padding(top = 8.dp),
@@ -132,7 +132,7 @@ fun LocalModelDownloadStatus(
                 }
             }
 
-            item.status == LocalModelItemStatus.DOWNLOADED -> {
+            item.status == LocalModelItemStatus.READY -> {
                 Text(
                     text = stringResource(
                         R.string.local_model_on_disk,

@@ -11,7 +11,7 @@ fun interface LocalModelDownloadProber {
 }
 
 @Singleton
-class HttpLocalModelDownloadProber @Inject constructor() : LocalModelDownloadProber {
+class LocalModelDownloadProberImpl @Inject constructor() : LocalModelDownloadProber {
     override fun probe(downloadUrl: String, accessToken: String?): Int = try {
         val connection = URL(downloadUrl).openConnection() as HttpURLConnection
         try {

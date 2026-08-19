@@ -17,6 +17,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -41,13 +42,15 @@ class LocalModelsViewModel @Inject constructor(
         scope = viewModelScope
     )
 
-    private val listState = MutableStateFlow(LocalModelsListState())
-    private val deleteDialog = MutableStateFlow<LocalModelsDialog>(LocalModelsDialog.Hidden)
+    private val _listState = MutableStateFlow(LocalModelsListState())
+    private val listState = _listState.asStateFlow()
+    private val _deleteDialog = MutableStateFlow<LocalModelsDialog>(LocalModelsDialog.Hidden)
+    private val deleteDialog = _deleteDialog.asStateFlow()
 
     val uiState: StateFlow<LocalModelsUiState> = combine(
-        listState,
+        _listState,
         downloadActions.uiState,
-        deleteDialog
+        _deleteDialog
     ) { list, download, delete ->
         LocalModelsUiState(
             items = list.items,
@@ -69,11 +72,11 @@ class LocalModelsViewModel @Inject constructor(
             ) { localModels, workInfos ->
                 val items = catalogLocalModelItems(catalogEntries, localModels, workInfos)
                 val storage = localModels
-                    .filter { it.status == LocalModelStatus.DOWNLOADED }
+                    .filter { it.status == LocalModelStatus.READY }
                     .sumOf { it.totalBytes }
                 items to storage
             }.collect { (items, storage) ->
-                listState.update {
+                _listState.update {
                     it.copy(
                         items = items,
                         isLoading = false,
@@ -97,12 +100,12 @@ class LocalModelsViewModel @Inject constructor(
     }
 
     fun onDeleteClick(entry: CatalogEntry) {
-        deleteDialog.value = LocalModelsDialog.DeleteConfirm(entry)
+        _deleteDialog.value = LocalModelsDialog.DeleteConfirm(entry)
     }
 
     fun confirmDelete() {
-        val entry = (deleteDialog.value as? LocalModelsDialog.DeleteConfirm)?.entry ?: return
-        deleteDialog.value = LocalModelsDialog.Hidden
+        val entry = (_deleteDialog.value as? LocalModelsDialog.DeleteConfirm)?.entry ?: return
+        _deleteDialog.value = LocalModelsDialog.Hidden
         viewModelScope.launch { localModelRepository.deleteModel(entry.id) }
     }
 
@@ -111,8 +114,8 @@ class LocalModelsViewModel @Inject constructor(
     }
 
     fun dismissDialog() {
-        if (deleteDialog.value !is LocalModelsDialog.Hidden) {
-            deleteDialog.value = LocalModelsDialog.Hidden
+        if (_deleteDialog.value !is LocalModelsDialog.Hidden) {
+            _deleteDialog.value = LocalModelsDialog.Hidden
         } else {
             downloadActions.dismissDialog()
         }
@@ -137,7 +140,7 @@ class LocalModelsViewModel @Inject constructor(
         super.onCleared()
     }
 
-    private fun currentStatus(catalogEntryId: String): LocalModelItemStatus? = listState.value.items.firstOrNull { it.entry.id == catalogEntryId }?.status
+    private fun currentStatus(catalogEntryId: String): LocalModelItemStatus? = _listState.value.items.firstOrNull { it.entry.id == catalogEntryId }?.status
 }
 
 private data class LocalModelsListState(

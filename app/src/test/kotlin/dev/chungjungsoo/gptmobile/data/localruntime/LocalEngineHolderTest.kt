@@ -64,8 +64,8 @@ class LocalEngineHolderTest {
     fun `reloads engine when vision flag changes`() = runTest {
         val fake = FakeLocalRuntime()
         val holder = LocalEngineHolder(fake)
-        val textOnly = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024, enableVision = false)
-        val vision = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024, enableVision = true)
+        val textOnly = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024, isVisionEnabled = false)
+        val vision = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024, isVisionEnabled = true)
 
         holder.loadEngine(textOnly)
         holder.loadEngine(vision)

@@ -7,7 +7,7 @@ import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClient
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCoordinator
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogDefaultConfig
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
-import dev.chungjungsoo.gptmobile.data.catalog.SocModelFile
+import dev.chungjungsoo.gptmobile.data.catalog.SocVariant
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentToolBinding
@@ -213,7 +213,7 @@ class PlatformSettingViewModelTest {
                     catalogEntry(
                         id = "cpu-gpu",
                         supportedAccelerators = listOf("npu", "cpu", "gpu"),
-                        socToModelFiles = mapOf("SM8650" to SocModelFile(modelFile = "npu.litertlm"))
+                        socToModelFiles = mapOf("SM8650" to SocVariant(modelFile = "npu.litertlm"))
                     )
                 )
             ),
@@ -236,7 +236,7 @@ class PlatformSettingViewModelTest {
                     catalogEntry(
                         id = "cpu-gpu",
                         supportedAccelerators = listOf("cpu", "gpu", "npu"),
-                        socToModelFiles = mapOf("SM8650" to SocModelFile(modelFile = "npu.litertlm"))
+                        socToModelFiles = mapOf("SM8650" to SocVariant(modelFile = "npu.litertlm"))
                     )
                 )
             ),
@@ -506,7 +506,7 @@ private fun catalogEntry(
     id: String,
     supportedAccelerators: List<String>,
     defaults: CatalogDefaultConfig = CatalogDefaultConfig(),
-    socToModelFiles: Map<String, SocModelFile> = emptyMap()
+    socToModelFiles: Map<String, SocVariant> = emptyMap()
 ) = CatalogEntry(
     id = id,
     displayName = id,

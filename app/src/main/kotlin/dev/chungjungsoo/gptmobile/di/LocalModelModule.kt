@@ -11,14 +11,14 @@ import dev.chungjungsoo.gptmobile.data.database.dao.LocalModelDao
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceOAuthConfig
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
 import dev.chungjungsoo.gptmobile.data.localmodel.GatedDownloadCoordinator
-import dev.chungjungsoo.gptmobile.data.localmodel.HttpLocalModelDownloadProber
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadProber
+import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadProberImpl
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepositoryImpl
-import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.AndroidHuggingFaceAuthClient
-import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.AndroidLocalDownloadGuards
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClient
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClientImpl
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuards
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuardsImpl
 import javax.inject.Singleton
 
 @Module
@@ -28,7 +28,7 @@ object LocalModelModule {
     @Provides
     @Singleton
     fun provideLocalModelDownloadProber(
-        impl: HttpLocalModelDownloadProber
+        impl: LocalModelDownloadProberImpl
     ): LocalModelDownloadProber = impl
 
     @Provides
@@ -50,12 +50,12 @@ object LocalModelModule {
     @Provides
     @Singleton
     fun provideLocalDownloadGuards(
-        impl: AndroidLocalDownloadGuards
+        impl: LocalDownloadGuardsImpl
     ): LocalDownloadGuards = impl
 
     @Provides
     fun provideHuggingFaceAuthClient(
-        impl: AndroidHuggingFaceAuthClient
+        impl: HuggingFaceAuthClientImpl
     ): HuggingFaceAuthClient = impl
 
     @Provides

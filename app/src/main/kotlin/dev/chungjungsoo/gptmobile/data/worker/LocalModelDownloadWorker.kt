@@ -70,7 +70,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
                     totalBytes = totalBytes,
                     accessToken = accessToken
                 )
-                markStatus(catalogEntryId, LocalModelStatus.DOWNLOADED)
+                markStatus(catalogEntryId, LocalModelStatus.READY)
                 Result.success()
             } catch (cancelled: CancellationException) {
                 throw cancelled

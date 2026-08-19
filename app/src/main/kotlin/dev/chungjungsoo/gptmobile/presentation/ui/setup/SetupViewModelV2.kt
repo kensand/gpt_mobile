@@ -91,10 +91,11 @@ class SetupViewModelV2 @Inject constructor(
     private val _saveStatus = MutableStateFlow<SaveStatus>(SaveStatus.Idle)
     val saveStatus: StateFlow<SaveStatus> = _saveStatus.asStateFlow()
 
-    private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    private val _catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    val catalogEntries = _catalogEntries.asStateFlow()
 
     val catalogLocalModels: StateFlow<List<LocalModelListItem>> = combine(
-        catalogEntries,
+        _catalogEntries,
         localModelRepository.observeAll(),
         localModelRepository.observeWorkInfos()
     ) { catalog, models, workInfos ->
@@ -106,7 +107,7 @@ class SetupViewModelV2 @Inject constructor(
     init {
         loadPlatforms()
         viewModelScope.launch {
-            catalogEntries.value = modelCatalogRepository.getVisibleEntries()
+            _catalogEntries.value = modelCatalogRepository.getVisibleEntries()
         }
     }
 
@@ -176,7 +177,7 @@ class SetupViewModelV2 @Inject constructor(
 
     fun isWaitingForModelDownload(): Boolean {
         if (!isLiteRtLm()) return false
-        return selectedLocalModelStatus()?.let { it != LocalModelItemStatus.DOWNLOADED } == true
+        return selectedLocalModelStatus()?.let { it != LocalModelItemStatus.READY } == true
     }
 
     fun nextWizardStep() {
@@ -290,7 +291,7 @@ class SetupViewModelV2 @Inject constructor(
         super.onCleared()
     }
 
-    private fun selectedLocalModelIsDownloaded(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.DOWNLOADED
+    private fun selectedLocalModelIsDownloaded(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.READY
 
     private fun selectedLocalModelStatus(): LocalModelItemStatus? {
         val catalogEntryId = _model.value
@@ -298,7 +299,7 @@ class SetupViewModelV2 @Inject constructor(
         return catalogLocalModels.value.firstOrNull { it.entry.id == catalogEntryId }?.status
     }
 
-    private fun catalogDefaultsFor(modelId: String) = catalogEntries.value
+    private fun catalogDefaultsFor(modelId: String) = _catalogEntries.value
         .firstOrNull { it.id == modelId }
         ?.let { localSamplingDefaults(it, deviceSocModel) }
 

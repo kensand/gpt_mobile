@@ -22,7 +22,7 @@ interface HuggingFaceAuthClient {
     fun dispose()
 }
 
-class AndroidHuggingFaceAuthClient @Inject constructor(
+class HuggingFaceAuthClientImpl @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) : HuggingFaceAuthClient {
     private var authService: AuthorizationService? = null

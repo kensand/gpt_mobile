@@ -1,6 +1,6 @@
 package dev.chungjungsoo.gptmobile.data.localruntime
 
-import dev.chungjungsoo.gptmobile.data.localmodel.SocModelFileResolver
+import dev.chungjungsoo.gptmobile.data.localmodel.SocVariantResolver
 
 object LocalAccelerators {
     const val CPU = "cpu"
@@ -9,7 +9,7 @@ object LocalAccelerators {
 
     /**
      * NPU is offered only when the catalog lists it and this device has a matching
-     * SOC-specific model file. Gallery hides NPU-only models whose `socToModelFiles`
+     * SOC-specific variant. Gallery hides NPU-only models whose `socToModelFiles`
      * omit `Build.SOC_MODEL`; we apply that same SOC gate to the Accelerator picker
      * so incapable devices never see NPU. CPU/GPU stay available from the default file.
      */
@@ -19,7 +19,7 @@ object LocalAccelerators {
         deviceSocModel: String
     ): Boolean {
         val listsNpu = supported.any { it.equals(NPU, ignoreCase = true) }
-        return listsNpu && SocModelFileResolver.hasMatchingVariant(socToModelFiles, deviceSocModel)
+        return listsNpu && SocVariantResolver.hasMatchingVariant(socToModelFiles, deviceSocModel)
     }
 
     fun defaultFrom(

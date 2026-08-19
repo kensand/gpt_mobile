@@ -100,7 +100,7 @@ fun LocalModelCatalogPicker(
                     LocalModelRequirements(
                         item = item,
                         modifier = Modifier.padding(horizontal = 20.dp),
-                        showCapabilities = false
+                        isCapabilitiesVisible = false
                     )
                     LocalModelDownloadStatus(
                         item = item,

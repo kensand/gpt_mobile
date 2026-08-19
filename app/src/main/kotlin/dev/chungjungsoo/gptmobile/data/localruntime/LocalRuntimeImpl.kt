@@ -26,7 +26,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-class LiteRtLocalRuntime(
+/** Production [LocalRuntime] implementation wrapping LiteRT-LM. */
+class LocalRuntimeImpl(
     private val context: Context
 ) : LocalRuntime {
     private var engine: Engine? = null
@@ -43,7 +44,7 @@ class LiteRtLocalRuntime(
                 visionBackend = visionBackendFor(spec),
                 audioBackend = null,
                 maxNumTokens = spec.maxTokens,
-                maxNumImages = if (spec.enableVision) MAX_IMAGES_PER_MESSAGE else null
+                maxNumImages = if (spec.isVisionEnabled) MAX_IMAGES_PER_MESSAGE else null
             )
             val nextEngine = Engine(engineConfig)
             nextEngine.initialize()
@@ -61,7 +62,7 @@ class LiteRtLocalRuntime(
                 tool(BridgedOpenApiTool(descriptor, config.toolExecutor))
             }
             val previousConstrainedDecoding = ExperimentalFlags.enableConversationConstrainedDecoding
-            ExperimentalFlags.enableConversationConstrainedDecoding = config.enableConstrainedDecoding
+            ExperimentalFlags.enableConversationConstrainedDecoding = config.isConstrainedDecodingEnabled
             try {
                 conversation = currentEngine.createConversation(
                     ConversationConfig(
@@ -172,7 +173,7 @@ class LiteRtLocalRuntime(
     }
 
     private fun visionBackendFor(spec: LocalEngineSpec): Backend? {
-        if (!spec.enableVision) return null
+        if (!spec.isVisionEnabled) return null
         return when (LocalAccelerators.normalize(spec.accelerator)) {
             LocalAccelerators.CPU -> Backend.CPU()
             LocalAccelerators.NPU -> Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)

@@ -1,7 +1,7 @@
 package dev.chungjungsoo.gptmobile.data.localmodel
 
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
-import dev.chungjungsoo.gptmobile.data.catalog.SocModelFile
+import dev.chungjungsoo.gptmobile.data.catalog.SocVariant
 
 data class ResolvedModelDownload(
     val fileName: String,
@@ -10,7 +10,7 @@ data class ResolvedModelDownload(
     val sizeInBytes: Long
 )
 
-object SocModelFileResolver {
+object SocVariantResolver {
     fun resolve(entry: CatalogEntry, deviceSocModel: String): ResolvedModelDownload {
         val default = ResolvedModelDownload(
             fileName = LocalModelDownloadPaths.fileNameFromUrl(entry.downloadUrl),
@@ -35,9 +35,9 @@ object SocModelFileResolver {
     fun hasMatchingVariant(socToModelFiles: Map<String, *>, deviceSocModel: String): Boolean = matchingVariantKey(socToModelFiles, deviceSocModel) != null
 
     private fun matchingVariant(
-        socToModelFiles: Map<String, SocModelFile>,
+        socToModelFiles: Map<String, SocVariant>,
         deviceSocModel: String
-    ): SocModelFile? {
+    ): SocVariant? {
         val key = matchingVariantKey(socToModelFiles, deviceSocModel) ?: return null
         return socToModelFiles[key]
     }
