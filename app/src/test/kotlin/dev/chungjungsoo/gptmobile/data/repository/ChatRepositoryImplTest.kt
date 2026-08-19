@@ -35,6 +35,9 @@ import dev.chungjungsoo.gptmobile.data.dto.openai.response.ChatToolCallDelta
 import dev.chungjungsoo.gptmobile.data.dto.openai.response.Choice
 import dev.chungjungsoo.gptmobile.data.dto.openai.response.Delta
 import dev.chungjungsoo.gptmobile.data.dto.openai.response.ResponsesStreamEvent
+import dev.chungjungsoo.gptmobile.data.localruntime.FakeLocalRuntime
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntimeEvent
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
@@ -138,6 +141,44 @@ class ChatRepositoryImplTest {
         assertEquals(1, groqAPI.streamCalls)
         assertEquals(0, openAIAPI.streamChatCompletionCalls)
         assertEquals(8_192, groqAPI.lastRequest?.maxCompletionTokens)
+    }
+
+    @Test
+    fun `litert lm path uses local runtime and streams thinking and text`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(
+                    LocalRuntimeEvent.ThinkingDelta("plan"),
+                    LocalRuntimeEvent.TextDelta("hello"),
+                    LocalRuntimeEvent.Done
+                )
+            )
+        }
+        val repository = createRepository(
+            localRuntime = runtime,
+            localModelRepository = FakeLocalModelRepository(
+                downloadedPaths = mapOf("gemma3-1b-it" to "/models/gemma.litertlm")
+            )
+        )
+
+        val states = repository.completeChat(
+            userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
+            assistantMessages = emptyList(),
+            platform = localPlatform(),
+            runId = "local-run"
+        ).toList()
+
+        assertEquals(
+            listOf(
+                ApiState.Loading,
+                ApiState.Thinking("plan"),
+                ApiState.Success("hello"),
+                ApiState.Done
+            ),
+            states
+        )
+        assertEquals(listOf("Hi"), runtime.sendMessageCalls)
+        assertEquals(1, runtime.loadEngineCalls.size)
     }
 
     @Test
@@ -474,7 +515,9 @@ class ChatRepositoryImplTest {
         openAIAPI: OpenAIAPI = RecordingOpenAIAPI(),
         googleAPI: GoogleAPI = FakeGoogleAPI(),
         agentToolResolver: AgentToolResolver = emptyToolResolver(),
-        toolEventRecorder: ToolEventRecorder = ToolEventRecorder(proxy())
+        toolEventRecorder: ToolEventRecorder = ToolEventRecorder(proxy()),
+        localRuntime: LocalRuntime = FakeLocalRuntime(),
+        localModelRepository: LocalModelRepository = FakeLocalModelRepository()
     ): ChatRepositoryImpl = ChatRepositoryImpl(
         context = ContextWrapper(null),
         chatRoomDao = proxy(),
@@ -496,7 +539,9 @@ class ChatRepositoryImplTest {
         ),
         contextBuilder = ContextBuilder(),
         agentToolResolver = agentToolResolver,
-        toolEventRecorder = toolEventRecorder
+        toolEventRecorder = toolEventRecorder,
+        localRuntime = localRuntime,
+        localModelRepository = localModelRepository
     )
 
     private fun emptyToolResolver(): AgentToolResolver {
@@ -536,6 +581,19 @@ class ChatRepositoryImplTest {
         hateSpeechSafetyThreshold = GeminiSafetySettings.BLOCK_MEDIUM_AND_ABOVE,
         sexuallyExplicitSafetyThreshold = GeminiSafetySettings.BLOCK_ONLY_HIGH,
         dangerousContentSafetyThreshold = GeminiSafetySettings.BLOCK_NONE
+    )
+
+    private fun localPlatform() = PlatformV2(
+        uid = "local-platform",
+        name = "Local",
+        compatibleType = ClientType.LITERT_LM,
+        apiUrl = "",
+        model = "gemma3-1b-it",
+        temperature = 1.0f,
+        topP = 0.95f,
+        topK = 40,
+        maxTokens = 1024,
+        accelerator = "gpu"
     )
 
     private fun customPlatform() = PlatformV2(

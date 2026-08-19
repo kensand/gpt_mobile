@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.Flow
 interface LocalModelRepository {
     fun observeAll(): Flow<List<LocalModel>>
     fun observeWorkInfos(): Flow<List<WorkInfo>>
+    suspend fun getById(catalogEntryId: String): LocalModel?
+    suspend fun resolveDownloadedPath(catalogEntryId: String): String?
     suspend fun startDownload(entry: CatalogEntry)
     suspend fun cancelDownload(catalogEntryId: String)
     suspend fun deleteModel(catalogEntryId: String)

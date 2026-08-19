@@ -64,6 +64,11 @@ private val platformTypes = listOf(
         clientType = ClientType.CUSTOM,
         titleResId = R.string.custom_provider,
         descriptionResId = R.string.custom_provider_description
+    ),
+    PlatformTypeInfo(
+        clientType = ClientType.LITERT_LM,
+        titleResId = R.string.litert_lm,
+        descriptionResId = R.string.litert_lm_description
     )
 )
 

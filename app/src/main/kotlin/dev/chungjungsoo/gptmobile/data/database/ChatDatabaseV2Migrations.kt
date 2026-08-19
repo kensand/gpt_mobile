@@ -363,6 +363,18 @@ object ChatDatabaseV2Migrations {
         }
     }
 
+    val PLATFORM_LOCAL_INFERENCE_COLUMN_MIGRATIONS = listOf(
+        "ALTER TABLE `platform_v2` ADD COLUMN `top_k` INTEGER",
+        "ALTER TABLE `platform_v2` ADD COLUMN `max_tokens` INTEGER",
+        "ALTER TABLE `platform_v2` ADD COLUMN `accelerator` TEXT"
+    )
+
+    val MIGRATION_9_10 = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            PLATFORM_LOCAL_INFERENCE_COLUMN_MIGRATIONS.forEach(db::execSQL)
+        }
+    }
+
     val MIGRATION_7_8 = object : Migration(7, 8) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE `messages_v2` ADD COLUMN `timeline` TEXT NOT NULL DEFAULT '[]'")

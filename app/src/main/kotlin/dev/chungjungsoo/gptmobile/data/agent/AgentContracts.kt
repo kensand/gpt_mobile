@@ -9,6 +9,7 @@ sealed interface ProviderEvent {
     data class TextDelta(val text: String) : ProviderEvent
     data class ToolCall(val callId: String, val name: String, val arguments: JsonObject) : ProviderEvent
     data class Failed(val message: String) : ProviderEvent
+    data class Notice(val message: String) : ProviderEvent
     data object Completed : ProviderEvent
 }
 

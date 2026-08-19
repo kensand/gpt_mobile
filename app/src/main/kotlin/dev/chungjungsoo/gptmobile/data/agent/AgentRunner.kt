@@ -64,6 +64,8 @@ class AgentRunner(
                                     emit(AgentRunEvent.Provider(event))
                                 }
 
+                                is ProviderEvent.Notice -> emit(AgentRunEvent.Notice(event.message))
+
                                 ProviderEvent.Completed -> completed = true
 
                                 else -> emit(AgentRunEvent.Provider(event))

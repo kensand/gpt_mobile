@@ -2,6 +2,7 @@ package dev.chungjungsoo.gptmobile.data.repository
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunEvent
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunner
 import dev.chungjungsoo.gptmobile.data.agent.AgentToolResult
@@ -9,6 +10,7 @@ import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
 import dev.chungjungsoo.gptmobile.data.agent.ToolResultContent
 import dev.chungjungsoo.gptmobile.data.agent.provider.AnthropicMessagesAdapter
 import dev.chungjungsoo.gptmobile.data.agent.provider.GeminiAdapter
+import dev.chungjungsoo.gptmobile.data.agent.provider.LiteRtLmAdapter
 import dev.chungjungsoo.gptmobile.data.agent.provider.OpenAICompatibleAdapter
 import dev.chungjungsoo.gptmobile.data.agent.provider.OpenAIResponsesAdapter
 import dev.chungjungsoo.gptmobile.data.agent.provider.ProviderAttachmentEncoder
@@ -37,6 +39,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
 import dev.chungjungsoo.gptmobile.data.model.ApiType
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.network.AnthropicAPI
@@ -70,13 +73,27 @@ class ChatRepositoryImpl @Inject constructor(
     private val attachmentUploadCoordinator: AttachmentUploadCoordinator,
     private val contextBuilder: ContextBuilder,
     private val agentToolResolver: AgentToolResolver,
-    private val toolEventRecorder: ToolEventRecorder
+    private val toolEventRecorder: ToolEventRecorder,
+    private val localRuntime: LocalRuntime,
+    private val localModelRepository: LocalModelRepository
 ) : ChatRepository {
     private val providerAttachmentEncoder = ProviderAttachmentEncoder(context)
     private val openAIResponsesAdapter = OpenAIResponsesAdapter(openAIAPI, providerAttachmentEncoder)
     private val openAICompatibleAdapter = OpenAICompatibleAdapter(openAIAPI, groqAPI, providerAttachmentEncoder)
     private val anthropicMessagesAdapter = AnthropicMessagesAdapter(anthropicAPI, providerAttachmentEncoder)
     private val geminiAdapter = GeminiAdapter(googleAPI, providerAttachmentEncoder)
+    private val liteRtLmAdapter = LiteRtLmAdapter(
+        localRuntime = localRuntime,
+        localModelRepository = localModelRepository,
+        ignoredAttachmentsNotice = contextString(
+            R.string.local_platform_ignored_attachments,
+            LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS
+        ),
+        modelNotDownloadedError = contextString(
+            R.string.local_platform_model_not_downloaded,
+            LiteRtLmAdapter.DEFAULT_MODEL_NOT_DOWNLOADED
+        )
+    )
     private val agentRunner = AgentRunner()
 
     override suspend fun completeChat(
@@ -101,8 +118,14 @@ class ChatRepositoryImpl @Inject constructor(
                 ClientType.ANTHROPIC -> anthropicMessagesAdapter.openSession(contextTurns, platform)
 
                 ClientType.GOOGLE -> geminiAdapter.openSession(contextTurns, platform)
+
+                ClientType.LITERT_LM -> liteRtLmAdapter.openSession(contextTurns, platform)
             }
-            val resolvedTools = agentToolResolver.resolve(platform.uid)
+            val resolvedTools = if (platform.compatibleType == ClientType.LITERT_LM) {
+                emptyList()
+            } else {
+                agentToolResolver.resolve(platform.uid)
+            }
             val trace = ToolTraceSession(runId, resolvedTools, toolEventRecorder)
 
             agentRunner.run(session, resolvedTools.map { it.tool }).collect { runEvent ->
@@ -113,6 +136,8 @@ class ChatRepositoryImpl @Inject constructor(
                         is ProviderEvent.TextDelta -> emit(ApiState.Success(providerEvent.text))
 
                         is ProviderEvent.Failed -> emit(ApiState.Error(providerEvent.message))
+
+                        is ProviderEvent.Notice -> emit(ApiState.Notice(providerEvent.message))
 
                         is ProviderEvent.ToolCall -> {
                             val toolEvent = trace.start(providerEvent)
@@ -386,6 +411,8 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun deleteChatsV2(chatRooms: List<ChatRoomV2>) {
         chatRoomV2Dao.deleteChatRooms(*chatRooms.toTypedArray())
     }
+
+    private fun contextString(resId: Int, fallback: String): String = runCatching { context.getString(resId) }.getOrDefault(fallback)
 }
 
 internal fun MessageV2.sendableAssistantContent(): String {

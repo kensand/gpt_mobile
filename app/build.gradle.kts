@@ -135,6 +135,9 @@ dependencies {
     implementation(libs.androidx.browser)
     implementation(libs.openid.appauth)
 
+    // On-device LiteRT-LM serving
+    implementation(libs.litertlm)
+
     // License page UI
     implementation(libs.auto.license.core)
     implementation(libs.auto.license.ui)

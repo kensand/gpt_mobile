@@ -48,14 +48,14 @@ import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2.Companion.WIZARD_STEP_API_KEY
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2.Companion.WIZARD_STEP_BASICS
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2.Companion.WIZARD_STEP_MODEL
-import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2.Companion.WIZARD_TOTAL_STEPS
 
 @Composable
 fun SetupPlatformWizardScreen(
     modifier: Modifier = Modifier,
     setupViewModel: SetupViewModelV2 = hiltViewModel(),
     onComplete: () -> Unit,
-    onBackAction: () -> Unit
+    onBackAction: () -> Unit,
+    onNavigateToLocalModels: () -> Unit = {}
 ) {
     // Keep State objects for derivedStateOf to properly track dependencies
     val wizardStepState = setupViewModel.wizardStep.collectAsStateWithLifecycle()
@@ -76,16 +76,11 @@ fun SetupPlatformWizardScreen(
     // Compute canProceed using derivedStateOf for proper reactivity
     val canProceed by remember {
         derivedStateOf {
-            when (wizardStepState.value) {
-                WIZARD_STEP_BASICS -> platformNameState.value.isNotBlank() && apiUrlState.value.isNotBlank()
-
-                WIZARD_STEP_API_KEY -> true
-
-                // API key is optional for some providers (e.g., Ollama)
-                WIZARD_STEP_MODEL -> modelState.value.isNotBlank()
-
-                else -> false
-            }
+            platformNameState.value
+            apiUrlState.value
+            modelState.value
+            selectedClientTypeState.value
+            setupViewModel.canProceedFromStep(wizardStepState.value)
         }
     }
 
@@ -122,8 +117,9 @@ fun SetupPlatformWizardScreen(
         ) {
             // Progress indicator
             WizardProgressIndicator(
-                currentStep = wizardStep,
-                totalSteps = WIZARD_TOTAL_STEPS
+                currentStep = setupViewModel.wizardDisplayStep(),
+                totalSteps = setupViewModel.wizardTotalSteps(),
+                isLocalPlatform = selectedClientType == ClientType.LITERT_LM
             )
 
             // Step content
@@ -151,7 +147,8 @@ fun SetupPlatformWizardScreen(
                             platformName = currentPlatformName,
                             onPlatformNameChange = setupViewModel::updatePlatformName,
                             apiUrl = currentApiUrl,
-                            onApiUrlChange = setupViewModel::updateApiUrl
+                            onApiUrlChange = setupViewModel::updateApiUrl,
+                            showApiUrl = selectedClientType != ClientType.LITERT_LM
                         )
                     }
 
@@ -168,10 +165,20 @@ fun SetupPlatformWizardScreen(
                     WIZARD_STEP_MODEL -> {
                         // Collect model state directly inside AnimatedContent for proper recomposition
                         val currentModel by setupViewModel.model.collectAsStateWithLifecycle()
-                        ModelStep(
-                            model = currentModel,
-                            onModelChange = setupViewModel::updateModel
-                        )
+                        if (selectedClientType == ClientType.LITERT_LM) {
+                            val downloadedModels by setupViewModel.downloadedLocalModels.collectAsStateWithLifecycle()
+                            LocalModelStep(
+                                models = downloadedModels,
+                                selectedCatalogEntryId = currentModel,
+                                onModelSelected = setupViewModel::updateModel,
+                                onNavigateToLocalModels = onNavigateToLocalModels
+                            )
+                        } else {
+                            ModelStep(
+                                model = currentModel,
+                                onModelChange = setupViewModel::updateModel
+                            )
+                        }
                     }
                 }
             }
@@ -189,14 +196,14 @@ fun SetupPlatformWizardScreen(
                     }
                 },
                 onNext = {
-                    if (wizardStep < WIZARD_TOTAL_STEPS - 1) {
-                        setupViewModel.nextWizardStep()
-                    } else {
+                    if (wizardStep == WIZARD_STEP_MODEL) {
                         setupViewModel.savePlatform()
                         onComplete()
+                    } else {
+                        setupViewModel.nextWizardStep()
                     }
                 },
-                isLastStep = wizardStep == WIZARD_TOTAL_STEPS - 1
+                isLastStep = wizardStep == WIZARD_STEP_MODEL
             )
         }
     }
@@ -206,6 +213,7 @@ fun SetupPlatformWizardScreen(
 private fun WizardProgressIndicator(
     currentStep: Int,
     totalSteps: Int,
+    isLocalPlatform: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -237,18 +245,20 @@ private fun WizardProgressIndicator(
         ) {
             StepLabel(
                 text = stringResource(R.string.step_basics),
-                isCompleted = currentStep > WIZARD_STEP_BASICS,
-                isCurrent = currentStep == WIZARD_STEP_BASICS
+                isCompleted = currentStep > 0,
+                isCurrent = currentStep == 0
             )
-            StepLabel(
-                text = stringResource(R.string.step_api_key),
-                isCompleted = currentStep > WIZARD_STEP_API_KEY,
-                isCurrent = currentStep == WIZARD_STEP_API_KEY
-            )
+            if (!isLocalPlatform) {
+                StepLabel(
+                    text = stringResource(R.string.step_api_key),
+                    isCompleted = currentStep > WIZARD_STEP_API_KEY,
+                    isCurrent = currentStep == WIZARD_STEP_API_KEY
+                )
+            }
             StepLabel(
                 text = stringResource(R.string.step_model),
-                isCompleted = currentStep > WIZARD_STEP_MODEL,
-                isCurrent = currentStep == WIZARD_STEP_MODEL
+                isCompleted = currentStep > totalSteps - 1,
+                isCurrent = currentStep == totalSteps - 1
             )
         }
     }
@@ -293,6 +303,7 @@ private fun BasicsStep(
     onPlatformNameChange: (String) -> Unit,
     apiUrl: String,
     onApiUrlChange: (String) -> Unit,
+    showApiUrl: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -310,7 +321,13 @@ private fun BasicsStep(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = stringResource(R.string.platform_basics_description),
+            text = stringResource(
+                if (clientType == ClientType.LITERT_LM) {
+                    R.string.local_platform_basics_description
+                } else {
+                    R.string.platform_basics_description
+                }
+            ),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -330,25 +347,27 @@ private fun BasicsStep(
             }
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        if (showApiUrl) {
+            Spacer(modifier = Modifier.height(20.dp))
 
-        // API URL
-        OutlinedTextField(
-            value = apiUrl,
-            onValueChange = onApiUrlChange,
-            label = { Text(stringResource(R.string.api_url)) },
-            placeholder = { Text(stringResource(R.string.api_url_hint)) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = clientType != ClientType.GOOGLE,
-            supportingText = {
-                if (clientType == ClientType.GOOGLE) {
-                    Text(stringResource(R.string.client_type_google_desc))
-                } else {
-                    Text(stringResource(R.string.api_url_cautions))
+            // API URL
+            OutlinedTextField(
+                value = apiUrl,
+                onValueChange = onApiUrlChange,
+                label = { Text(stringResource(R.string.api_url)) },
+                placeholder = { Text(stringResource(R.string.api_url_hint)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                enabled = clientType != ClientType.GOOGLE,
+                supportingText = {
+                    if (clientType == ClientType.GOOGLE) {
+                        Text(stringResource(R.string.client_type_google_desc))
+                    } else {
+                        Text(stringResource(R.string.api_url_cautions))
+                    }
                 }
-            }
-        )
+            )
+        }
     }
 }
 
@@ -423,6 +442,35 @@ private fun ApiKeyStep(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun LocalModelStep(
+    models: List<DownloadedLocalModelOption>,
+    selectedCatalogEntryId: String,
+    onModelSelected: (String) -> Unit,
+    onNavigateToLocalModels: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+    ) {
+        Text(
+            modifier = Modifier.semantics { heading() },
+            text = stringResource(R.string.step_model),
+            style = MaterialTheme.typography.headlineSmall
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        LocalModelPicker(
+            models = models,
+            selectedCatalogEntryId = selectedCatalogEntryId,
+            onModelSelected = onModelSelected,
+            onNavigateToLocalModels = onNavigateToLocalModels
+        )
     }
 }
 
@@ -532,4 +580,5 @@ private fun getApiHelpUrl(clientType: ClientType): String? = when (clientType) {
     ClientType.OLLAMA -> "https://ollama.com/blog/openai-compatibility"
     ClientType.OPENROUTER -> "https://openrouter.ai/keys"
     ClientType.CUSTOM -> null
+    ClientType.LITERT_LM -> null
 }

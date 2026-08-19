@@ -43,6 +43,15 @@ data class PlatformV2(
     @ColumnInfo(name = "top_p")
     val topP: Float? = null,
 
+    @ColumnInfo(name = "top_k")
+    val topK: Int? = null,
+
+    @ColumnInfo(name = "max_tokens")
+    val maxTokens: Int? = null,
+
+    @ColumnInfo(name = "accelerator")
+    val accelerator: String? = null,
+
     @ColumnInfo(name = "system_prompt")
     val systemPrompt: String? = null,
 

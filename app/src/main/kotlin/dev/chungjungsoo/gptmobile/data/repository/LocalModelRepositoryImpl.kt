@@ -32,6 +32,18 @@ class LocalModelRepositoryImpl(
 
     override fun observeWorkInfos(): Flow<List<WorkInfo>> = workManager.getWorkInfosByTagFlow(LocalModelDownloadWorker.WORK_TAG)
 
+    override suspend fun getById(catalogEntryId: String): LocalModel? = localModelDao.getById(catalogEntryId)
+
+    override suspend fun resolveDownloadedPath(catalogEntryId: String): String? = withContext(Dispatchers.IO) {
+        val model = localModelDao.getById(catalogEntryId) ?: return@withContext null
+        if (model.status != LocalModelStatus.DOWNLOADED) return@withContext null
+        val file = File(
+            storageRoot(),
+            LocalModelDownloadPaths.relativeFilePath(model.catalogEntryId, model.commitHash, model.fileName)
+        )
+        file.takeIf { it.exists() }?.absolutePath
+    }
+
     override suspend fun startDownload(entry: CatalogEntry) {
         withContext(Dispatchers.IO) {
             val commitHash = LocalModelDownloadPaths.commitHashFromUrl(entry.downloadUrl)

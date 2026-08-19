@@ -1,6 +1,7 @@
 package dev.chungjungsoo.gptmobile.presentation
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
@@ -12,6 +13,7 @@ import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.backup.SanitizedChatBackup
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentRunDao
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
@@ -47,6 +49,9 @@ class GPTMobileApp :
     @Inject
     lateinit var localModelRepository: LocalModelRepository
 
+    @Inject
+    lateinit var localRuntime: LocalRuntime
+
     @Volatile
     var secretMigrationErrors: List<SecretMigrationError> = emptyList()
         private set
@@ -80,6 +85,15 @@ class GPTMobileApp :
                 }
             }
             localModelRepository.reconcile()
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && ::localRuntime.isInitialized) {
+            applicationScope.launch {
+                localRuntime.unloadEngine()
+            }
         }
     }
 

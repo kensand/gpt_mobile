@@ -9,6 +9,7 @@ object Route {
     const val SETUP_PLATFORM_TYPE = "setup_platform_type"
     const val SETUP_PLATFORM_WIZARD = "setup_platform_wizard"
     const val SETUP_COMPLETE = "setup_complete"
+    const val SETUP_LOCAL_MODELS = "setup_local_models"
 
     // Legacy routes (deprecated - kept for reference)
     const val SELECT_PLATFORM = "select_platform"

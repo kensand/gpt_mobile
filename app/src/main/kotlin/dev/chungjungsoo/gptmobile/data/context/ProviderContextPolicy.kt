@@ -51,6 +51,13 @@ data class ProviderContextPolicy(
                     maxInlineAttachmentBytes = INLINE_ATTACHMENT_LIMIT_BYTES
                 )
             }
+
+            ClientType.LITERT_LM -> {
+                ProviderContextPolicy(
+                    recentTurnWindow = 10,
+                    historicalImageTurnWindow = 0
+                )
+            }
         }
     }
 }

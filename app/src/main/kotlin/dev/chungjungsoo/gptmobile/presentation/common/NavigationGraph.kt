@@ -109,7 +109,13 @@ fun NavGraphBuilder.setupNavigation(
                     // Go back to platform list after adding a platform
                     navController.popBackStack(Route.SETUP_PLATFORM_LIST, inclusive = false)
                 },
-                onBackAction = { navController.navigateUp() }
+                onBackAction = { navController.navigateUp() },
+                onNavigateToLocalModels = { navController.navigate(Route.SETUP_LOCAL_MODELS) }
+            )
+        }
+        composable(route = Route.SETUP_LOCAL_MODELS) {
+            LocalModelsScreen(
+                onNavigationClick = { navController.navigateUp() }
             )
         }
         composable(route = Route.SETUP_COMPLETE) {
@@ -198,7 +204,8 @@ fun NavGraphBuilder.settingNavigation(
                 onSave = { platform ->
                     settingViewModel.addPlatform(platform)
                     navController.navigateUp()
-                }
+                },
+                onNavigateToLocalModels = { navController.navigate(Route.LOCAL_MODELS) }
             )
         }
         composable(

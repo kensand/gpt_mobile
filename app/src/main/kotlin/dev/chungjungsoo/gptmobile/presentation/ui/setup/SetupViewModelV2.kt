@@ -5,13 +5,21 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.chungjungsoo.gptmobile.data.ModelConstants
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
+import dev.chungjungsoo.gptmobile.data.localruntime.localSamplingDefaults
 import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -22,9 +30,16 @@ sealed class SaveStatus {
     data class Error(val message: String) : SaveStatus()
 }
 
+data class DownloadedLocalModelOption(
+    val catalogEntryId: String,
+    val displayName: String
+)
+
 @HiltViewModel
 class SetupViewModelV2 @Inject constructor(
-    private val settingRepository: SettingRepository
+    private val settingRepository: SettingRepository,
+    private val localModelRepository: LocalModelRepository,
+    private val modelCatalogRepository: ModelCatalogRepository
 ) : ViewModel() {
 
     private val _platforms = MutableStateFlow<List<PlatformV2>>(emptyList())
@@ -52,8 +67,26 @@ class SetupViewModelV2 @Inject constructor(
     private val _saveStatus = MutableStateFlow<SaveStatus>(SaveStatus.Idle)
     val saveStatus: StateFlow<SaveStatus> = _saveStatus.asStateFlow()
 
+    private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+
+    val downloadedLocalModels: StateFlow<List<DownloadedLocalModelOption>> = combine(
+        localModelRepository.observeAll(),
+        catalogEntries
+    ) { models, catalog ->
+        val names = catalog.associate { it.id to it.displayName }
+        models.filter { it.status == LocalModelStatus.DOWNLOADED }.map { model ->
+            DownloadedLocalModelOption(
+                catalogEntryId = model.catalogEntryId,
+                displayName = names[model.catalogEntryId]?.takeIf { it.isNotBlank() } ?: model.catalogEntryId
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     init {
         loadPlatforms()
+        viewModelScope.launch {
+            catalogEntries.value = modelCatalogRepository.getVisibleEntries()
+        }
     }
 
     private fun loadPlatforms() {
@@ -89,11 +122,19 @@ class SetupViewModelV2 @Inject constructor(
     }
 
     fun nextWizardStep() {
-        _wizardStep.update { it + 1 }
+        if (isLiteRtLm() && _wizardStep.value == WIZARD_STEP_BASICS) {
+            _wizardStep.value = WIZARD_STEP_MODEL
+        } else {
+            _wizardStep.update { it + 1 }
+        }
     }
 
     fun previousWizardStep() {
-        _wizardStep.update { maxOf(0, it - 1) }
+        if (isLiteRtLm() && _wizardStep.value == WIZARD_STEP_MODEL) {
+            _wizardStep.value = WIZARD_STEP_BASICS
+        } else {
+            _wizardStep.update { maxOf(0, it - 1) }
+        }
     }
 
     fun resetWizard() {
@@ -111,15 +152,23 @@ class SetupViewModelV2 @Inject constructor(
         viewModelScope.launch {
             _saveStatus.value = SaveStatus.Saving
             try {
+                val defaults = if (clientType == ClientType.LITERT_LM) {
+                    catalogDefaultsFor(_model.value.trim())
+                } else {
+                    null
+                }
                 val platform = PlatformV2(
                     name = _platformName.value.trim(),
                     compatibleType = clientType,
                     enabled = true,
-                    apiUrl = _apiUrl.value.trim(),
-                    token = _apiKey.value.trim().takeIf { it.isNotEmpty() },
+                    apiUrl = if (clientType == ClientType.LITERT_LM) "" else _apiUrl.value.trim(),
+                    token = _apiKey.value.trim().takeIf { it.isNotEmpty() && clientType != ClientType.LITERT_LM },
                     model = _model.value.trim(),
-                    temperature = 1.0f,
-                    topP = 1.0f,
+                    temperature = defaults?.temperature ?: 1.0f,
+                    topP = defaults?.topP ?: 1.0f,
+                    topK = defaults?.topK,
+                    maxTokens = defaults?.maxTokens,
+                    accelerator = defaults?.accelerator,
                     systemPrompt = ModelConstants.DEFAULT_PROMPT,
                     stream = true,
                     reasoning = false,
@@ -153,17 +202,33 @@ class SetupViewModelV2 @Inject constructor(
     }
 
     fun canProceedFromStep(step: Int): Boolean = when (step) {
-        0 -> _platformName.value.isNotBlank() && _apiUrl.value.isNotBlank()
+        WIZARD_STEP_BASICS -> {
+            val hasName = _platformName.value.isNotBlank()
+            if (isLiteRtLm()) hasName else hasName && _apiUrl.value.isNotBlank()
+        }
 
-        1 -> true
+        WIZARD_STEP_API_KEY -> true
 
-        // API key is optional for some providers (e.g., Ollama)
-        2 -> _model.value.isNotBlank()
+        WIZARD_STEP_MODEL -> _model.value.isNotBlank()
 
         else -> false
     }
 
     fun isSetupComplete(): Boolean = _platforms.value.isNotEmpty()
+
+    fun isLiteRtLm(): Boolean = _selectedClientType.value == ClientType.LITERT_LM
+
+    fun wizardTotalSteps(): Int = if (isLiteRtLm()) WIZARD_LOCAL_STEPS else WIZARD_TOTAL_STEPS
+
+    fun wizardDisplayStep(): Int = if (isLiteRtLm() && _wizardStep.value == WIZARD_STEP_MODEL) {
+        1
+    } else {
+        _wizardStep.value
+    }
+
+    private fun catalogDefaultsFor(modelId: String) = catalogEntries.value
+        .firstOrNull { it.id == modelId }
+        ?.let(::localSamplingDefaults)
 
     private fun getDefaultPlatformName(clientType: ClientType): String = ModelConstants.defaultPlatformName(clientType)
 
@@ -175,5 +240,6 @@ class SetupViewModelV2 @Inject constructor(
         const val WIZARD_STEP_API_KEY = 1
         const val WIZARD_STEP_MODEL = 2
         const val WIZARD_TOTAL_STEPS = 3
+        const val WIZARD_LOCAL_STEPS = 2
     }
 }
