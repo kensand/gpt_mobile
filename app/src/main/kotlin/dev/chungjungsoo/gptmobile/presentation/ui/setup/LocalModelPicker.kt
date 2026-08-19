@@ -68,6 +68,7 @@ fun LocalModelCatalogPicker(
     checkingAccessEntryId: String?,
     onModelSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
+    showPendingActivationHint: Boolean = false,
     onNavigateToLocalModels: (() -> Unit)? = null
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -81,6 +82,14 @@ fun LocalModelCatalogPicker(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (showPendingActivationHint) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.local_platform_pending_activation_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Spacer(modifier = Modifier.height(16.dp))
         if (items.isEmpty()) {
             Text(

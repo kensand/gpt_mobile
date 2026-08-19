@@ -72,19 +72,21 @@ class AddPlatformViewModelTest {
     }
 
     @Test
-    fun `save is gated until the selected local model is downloaded`() = runTest {
+    fun `save is enabled once a local model is selected even while downloading`() = runTest {
         val localModels = FakeLocalModelRepository()
         val viewModel = addPlatformViewModel(localModels = localModels)
 
         viewModel.selectLocalModel("pending-model")
 
-        assertFalse(viewModel.canSaveLocalModel())
+        assertTrue(viewModel.canSaveLocalModel())
         assertTrue(viewModel.isWaitingForModelDownload())
+        assertFalse(viewModel.shouldEnableLocalPlatform())
 
         localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.READY)))
 
         assertTrue(viewModel.canSaveLocalModel())
         assertFalse(viewModel.isWaitingForModelDownload())
+        assertTrue(viewModel.shouldEnableLocalPlatform())
     }
 
     @Test
@@ -130,6 +132,7 @@ class AddPlatformViewModelTest {
 
         assertEquals("ready-model", viewModel.selectedCatalogEntryId.value)
         assertTrue(viewModel.canSaveLocalModel())
+        assertTrue(viewModel.shouldEnableLocalPlatform())
         assertTrue(localModels.startDownloadCalls.isEmpty())
         assertEquals(LocalModelsDialog.Hidden, viewModel.localModelDownloadState.value.dialog)
     }

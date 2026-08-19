@@ -13,6 +13,7 @@ import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.backup.SanitizedChatBackup
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentRunDao
+import dev.chungjungsoo.gptmobile.data.localmodel.PendingLocalPlatformActivator
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
@@ -52,6 +53,9 @@ class GPTMobileApp :
     @Inject
     lateinit var localRuntime: LocalRuntime
 
+    @Inject
+    lateinit var pendingLocalPlatformActivator: PendingLocalPlatformActivator
+
     @Volatile
     var secretMigrationErrors: List<SecretMigrationError> = emptyList()
         private set
@@ -61,6 +65,7 @@ class GPTMobileApp :
     override fun onCreate() {
         SanitizedChatBackup.restoreIfPresent(this)
         super.onCreate()
+        pendingLocalPlatformActivator.start()
         registerActivityLifecycleCallbacks(AppForegroundTracker)
         StartupRecoveryGate.start(applicationScope) {
             secretMigrationErrors = runStartupMaintenance(

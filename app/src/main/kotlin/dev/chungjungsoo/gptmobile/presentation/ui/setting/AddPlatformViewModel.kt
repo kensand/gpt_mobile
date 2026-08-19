@@ -96,7 +96,17 @@ class AddPlatformViewModel @Inject constructor(
         downloadActions.retryAfterLicense()
     }
 
-    fun canSaveLocalModel(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.READY
+    fun canSaveLocalModel(): Boolean = _selectedCatalogEntryId.value.isNotBlank()
+
+    fun shouldEnableLocalPlatform(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.READY
+
+    fun saveHuggingFaceAccessToken(token: String) {
+        downloadActions.saveAccessTokenAndRetry(token)
+    }
+
+    fun openAccessTokenDialog() {
+        downloadActions.openAccessTokenDialog()
+    }
 
     fun isWaitingForModelDownload(): Boolean {
         val catalogEntryId = _selectedCatalogEntryId.value

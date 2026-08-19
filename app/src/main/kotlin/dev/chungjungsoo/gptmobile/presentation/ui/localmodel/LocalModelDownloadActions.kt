@@ -72,8 +72,7 @@ class LocalModelDownloadActions(
     fun startHuggingFaceSignIn(): Intent? {
         val intent = huggingFaceAuthClient.authorizationIntent()
         if (intent == null) {
-            pendingGatedEntry = null
-            _uiState.update { it.copy(dialog = LocalModelsDialog.OAuthNotConfigured) }
+            _uiState.update { it.copy(dialog = LocalModelsDialog.OAuthNotConfigured()) }
         }
         return intent
     }
@@ -114,6 +113,33 @@ class LocalModelDownloadActions(
         onLicenseTabClosed()
     }
 
+    fun openAccessTokenDialog(isSessionExpired: Boolean = false) {
+        val expired = isSessionExpired ||
+            (_uiState.value.dialog as? LocalModelsDialog.OAuthNotConfigured)?.isSessionExpired == true
+        _uiState.update { it.copy(dialog = LocalModelsDialog.EnterAccessToken(expired)) }
+    }
+
+    fun saveAccessTokenAndRetry(token: String) {
+        val trimmed = token.trim()
+        if (trimmed.isEmpty()) return
+        scope.launch {
+            huggingFaceTokenStore.saveAccessToken(trimmed)
+            retryPendingDownload()
+        }
+    }
+
+    fun retryAfterAccessToken() {
+        retryPendingDownload()
+    }
+
+    private fun retryPendingDownload() {
+        val entry = pendingGatedEntry
+        _uiState.update { it.copy(dialog = LocalModelsDialog.Hidden) }
+        if (entry != null) {
+            beginDownload(entry)
+        }
+    }
+
     fun release() {
         huggingFaceAuthClient.dispose()
     }
@@ -145,8 +171,11 @@ class LocalModelDownloadActions(
                     _uiState.update { it.copy(dialog = LocalModelsDialog.License(entry, step.modelPageUrl)) }
                 }
 
-                GatedDownloadStep.OAuthNotConfigured -> _uiState.update {
-                    it.copy(dialog = LocalModelsDialog.OAuthNotConfigured)
+                is GatedDownloadStep.OAuthNotConfigured -> {
+                    pendingGatedEntry = entry
+                    _uiState.update {
+                        it.copy(dialog = LocalModelsDialog.OAuthNotConfigured(step.isSessionExpired))
+                    }
                 }
 
                 GatedDownloadStep.Error -> _uiState.update {

@@ -30,6 +30,7 @@ import dev.chungjungsoo.gptmobile.presentation.icons.Done
 @Composable
 fun SetupCompleteScreen(
     modifier: Modifier = Modifier,
+    isPendingLocalPlatform: Boolean = false,
     onNavigate: (route: String) -> Unit,
     onBackAction: () -> Unit
 ) {
@@ -46,7 +47,7 @@ fun SetupCompleteScreen(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
         ) {
-            SetupCompleteText()
+            SetupCompleteText(isPendingLocalPlatform = isPendingLocalPlatform)
             SetupCompleteLogo(
                 Modifier
                     .widthIn(min = screenWidth)
@@ -64,7 +65,10 @@ fun SetupCompleteScreen(
 
 @Preview
 @Composable
-private fun SetupCompleteText(modifier: Modifier = Modifier) {
+private fun SetupCompleteText(
+    modifier: Modifier = Modifier,
+    isPendingLocalPlatform: Boolean = false
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -79,7 +83,13 @@ private fun SetupCompleteText(modifier: Modifier = Modifier) {
         )
         Text(
             modifier = Modifier.padding(4.dp),
-            text = stringResource(R.string.setup_complete_description),
+            text = stringResource(
+                if (isPendingLocalPlatform) {
+                    R.string.setup_complete_pending_description
+                } else {
+                    R.string.setup_complete_description
+                }
+            ),
             style = MaterialTheme.typography.bodyLarge
         )
     }

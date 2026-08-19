@@ -205,9 +205,16 @@ class SetupViewModelV2 @Inject constructor(
         _model.value = ""
     }
 
+    fun saveHuggingFaceAccessToken(token: String) {
+        downloadActions.saveAccessTokenAndRetry(token)
+    }
+
+    fun openAccessTokenDialog() {
+        downloadActions.openAccessTokenDialog()
+    }
+
     fun savePlatform() {
         val clientType = _selectedClientType.value ?: return
-        if (clientType == ClientType.LITERT_LM && !selectedLocalModelIsDownloaded()) return
 
         viewModelScope.launch {
             _saveStatus.value = SaveStatus.Saving
@@ -220,7 +227,7 @@ class SetupViewModelV2 @Inject constructor(
                 val platform = PlatformV2(
                     name = _platformName.value.trim(),
                     compatibleType = clientType,
-                    enabled = true,
+                    enabled = clientType != ClientType.LITERT_LM || selectedLocalModelIsDownloaded(),
                     apiUrl = if (clientType == ClientType.LITERT_LM) "" else _apiUrl.value.trim(),
                     token = _apiKey.value.trim().takeIf { it.isNotEmpty() && clientType != ClientType.LITERT_LM },
                     model = _model.value.trim(),
@@ -269,7 +276,7 @@ class SetupViewModelV2 @Inject constructor(
 
         WIZARD_STEP_API_KEY -> true
 
-        WIZARD_STEP_MODEL -> if (isLiteRtLm()) selectedLocalModelIsDownloaded() else _model.value.isNotBlank()
+        WIZARD_STEP_MODEL -> _model.value.isNotBlank()
 
         else -> false
     }

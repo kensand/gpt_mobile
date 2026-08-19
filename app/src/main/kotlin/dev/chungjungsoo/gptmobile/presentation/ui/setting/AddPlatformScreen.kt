@@ -96,11 +96,7 @@ fun AddPlatformScreen(
             AddPlatformTopBar(
                 title = title,
                 scrollBehavior = scrollBehavior,
-                actionLabel = when {
-                    step != AddPlatformStep.DETAILS -> null
-                    isWaitingForDownload -> stringResource(R.string.local_platform_waiting_for_download)
-                    else -> stringResource(R.string.save)
-                },
+                actionLabel = if (step == AddPlatformStep.DETAILS) stringResource(R.string.save) else null,
                 isActionEnabled = isSaveEnabled,
                 onNavigationClick = navigateBack,
                 onActionClick = {
@@ -120,7 +116,11 @@ fun AddPlatformScreen(
                         PlatformV2(
                             name = platformName.trim(),
                             compatibleType = clientType,
-                            enabled = true,
+                            enabled = if (clientType == ClientType.LITERT_LM) {
+                                viewModel.shouldEnableLocalPlatform()
+                            } else {
+                                true
+                            },
                             apiUrl = if (clientType == ClientType.LITERT_LM) "" else apiUrl.trim(),
                             token = apiKey.trim().takeIf { it.isNotEmpty() && clientType != ClientType.LITERT_LM },
                             model = selectedModel,
@@ -197,6 +197,7 @@ fun AddPlatformScreen(
                         items = catalogModels,
                         selectedCatalogEntryId = selectedLocalModelId,
                         checkingAccessEntryId = downloadState.checkingAccessEntryId,
+                        showPendingActivationHint = isWaitingForDownload,
                         onModelSelected = { catalogEntryId ->
                             val entry = catalogModels.firstOrNull { it.entry.id == catalogEntryId }?.entry
                             if (entry != null) {
@@ -221,7 +222,9 @@ fun AddPlatformScreen(
         onStartSignIn = viewModel::startHuggingFaceSignIn,
         onAuthActivityResult = viewModel::onAuthActivityResult,
         onLicenseTabClosed = viewModel::onLicenseTabClosed,
-        onRetryAfterLicense = viewModel::retryAfterLicense
+        onRetryAfterLicense = viewModel::retryAfterLicense,
+        onEnterAccessToken = viewModel::openAccessTokenDialog,
+        onSaveAccessToken = viewModel::saveHuggingFaceAccessToken
     )
 }
 

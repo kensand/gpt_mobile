@@ -19,6 +19,7 @@ import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClie
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceSignInResult
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuards
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.AddPlatformViewModel
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelsViewModel
 import kotlinx.coroutines.Dispatchers
 
 internal fun wizardCatalogEntry(
@@ -67,7 +68,7 @@ internal class FakeHuggingFaceAuthClient : HuggingFaceAuthClient {
 }
 
 internal class RecordingProber(
-    private val statusCode: Int = 200
+    var statusCode: Int = 200
 ) : LocalModelDownloadProber {
     override fun probe(downloadUrl: String, accessToken: String?): Int = statusCode
 }
@@ -119,10 +120,11 @@ internal class RecordingSettingRepository : SettingRepository {
 internal fun wizardGatedCoordinator(
     statusCode: Int = 200,
     oauthConfigured: Boolean = true,
-    tokenStore: HuggingFaceTokenStore = HuggingFaceTokenStore(MapSecretVault())
+    tokenStore: HuggingFaceTokenStore = HuggingFaceTokenStore(MapSecretVault()),
+    prober: LocalModelDownloadProber = RecordingProber(statusCode)
 ) = GatedDownloadCoordinator(
     tokenStore = tokenStore,
-    prober = RecordingProber(statusCode),
+    prober = prober,
     isOAuthConfigured = { oauthConfigured },
     ioDispatcher = Dispatchers.Unconfined
 )
@@ -176,4 +178,20 @@ internal fun addPlatformViewModel(
     downloadGuards = guards,
     huggingFaceAuthClient = authClient,
     deviceSocModel = deviceSocModel
+)
+
+internal fun localModelsViewModel(
+    localModels: FakeLocalModelRepository = FakeLocalModelRepository(),
+    catalog: FakeModelCatalogRepository = defaultWizardCatalog(),
+    gatedCoordinator: GatedDownloadCoordinator = wizardGatedCoordinator(),
+    tokenStore: HuggingFaceTokenStore = HuggingFaceTokenStore(MapSecretVault()),
+    guards: LocalDownloadGuards = FakeLocalDownloadGuards(),
+    authClient: HuggingFaceAuthClient = FakeHuggingFaceAuthClient()
+) = LocalModelsViewModel(
+    modelCatalogRepository = catalog,
+    localModelRepository = localModels,
+    gatedDownloadCoordinator = gatedCoordinator,
+    huggingFaceTokenStore = tokenStore,
+    downloadGuards = guards,
+    huggingFaceAuthClient = authClient
 )

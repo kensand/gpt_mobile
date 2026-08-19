@@ -181,6 +181,7 @@ fun SetupPlatformWizardScreen(
                                 items = catalogModels,
                                 selectedCatalogEntryId = currentModel,
                                 checkingAccessEntryId = downloadState.checkingAccessEntryId,
+                                showPendingActivationHint = isWaitingForDownload,
                                 onModelSelected = { catalogEntryId ->
                                     val entry = catalogModels.firstOrNull { it.entry.id == catalogEntryId }?.entry
                                     if (entry != null) {
@@ -221,8 +222,7 @@ fun SetupPlatformWizardScreen(
                         setupViewModel.nextWizardStep()
                     }
                 },
-                isLastStep = wizardStep == WIZARD_STEP_MODEL,
-                isWaitingForDownload = isWaitingForDownload
+                isLastStep = wizardStep == WIZARD_STEP_MODEL
             )
         }
     }
@@ -235,7 +235,9 @@ fun SetupPlatformWizardScreen(
         onStartSignIn = setupViewModel::startHuggingFaceSignIn,
         onAuthActivityResult = setupViewModel::onAuthActivityResult,
         onLicenseTabClosed = setupViewModel::onLicenseTabClosed,
-        onRetryAfterLicense = setupViewModel::retryAfterLicense
+        onRetryAfterLicense = setupViewModel::retryAfterLicense,
+        onEnterAccessToken = setupViewModel::openAccessTokenDialog,
+        onSaveAccessToken = setupViewModel::saveHuggingFaceAccessToken
     )
 }
 
@@ -480,6 +482,7 @@ private fun LocalModelStep(
     items: List<LocalModelListItem>,
     selectedCatalogEntryId: String,
     checkingAccessEntryId: String?,
+    showPendingActivationHint: Boolean,
     onModelSelected: (String) -> Unit,
     onNavigateToLocalModels: () -> Unit,
     modifier: Modifier = Modifier
@@ -500,6 +503,7 @@ private fun LocalModelStep(
             items = items,
             selectedCatalogEntryId = selectedCatalogEntryId,
             checkingAccessEntryId = checkingAccessEntryId,
+            showPendingActivationHint = showPendingActivationHint,
             onModelSelected = onModelSelected,
             onNavigateToLocalModels = onNavigateToLocalModels
         )
@@ -565,7 +569,6 @@ private fun WizardNavigationButtons(
     onBack: () -> Unit,
     onNext: () -> Unit,
     isLastStep: Boolean,
-    isWaitingForDownload: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -577,7 +580,9 @@ private fun WizardNavigationButtons(
         // Back button
         OutlinedButton(
             onClick = onBack,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .height(40.dp)
         ) {
             Text(
                 text = if (currentStep == 0) {
@@ -591,14 +596,16 @@ private fun WizardNavigationButtons(
         // Next/Finish button
         Button(
             onClick = onNext,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .height(40.dp),
             enabled = canProceed
         ) {
             Text(
-                text = when {
-                    isLastStep && isWaitingForDownload -> stringResource(R.string.local_platform_waiting_for_download)
-                    isLastStep -> stringResource(R.string.finish)
-                    else -> stringResource(R.string.next)
+                text = if (isLastStep) {
+                    stringResource(R.string.finish)
+                } else {
+                    stringResource(R.string.next)
                 }
             )
         }

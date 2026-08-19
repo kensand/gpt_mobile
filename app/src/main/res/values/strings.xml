@@ -54,6 +54,7 @@
     <string name="gemini_1_0_pro_description">Natural language tasks, multi-turn text and code chat, and code generation.</string>
     <string name="setup_complete">You’re all set!</string>
     <string name="setup_complete_description">Let’s start using GPT Mobile!</string>
+    <string name="setup_complete_pending_description">Your Local Platform is saved and will turn on automatically when the model finishes downloading.</string>
     <string name="done">Done</string>
     <string name="setup_complete_logo">Setup Complete Logo</string>
     <string name="chats">Chats</string>
@@ -280,6 +281,7 @@
     <string name="local_platform_select_model_description">This Local Platform uses a Local Model already on the device. Download more from Settings → Local Models.</string>
     <string name="local_platform_catalog_select_description">Pick a Local Model for this Local Platform. Downloaded models are ready to use. Others can be downloaded here.</string>
     <string name="local_platform_waiting_for_download">Waiting for model download</string>
+    <string name="local_platform_pending_activation_hint">Downloading — this platform will activate automatically when ready</string>
     <string name="local_platform_no_downloaded_models">No Local Models are downloaded yet.</string>
     <string name="local_platform_go_to_local_models">Go to Settings → Local Models</string>
     <string name="local_platform_ignored_attachments">The local platform ignored attachments</string>
@@ -473,7 +475,16 @@
     <string name="local_model_open_license">Open user agreement</string>
     <string name="local_model_license_retry">I accepted the license</string>
     <string name="local_model_oauth_not_configured_title">Hugging Face sign-in is not configured</string>
-    <string name="local_model_oauth_not_configured_message">This build does not have a registered Hugging Face OAuth app. Add a client ID and redirect URI in the app build configuration, then try again.</string>
+    <string name="local_model_oauth_not_configured_message">This build does not have Hugging Face sign-in. Paste a read access token instead to download gated models.</string>
+    <string name="huggingface_account">Hugging Face account</string>
+    <string name="huggingface_token_saved">Access token saved</string>
+    <string name="huggingface_add_access_token">Add access token</string>
+    <string name="huggingface_remove_token">Remove</string>
+    <string name="huggingface_enter_access_token">Enter access token</string>
+    <string name="huggingface_token_dialog_title">Hugging Face access token</string>
+    <string name="huggingface_token_dialog_guidance">Create a read token at huggingface.co/settings/tokens, then paste it here. The app stores it on this device and never shows it again.</string>
+    <string name="huggingface_token_label">Access token</string>
+    <string name="huggingface_open_token_settings">Open token settings</string>
     <string name="local_model_probe_error_title">Could not check download access</string>
     <string name="local_model_probe_error_message">Check your internet connection and try again.</string>
     <string name="local_model_download_percent">%1$d%%</string>

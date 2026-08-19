@@ -4,9 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -14,6 +16,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.navigation
+import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.presentation.ui.chat.ChatScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.home.HomeScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.migrate.MigrateScreen
@@ -119,7 +122,15 @@ fun NavGraphBuilder.setupNavigation(
             )
         }
         composable(route = Route.SETUP_COMPLETE) {
+            val parentEntry = remember(it) {
+                navController.getBackStackEntry(Route.SETUP_ROUTE)
+            }
+            val setupViewModel: SetupViewModelV2 = hiltViewModel(parentEntry)
+            val platforms by setupViewModel.platforms.collectAsStateWithLifecycle()
             SetupCompleteScreen(
+                isPendingLocalPlatform = platforms.any { platform ->
+                    !platform.enabled && platform.compatibleType == ClientType.LITERT_LM
+                },
                 onNavigate = { route ->
                     navController.navigate(route) {
                         popUpTo(Route.GET_STARTED) { inclusive = true }

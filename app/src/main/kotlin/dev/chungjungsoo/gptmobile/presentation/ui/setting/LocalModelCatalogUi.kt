@@ -13,7 +13,8 @@ data class LocalModelsUiState(
     val isLoading: Boolean = true,
     val totalStorageBytes: Long = 0L,
     val checkingAccessEntryId: String? = null,
-    val dialog: LocalModelsDialog = LocalModelsDialog.Hidden
+    val dialog: LocalModelsDialog = LocalModelsDialog.Hidden,
+    val hasHuggingFaceToken: Boolean = false
 )
 
 data class LocalModelDownloadUiState(
@@ -46,7 +47,8 @@ sealed class LocalModelsDialog {
     data class DeleteConfirm(val entry: CatalogEntry) : LocalModelsDialog()
     data class SignIn(val entry: CatalogEntry, val isSessionExpired: Boolean) : LocalModelsDialog()
     data class License(val entry: CatalogEntry, val modelPageUrl: String) : LocalModelsDialog()
-    data object OAuthNotConfigured : LocalModelsDialog()
+    data class OAuthNotConfigured(val isSessionExpired: Boolean = false) : LocalModelsDialog()
+    data class EnterAccessToken(val isSessionExpired: Boolean = false) : LocalModelsDialog()
     data object ProbeError : LocalModelsDialog()
     data object SignInFailed : LocalModelsDialog()
 }

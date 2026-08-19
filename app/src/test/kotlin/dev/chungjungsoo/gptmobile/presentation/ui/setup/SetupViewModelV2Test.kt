@@ -76,7 +76,7 @@ class SetupViewModelV2Test {
     }
 
     @Test
-    fun `finish is gated until the selected local model is downloaded`() = runTest {
+    fun `finish is enabled once a local model is selected even while downloading`() = runTest {
         val localModels = FakeLocalModelRepository()
         val viewModel = setupViewModel(localModels = localModels)
         viewModel.selectClientType(ClientType.LITERT_LM)
@@ -85,7 +85,7 @@ class SetupViewModelV2Test {
 
         viewModel.selectLocalModel("pending-model")
 
-        assertFalse(viewModel.canProceedFromStep(SetupViewModelV2.WIZARD_STEP_MODEL))
+        assertTrue(viewModel.canProceedFromStep(SetupViewModelV2.WIZARD_STEP_MODEL))
         assertTrue(viewModel.isWaitingForModelDownload())
 
         localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.READY)))
@@ -111,7 +111,6 @@ class SetupViewModelV2Test {
         viewModel.selectClientType(ClientType.LITERT_LM)
         viewModel.updatePlatformName("Local")
         viewModel.selectLocalModel("pending-model")
-        viewModel.savePlatform()
 
         assertEquals(listOf("pending-model"), localModels.startDownloadCalls)
         assertTrue(settings.addedPlatforms.isEmpty())
@@ -150,7 +149,7 @@ class SetupViewModelV2Test {
     }
 
     @Test
-    fun `savePlatform writes the local profile only after the selected model is downloaded`() = runTest {
+    fun `savePlatform persists a disabled pending platform while the model is downloading`() = runTest {
         val settings = RecordingSettingRepository()
         val localModels = FakeLocalModelRepository()
         val viewModel = setupViewModel(settings = settings, localModels = localModels)
@@ -159,15 +158,30 @@ class SetupViewModelV2Test {
         viewModel.selectLocalModel("pending-model")
         viewModel.savePlatform()
 
-        assertTrue(settings.addedPlatforms.isEmpty())
-
-        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.READY)))
-        viewModel.savePlatform()
-
         val saved = settings.addedPlatforms.single()
         assertEquals("On-device", saved.name)
         assertEquals(ClientType.LITERT_LM, saved.compatibleType)
         assertEquals("pending-model", saved.model)
+        assertFalse(saved.enabled)
+        assertEquals(SaveStatus.Success, viewModel.saveStatus.value)
+        assertEquals(listOf("pending-model"), localModels.startDownloadCalls)
+        assertTrue(localModels.cancelDownloadCalls.isEmpty())
+    }
+
+    @Test
+    fun `savePlatform persists an enabled platform when the selected model is ready`() = runTest {
+        val settings = RecordingSettingRepository()
+        val localModels = FakeLocalModelRepository(listOf(wizardStoredModel("ready-model")))
+        val viewModel = setupViewModel(settings = settings, localModels = localModels)
+        viewModel.selectClientType(ClientType.LITERT_LM)
+        viewModel.updatePlatformName("On-device")
+        viewModel.selectLocalModel("ready-model")
+        viewModel.savePlatform()
+
+        val saved = settings.addedPlatforms.single()
+        assertEquals("ready-model", saved.model)
+        assertTrue(saved.enabled)
+        assertTrue(localModels.startDownloadCalls.isEmpty())
     }
 
     private fun statusOf(viewModel: SetupViewModelV2, catalogEntryId: String) = viewModel.catalogLocalModels.value

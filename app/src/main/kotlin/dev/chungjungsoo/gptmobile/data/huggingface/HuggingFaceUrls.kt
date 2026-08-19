@@ -13,4 +13,6 @@ object HuggingFaceUrls {
     fun modelId(downloadUrl: String): String? = modelPageUrl(downloadUrl)?.removePrefix(HOST_PREFIX)
 
     fun licensePageUrl(modelId: String): String = "$HOST_PREFIX$modelId"
+
+    const val ACCESS_TOKENS_URL = "${HOST_PREFIX}settings/tokens"
 }

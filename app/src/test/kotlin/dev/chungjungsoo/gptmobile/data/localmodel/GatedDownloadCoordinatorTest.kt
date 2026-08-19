@@ -63,13 +63,32 @@ class GatedDownloadCoordinatorTest {
     }
 
     @Test
-    fun `sign-in needed without oauth credentials surfaces a configuration error`() = runTest {
+    fun `sign-in needed without oauth credentials routes to token entry`() = runTest {
         val coordinator = coordinator(
             prober = RecordingProber(statusCode = 401),
             oauthConfigured = false
         )
 
-        assertEquals(GatedDownloadStep.OAuthNotConfigured, coordinator.resolve(gatedEntry()))
+        assertEquals(
+            GatedDownloadStep.OAuthNotConfigured(isSessionExpired = false),
+            coordinator.resolve(gatedEntry())
+        )
+    }
+
+    @Test
+    fun `session expired without oauth credentials routes to token entry`() = runTest {
+        val vault = MapSecretVault(mapOf(HuggingFaceTokenStore.SECRET_REF to "hf_expired".encodeToByteArray()))
+        val coordinator = coordinator(
+            tokenStore = HuggingFaceTokenStore(vault),
+            prober = RecordingProber(statusCode = 401),
+            oauthConfigured = false
+        )
+
+        assertEquals(
+            GatedDownloadStep.OAuthNotConfigured(isSessionExpired = true),
+            coordinator.resolve(gatedEntry())
+        )
+        assertNull(vault.values[HuggingFaceTokenStore.SECRET_REF])
     }
 
     @Test

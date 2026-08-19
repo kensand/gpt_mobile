@@ -11,7 +11,7 @@ sealed class GatedDownloadStep {
     data object Proceed : GatedDownloadStep()
     data class NeedsSignIn(val isSessionExpired: Boolean) : GatedDownloadStep()
     data class NeedsLicense(val modelPageUrl: String) : GatedDownloadStep()
-    data object OAuthNotConfigured : GatedDownloadStep()
+    data class OAuthNotConfigured(val isSessionExpired: Boolean = false) : GatedDownloadStep()
     data object Error : GatedDownloadStep()
 }
 
@@ -41,7 +41,7 @@ class GatedDownloadCoordinator(
                     tokenStore.clear()
                 }
                 if (!isOAuthConfigured()) {
-                    GatedDownloadStep.OAuthNotConfigured
+                    GatedDownloadStep.OAuthNotConfigured(isSessionExpired = decision.isSessionExpired)
                 } else {
                     GatedDownloadStep.NeedsSignIn(isSessionExpired = decision.isSessionExpired)
                 }
