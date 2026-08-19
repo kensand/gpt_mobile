@@ -517,7 +517,8 @@ class ChatRepositoryImplTest {
         agentToolResolver: AgentToolResolver = emptyToolResolver(),
         toolEventRecorder: ToolEventRecorder = ToolEventRecorder(proxy()),
         localRuntime: LocalRuntime = FakeLocalRuntime(),
-        localModelRepository: LocalModelRepository = FakeLocalModelRepository()
+        localModelRepository: LocalModelRepository = FakeLocalModelRepository(),
+        modelCatalogRepository: ModelCatalogRepository = FakeModelCatalogRepository()
     ): ChatRepositoryImpl = ChatRepositoryImpl(
         context = ContextWrapper(null),
         chatRoomDao = proxy(),
@@ -541,7 +542,8 @@ class ChatRepositoryImplTest {
         agentToolResolver = agentToolResolver,
         toolEventRecorder = toolEventRecorder,
         localRuntime = localRuntime,
-        localModelRepository = localModelRepository
+        localModelRepository = localModelRepository,
+        modelCatalogRepository = modelCatalogRepository
     )
 
     private fun emptyToolResolver(): AgentToolResolver {

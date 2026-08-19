@@ -29,9 +29,10 @@ class LiteRtLocalRuntime(
             val engineConfig = EngineConfig(
                 modelPath = spec.modelPath,
                 backend = backendFor(spec.accelerator),
-                visionBackend = null,
+                visionBackend = visionBackendFor(spec),
                 audioBackend = null,
-                maxNumTokens = spec.maxTokens
+                maxNumTokens = spec.maxTokens,
+                maxNumImages = if (spec.enableVision) MAX_IMAGES_PER_MESSAGE else null
             )
             val nextEngine = Engine(engineConfig)
             nextEngine.initialize()
@@ -46,10 +47,12 @@ class LiteRtLocalRuntime(
             conversation = currentEngine.createConversation(
                 ConversationConfig(
                     systemInstruction = config.systemPrompt?.takeIf { it.isNotBlank() }?.let { Contents.of(it) },
+                    // LiteRT-LM 0.11.0 Message.user/model(Contents) accept Content.ImageBytes,
+                    // so rebuilds re-seed prior image turns instead of dropping them to text-only.
                     initialMessages = config.initialMessages.map { message ->
                         when (message.role) {
-                            LocalHistoryRole.USER -> Message.user(message.text)
-                            LocalHistoryRole.MODEL -> Message.model(Contents.of(message.text))
+                            LocalHistoryRole.USER -> Message.user(contentsOf(message.text, message.images))
+                            LocalHistoryRole.MODEL -> Message.model(contentsOf(message.text, message.images))
                         }
                     },
                     samplerConfig = SamplerConfig(
@@ -62,7 +65,7 @@ class LiteRtLocalRuntime(
         }
     }
 
-    override fun sendMessage(text: String): Flow<LocalRuntimeEvent> = callbackFlow {
+    override fun sendMessage(text: String, images: List<ByteArray>): Flow<LocalRuntimeEvent> = callbackFlow {
         val activeConversation = conversation
         if (activeConversation == null) {
             trySend(LocalRuntimeEvent.Error("LiteRT-LM conversation is not ready"))
@@ -71,7 +74,7 @@ class LiteRtLocalRuntime(
         }
 
         activeConversation.sendMessageAsync(
-            Contents.of(text),
+            contentsOf(text, images),
             object : MessageCallback {
                 override fun onMessage(message: Message) {
                     message.channels[THOUGHT_CHANNEL]?.takeIf { it.isNotEmpty() }?.let { thought ->
@@ -137,6 +140,24 @@ class LiteRtLocalRuntime(
         else -> Backend.CPU()
     }
 
+    private fun visionBackendFor(spec: LocalEngineSpec): Backend? {
+        if (!spec.enableVision) return null
+        return when (LocalAccelerators.normalize(spec.accelerator)) {
+            LocalAccelerators.CPU -> Backend.CPU()
+            else -> Backend.GPU()
+        }
+    }
+
+    private fun contentsOf(text: String, images: List<ByteArray>): Contents {
+        if (images.isEmpty()) return Contents.of(text)
+        return Contents.of(
+            buildList {
+                images.forEach { image -> add(Content.ImageBytes(image)) }
+                if (text.isNotBlank()) add(Content.Text(text))
+            }
+        )
+    }
+
     private fun Message.visibleText(): String {
         val fromContents = contents.contents
             .filterIsInstance<Content.Text>()
@@ -146,5 +167,6 @@ class LiteRtLocalRuntime(
 
     private companion object {
         const val THOUGHT_CHANNEL = "thought"
+        const val MAX_IMAGES_PER_MESSAGE = 10
     }
 }

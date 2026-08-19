@@ -89,4 +89,21 @@ class ConversationFingerprintTest {
         assertFalse(incomingHistoryExtendsConsumed(consumed = consumed, incomingPrior = extended))
         assertFalse(incomingHistoryExtendsConsumed(consumed = consumed, incomingPrior = diverged))
     }
+
+    @Test
+    fun `fingerprint includes image identity`() {
+        val withImage = conversationFingerprint(
+            listOf(LocalHistoryMessage(LocalHistoryRole.USER, "hello", imageIds = listOf("/tmp/photo.png|image/png|12")))
+        )
+        val withoutImage = conversationFingerprint(
+            listOf(LocalHistoryMessage(LocalHistoryRole.USER, "hello"))
+        )
+        val otherImage = conversationFingerprint(
+            listOf(LocalHistoryMessage(LocalHistoryRole.USER, "hello", imageIds = listOf("/tmp/other.png|image/png|12")))
+        )
+
+        assertFalse(withImage == withoutImage)
+        assertFalse(withImage == otherImage)
+        assertFalse(withImage.isPrefixOf(withoutImage))
+    }
 }

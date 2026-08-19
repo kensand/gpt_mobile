@@ -11,6 +11,7 @@ class FakeLocalRuntime : LocalRuntime {
     val loadEngineCalls = mutableListOf<LocalEngineSpec>()
     val createConversationCalls = mutableListOf<LocalConversationConfig>()
     val sendMessageCalls = mutableListOf<String>()
+    val sendMessageImages = mutableListOf<List<ByteArray>>()
     var cancelActiveCalls = 0
     var closeConversationCalls = 0
     var unloadEngineCalls = 0
@@ -32,8 +33,9 @@ class FakeLocalRuntime : LocalRuntime {
         conversationOpen = true
     }
 
-    override fun sendMessage(text: String): Flow<LocalRuntimeEvent> = flow {
+    override fun sendMessage(text: String, images: List<ByteArray>): Flow<LocalRuntimeEvent> = flow {
         sendMessageCalls += text
+        sendMessageImages += images
         if (emitDelayMillis > 0L) {
             delay(emitDelayMillis)
         }

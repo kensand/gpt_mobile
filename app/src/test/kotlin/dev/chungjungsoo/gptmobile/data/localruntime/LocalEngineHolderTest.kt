@@ -56,4 +56,31 @@ class LocalEngineHolderTest {
         assertEquals("two", (secondEvents.first() as LocalRuntimeEvent.TextDelta).text)
         assertEquals(listOf("a", "b"), fake.sendMessageCalls)
     }
+
+    @Test
+    fun `reloads engine when vision flag changes`() = runTest {
+        val fake = FakeLocalRuntime()
+        val holder = LocalEngineHolder(fake)
+        val textOnly = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024, enableVision = false)
+        val vision = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024, enableVision = true)
+
+        holder.loadEngine(textOnly)
+        holder.loadEngine(vision)
+
+        assertEquals(listOf(textOnly, vision), fake.loadEngineCalls)
+        assertEquals(1, fake.unloadEngineCalls)
+    }
+
+    @Test
+    fun `forwards image payloads to the delegate`() = runTest {
+        val fake = FakeLocalRuntime()
+        val holder = LocalEngineHolder(fake)
+        val image = byteArrayOf(1, 2, 3)
+
+        holder.sendMessage("look", listOf(image)).toList()
+
+        assertEquals(listOf("look"), fake.sendMessageCalls)
+        assertEquals(1, fake.sendMessageImages.single().size)
+        assertTrue(fake.sendMessageImages.single().single().contentEquals(image))
+    }
 }

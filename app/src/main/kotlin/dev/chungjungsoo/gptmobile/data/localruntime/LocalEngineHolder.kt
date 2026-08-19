@@ -29,9 +29,9 @@ class LocalEngineHolder(
         delegate.createConversation(config)
     }
 
-    override fun sendMessage(text: String): Flow<LocalRuntimeEvent> = channelFlow {
+    override fun sendMessage(text: String, images: List<ByteArray>): Flow<LocalRuntimeEvent> = channelFlow {
         withGenerationLock {
-            delegate.sendMessage(text).collect { send(it) }
+            delegate.sendMessage(text, images).collect { send(it) }
         }
     }
 

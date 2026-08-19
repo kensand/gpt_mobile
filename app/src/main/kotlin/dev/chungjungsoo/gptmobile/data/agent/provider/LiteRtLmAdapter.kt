@@ -18,7 +18,9 @@ import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntimeEvent
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalSamplerConfig
 import dev.chungjungsoo.gptmobile.data.localruntime.conversationFingerprint
 import dev.chungjungsoo.gptmobile.data.localruntime.incomingHistoryExtendsConsumed
+import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -28,7 +30,10 @@ class LiteRtLmAdapter(
     private val localModelRepository: LocalModelRepository,
     private val ignoredAttachmentsNotice: String,
     private val modelNotDownloadedError: String,
-    private val waitingForEngineNotice: String = DEFAULT_WAITING_FOR_ENGINE
+    private val waitingForEngineNotice: String = DEFAULT_WAITING_FOR_ENGINE,
+    private val tooManyImagesNotice: String = DEFAULT_TOO_MANY_IMAGES,
+    private val modelCatalogRepository: ModelCatalogRepository? = null,
+    private val loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { null }
 ) {
     private data class OpenConversation(
         val profileUid: String,
@@ -47,12 +52,14 @@ class LiteRtLmAdapter(
                 tools: List<AgentToolDefinition>,
                 exchanges: List<AgentToolExchange>
             ): Flow<ProviderEvent> = channelFlow {
-                val hasAttachments = turns.any { turn ->
-                    turn.userMessage.attachments.isNotEmpty() ||
-                        turn.assistantMessage?.attachments?.isNotEmpty() == true
-                }
-                if (hasAttachments) {
-                    send(ProviderEvent.Notice(ignoredAttachmentsNotice))
+                val visionCapable = modelCatalogRepository
+                    ?.getVisibleEntries()
+                    ?.firstOrNull { entry -> entry.id == platform.model }
+                    ?.capabilities
+                    ?.vision == true
+                val latestAttachments = turns.lastOrNull()?.userMessage?.attachments.orEmpty()
+                attachmentNotices(visionCapable, turns, latestAttachments).forEach { notice ->
+                    send(notice)
                 }
 
                 val modelPath = localModelRepository.resolveDownloadedPath(platform.model)
@@ -62,18 +69,25 @@ class LiteRtLmAdapter(
                 }
 
                 val latestUserText = turns.lastOrNull()?.userMessage?.effectiveContent().orEmpty()
-                val history = turns.dropLast(1).flatMap { turn ->
-                    buildList {
-                        add(LocalHistoryMessage(LocalHistoryRole.USER, turn.userMessage.effectiveContent()))
-                        turn.assistantMessage?.effectiveContent()?.takeIf { it.isNotBlank() }?.let { content ->
-                            add(LocalHistoryMessage(LocalHistoryRole.MODEL, content))
-                        }
-                    }
+                val latestImageIds = visionImageIds(latestAttachments, visionCapable)
+                val latestImages = if (visionCapable) {
+                    latestAttachments
+                        .filter { attachment -> attachment.isImageAttachment() }
+                        .take(MAX_IMAGES_PER_MESSAGE)
+                        .mapNotNull { attachment -> loadImageBytes(attachment) }
+                } else {
+                    emptyList()
                 }
+                val history = historyMessages(
+                    priorTurns = turns.dropLast(1),
+                    visionCapable = visionCapable,
+                    includeImageBytes = false
+                )
                 val spec = LocalEngineSpec(
                     modelPath = modelPath,
                     accelerator = LocalAccelerators.normalize(platform.accelerator),
-                    maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS
+                    maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
+                    enableVision = visionCapable
                 )
                 val sampler = LocalSamplerConfig(
                     topK = platform.topK ?: DEFAULT_TOP_K,
@@ -102,11 +116,20 @@ class LiteRtLmAdapter(
                             if (hasOpenConversation()) {
                                 closeConversation()
                             }
+                            val seedHistory = if (visionCapable) {
+                                historyMessages(
+                                    priorTurns = turns.dropLast(1),
+                                    visionCapable = true,
+                                    includeImageBytes = true
+                                )
+                            } else {
+                                history
+                            }
                             createConversation(
                                 LocalConversationConfig(
                                     sampler = sampler,
                                     systemPrompt = platform.systemPrompt,
-                                    initialMessages = history
+                                    initialMessages = seedHistory
                                 )
                             )
                             openConversation = OpenConversation(
@@ -118,7 +141,7 @@ class LiteRtLmAdapter(
                             )
                         }
                         conversationDirty = true
-                        sendMessage(latestUserText)
+                        sendMessage(latestUserText, latestImages)
                     }.collect { event ->
                         when (event) {
                             is LocalRuntimeEvent.TextDelta -> {
@@ -144,7 +167,11 @@ class LiteRtLmAdapter(
                             openConversation = snapshot.copy(
                                 consumed = snapshot.consumed.extend(
                                     listOfNotNull(
-                                        LocalHistoryMessage(LocalHistoryRole.USER, latestUserText),
+                                        LocalHistoryMessage(
+                                            role = LocalHistoryRole.USER,
+                                            text = latestUserText,
+                                            imageIds = latestImageIds
+                                        ),
                                         assistantReply.toString().takeIf { it.isNotBlank() }?.let { content ->
                                             LocalHistoryMessage(LocalHistoryRole.MODEL, content)
                                         }
@@ -166,11 +193,83 @@ class LiteRtLmAdapter(
         }
     }
 
+    private fun attachmentNotices(
+        visionCapable: Boolean,
+        turns: List<ConversationTurn>,
+        latestAttachments: List<ChatAttachment>
+    ): List<ProviderEvent> = buildList {
+        if (visionCapable) {
+            val images = latestAttachments.filter { attachment -> attachment.isImageAttachment() }
+            val nonImages = latestAttachments.filter { attachment -> !attachment.isImageAttachment() }
+            if (images.size > MAX_IMAGES_PER_MESSAGE) {
+                add(ProviderEvent.Notice(tooManyImagesNotice))
+            }
+            if (nonImages.isNotEmpty()) {
+                add(ProviderEvent.Notice(ignoredAttachmentsNotice))
+            }
+            return@buildList
+        }
+        val hasAttachments = turns.any { turn ->
+            turn.userMessage.attachments.isNotEmpty() ||
+                turn.assistantMessage?.attachments?.isNotEmpty() == true
+        }
+        if (hasAttachments) {
+            add(ProviderEvent.Notice(ignoredAttachmentsNotice))
+        }
+    }
+
+    private suspend fun historyMessages(
+        priorTurns: List<ConversationTurn>,
+        visionCapable: Boolean,
+        includeImageBytes: Boolean
+    ): List<LocalHistoryMessage> = priorTurns.flatMap { turn ->
+        val attachments = turn.userMessage.attachments
+        val imageIds = visionImageIds(attachments, visionCapable)
+        val images = if (includeImageBytes && visionCapable) {
+            attachments
+                .filter { attachment -> attachment.isImageAttachment() }
+                .take(MAX_IMAGES_PER_MESSAGE)
+                .mapNotNull { attachment -> loadImageBytes(attachment) }
+        } else {
+            emptyList()
+        }
+        buildList {
+            add(
+                LocalHistoryMessage(
+                    role = LocalHistoryRole.USER,
+                    text = turn.userMessage.effectiveContent(),
+                    imageIds = imageIds,
+                    images = images
+                )
+            )
+            turn.assistantMessage?.effectiveContent()?.takeIf { it.isNotBlank() }?.let { content ->
+                add(LocalHistoryMessage(LocalHistoryRole.MODEL, content))
+            }
+        }
+    }
+
+    private fun visionImageIds(
+        attachments: List<ChatAttachment>,
+        visionCapable: Boolean
+    ): List<String> {
+        if (!visionCapable) return emptyList()
+        return attachments
+            .filter { attachment -> attachment.isImageAttachment() }
+            .take(MAX_IMAGES_PER_MESSAGE)
+            .map { attachment -> attachment.identity() }
+    }
+
+    private fun ChatAttachment.isImageAttachment(): Boolean = mimeType.startsWith("image/")
+
+    private fun ChatAttachment.identity(): String = "${preparedFilePath.ifBlank { localFilePath }}|$mimeType|$sizeBytes"
+
     companion object {
         const val DEFAULT_IGNORED_ATTACHMENTS = "The local platform ignored attachments"
         const val DEFAULT_MODEL_NOT_DOWNLOADED =
             "This Local Model is not downloaded. Download it from Settings → Local Models."
         const val DEFAULT_WAITING_FOR_ENGINE = "Waiting for the local engine"
+        const val DEFAULT_TOO_MANY_IMAGES = "The local platform accepted only the first 10 images"
+        const val MAX_IMAGES_PER_MESSAGE = 10
         const val DEFAULT_TOP_K = 40
         const val DEFAULT_TOP_P = 0.95f
         const val DEFAULT_TEMPERATURE = 1.0f

@@ -1,6 +1,8 @@
 package dev.chungjungsoo.gptmobile.data.agent.provider
 
 import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogCapabilities
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
@@ -13,6 +15,8 @@ import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntimeEvent
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.repository.FakeLocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.FakeModelCatalogRepository
+import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.toList
@@ -328,6 +332,234 @@ class LiteRtLmAdapterTest {
             events
         )
         assertEquals(listOf("describe this"), runtime.sendMessageCalls)
+        assertTrue(runtime.sendMessageImages.single().isEmpty())
+        assertEquals(false, runtime.loadEngineCalls.single().enableVision)
+    }
+
+    @Test
+    fun `vision model forwards image bytes without a notice`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("a cat"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(runtime, catalog = visionCatalog())
+        val attachment = imageAttachment()
+
+        val events = adapter.openSession(
+            listOf(pendingTurn("describe this", listOf(attachment))),
+            visionPlatform()
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(
+            listOf(ProviderEvent.TextDelta("a cat"), ProviderEvent.Completed),
+            events
+        )
+        assertEquals(listOf("describe this"), runtime.sendMessageCalls)
+        assertImageBytes(listOf("/tmp/photo.png".toByteArray()), runtime.sendMessageImages.single())
+        assertEquals(true, runtime.loadEngineCalls.single().enableVision)
+    }
+
+    @Test
+    fun `vision model declines a pdf with the notice and still sends text`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(runtime, catalog = visionCatalog())
+
+        val events = adapter.openSession(
+            listOf(pendingTurn("summarize", listOf(pdfAttachment()))),
+            visionPlatform()
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(
+            listOf(
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS),
+                ProviderEvent.TextDelta("ok"),
+                ProviderEvent.Completed
+            ),
+            events
+        )
+        assertEquals(listOf("summarize"), runtime.sendMessageCalls)
+        assertTrue(runtime.sendMessageImages.single().isEmpty())
+    }
+
+    @Test
+    fun `vision model forwards an image and declines a pdf in the same turn`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(runtime, catalog = visionCatalog())
+
+        val events = adapter.openSession(
+            listOf(pendingTurn("look", listOf(imageAttachment(), pdfAttachment()))),
+            visionPlatform()
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(
+            listOf(
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS),
+                ProviderEvent.TextDelta("ok"),
+                ProviderEvent.Completed
+            ),
+            events
+        )
+        assertImageBytes(listOf("/tmp/photo.png".toByteArray()), runtime.sendMessageImages.single())
+    }
+
+    @Test
+    fun `non vision model declines an image with the notice`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(
+            runtime,
+            catalog = FakeModelCatalogRepository(
+                listOf(CatalogEntry(id = "gemma3-1b-it", capabilities = CatalogCapabilities(vision = false)))
+            )
+        )
+
+        val events = adapter.openSession(
+            listOf(pendingTurn("describe this", listOf(imageAttachment()))),
+            localPlatform()
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(
+            listOf(
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS),
+                ProviderEvent.TextDelta("ok"),
+                ProviderEvent.Completed
+            ),
+            events
+        )
+        assertTrue(runtime.sendMessageImages.single().isEmpty())
+        assertEquals(false, runtime.loadEngineCalls.single().enableVision)
+    }
+
+    @Test
+    fun `vision model forwards ten images and notices the rest`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(runtime, catalog = visionCatalog())
+        val attachments = (1..11).map { index ->
+            imageAttachment(path = "/tmp/photo-$index.png", name = "photo-$index.png")
+        }
+
+        val events = adapter.openSession(
+            listOf(pendingTurn("what are these", attachments)),
+            visionPlatform()
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(
+            listOf(
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES),
+                ProviderEvent.TextDelta("ok"),
+                ProviderEvent.Completed
+            ),
+            events
+        )
+        assertImageBytes(
+            (1..10).map { index -> "/tmp/photo-$index.png".toByteArray() },
+            runtime.sendMessageImages.single()
+        )
+    }
+
+    @Test
+    fun `follow-up after an image turn reuses the warm conversation`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("a cat"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("next"), LocalRuntimeEvent.Done)
+            )
+        }
+        val adapter = adapter(runtime, catalog = visionCatalog())
+        val platform = visionPlatform()
+        val photo = imageAttachment()
+
+        adapter.openSession(
+            listOf(pendingTurn("describe this", listOf(photo))),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+        adapter.openSession(
+            listOf(
+                completedTurn("describe this", "a cat", listOf(photo)),
+                pendingTurn("follow up")
+            ),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(1, runtime.createConversationCalls.size)
+        assertEquals(0, runtime.closeConversationCalls)
+        assertEquals(listOf("describe this", "follow up"), runtime.sendMessageCalls)
+        assertTrue(runtime.sendMessageImages[1].isEmpty())
+    }
+
+    @Test
+    fun `removing a prior image turn rebuilds the warm conversation`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("a cat"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("rebuilt"), LocalRuntimeEvent.Done)
+            )
+        }
+        val adapter = adapter(runtime, catalog = visionCatalog())
+        val platform = visionPlatform()
+        val photo = imageAttachment()
+
+        adapter.openSession(
+            listOf(pendingTurn("describe this", listOf(photo))),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+        adapter.openSession(
+            listOf(
+                completedTurn("describe this", "a cat"),
+                pendingTurn("follow up")
+            ),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(2, runtime.createConversationCalls.size)
+        assertEquals(1, runtime.closeConversationCalls)
+        assertEquals(listOf("describe this", "follow up"), runtime.sendMessageCalls)
+        assertTrue(runtime.createConversationCalls[1].initialMessages[0].imageIds.isEmpty())
+    }
+
+    @Test
+    fun `rebuild of a prior image turn seeds conversation with image bytes`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("a cat"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("next"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("retry"), LocalRuntimeEvent.Done)
+            )
+        }
+        val adapter = adapter(runtime, catalog = visionCatalog())
+        val platform = visionPlatform()
+        val photo = imageAttachment()
+
+        adapter.openSession(
+            listOf(pendingTurn("describe this", listOf(photo))),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+        adapter.openSession(
+            listOf(
+                completedTurn("describe this", "a cat", listOf(photo)),
+                pendingTurn("follow up")
+            ),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+        adapter.openSession(
+            listOf(
+                completedTurn("describe this", "a cat", listOf(photo)),
+                pendingTurn("follow up")
+            ),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(2, runtime.createConversationCalls.size)
+        val rebuiltUser = runtime.createConversationCalls[1].initialMessages[0]
+        assertEquals("describe this", rebuiltUser.text)
+        assertEquals(listOf("/tmp/photo.png|image/png|12"), rebuiltUser.imageIds)
+        assertImageBytes(listOf("/tmp/photo.png".toByteArray()), rebuiltUser.images)
     }
 
     @Test
@@ -437,28 +669,74 @@ class LiteRtLmAdapterTest {
     private fun adapter(
         runtime: LocalRuntime,
         models: FakeLocalModelRepository = FakeLocalModelRepository(
-            downloadedPaths = mapOf("gemma3-1b-it" to "/models/gemma.litertlm")
-        )
+            downloadedPaths = mapOf(
+                "gemma3-1b-it" to "/models/gemma.litertlm",
+                "gemma-3n-e2b-it" to "/models/gemma3n.litertlm"
+            )
+        ),
+        catalog: ModelCatalogRepository = FakeModelCatalogRepository(),
+        loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { attachment ->
+            attachment.preparedFilePath.ifBlank { attachment.localFilePath }.toByteArray()
+        }
     ) = LiteRtLmAdapter(
         localRuntime = runtime,
         localModelRepository = models,
         ignoredAttachmentsNotice = LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS,
-        modelNotDownloadedError = LiteRtLmAdapter.DEFAULT_MODEL_NOT_DOWNLOADED
+        modelNotDownloadedError = LiteRtLmAdapter.DEFAULT_MODEL_NOT_DOWNLOADED,
+        tooManyImagesNotice = LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES,
+        modelCatalogRepository = catalog,
+        loadImageBytes = loadImageBytes
     )
 
     private fun turns(text: String) = listOf(pendingTurn(text))
 
-    private fun pendingTurn(text: String) = ConversationTurn(
-        userMessage = MessageV2(content = text, platformType = null),
+    private fun pendingTurn(text: String, attachments: List<ChatAttachment> = emptyList()) = ConversationTurn(
+        userMessage = MessageV2(content = text, platformType = null, attachments = attachments),
         assistantMessage = null,
         isCurrentTurn = true
     )
 
-    private fun completedTurn(user: String, assistant: String) = ConversationTurn(
-        userMessage = MessageV2(content = user, platformType = null),
+    private fun completedTurn(
+        user: String,
+        assistant: String,
+        attachments: List<ChatAttachment> = emptyList()
+    ) = ConversationTurn(
+        userMessage = MessageV2(content = user, platformType = null, attachments = attachments),
         assistantMessage = MessageV2(content = assistant, platformType = "local"),
         isCurrentTurn = false
     )
+
+    private fun imageAttachment(
+        path: String = "/tmp/photo.png",
+        name: String = "photo.png"
+    ) = ChatAttachment(
+        localFilePath = path,
+        preparedFilePath = path,
+        displayName = name,
+        mimeType = "image/png",
+        sizeBytes = 12
+    )
+
+    private fun pdfAttachment() = ChatAttachment(
+        localFilePath = "/tmp/doc.pdf",
+        preparedFilePath = "/tmp/doc.pdf",
+        displayName = "doc.pdf",
+        mimeType = "application/pdf",
+        sizeBytes = 100
+    )
+
+    private fun visionCatalog() = FakeModelCatalogRepository(
+        listOf(CatalogEntry(id = "gemma-3n-e2b-it", capabilities = CatalogCapabilities(vision = true)))
+    )
+
+    private fun visionPlatform() = localPlatform(model = "gemma-3n-e2b-it")
+
+    private fun assertImageBytes(expected: List<ByteArray>, actual: List<ByteArray>) {
+        assertEquals(expected.size, actual.size)
+        expected.zip(actual).forEach { (expectedBytes, actualBytes) ->
+            assertTrue(expectedBytes.contentEquals(actualBytes))
+        }
+    }
 
     private fun localPlatform(
         uid: String = "local",

@@ -46,6 +46,7 @@ import dev.chungjungsoo.gptmobile.data.network.AnthropicAPI
 import dev.chungjungsoo.gptmobile.data.network.GoogleAPI
 import dev.chungjungsoo.gptmobile.data.network.GroqAPI
 import dev.chungjungsoo.gptmobile.data.network.OpenAIAPI
+import dev.chungjungsoo.gptmobile.util.FileUtils
 import dev.chungjungsoo.gptmobile.util.stripAssistantErrorNote
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -75,7 +76,8 @@ class ChatRepositoryImpl @Inject constructor(
     private val agentToolResolver: AgentToolResolver,
     private val toolEventRecorder: ToolEventRecorder,
     private val localRuntime: LocalRuntime,
-    private val localModelRepository: LocalModelRepository
+    private val localModelRepository: LocalModelRepository,
+    private val modelCatalogRepository: ModelCatalogRepository
 ) : ChatRepository {
     private val providerAttachmentEncoder = ProviderAttachmentEncoder(context)
     private val openAIResponsesAdapter = OpenAIResponsesAdapter(openAIAPI, providerAttachmentEncoder)
@@ -96,7 +98,16 @@ class ChatRepositoryImpl @Inject constructor(
         waitingForEngineNotice = contextString(
             R.string.local_platform_waiting_for_engine,
             LiteRtLmAdapter.DEFAULT_WAITING_FOR_ENGINE
-        )
+        ),
+        tooManyImagesNotice = contextString(
+            R.string.local_platform_too_many_images,
+            LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES
+        ),
+        modelCatalogRepository = modelCatalogRepository,
+        loadImageBytes = { attachment ->
+            val filePath = attachment.preparedFilePath.ifBlank { attachment.localFilePath }
+            FileUtils.readImageBytesForLocalInference(context, filePath)
+        }
     )
     private val agentRunner = AgentRunner()
 

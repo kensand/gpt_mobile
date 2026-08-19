@@ -23,8 +23,23 @@ enum class LocalHistoryRole {
 
 data class LocalHistoryMessage(
     val role: LocalHistoryRole,
-    val text: String
-)
+    val text: String,
+    val imageIds: List<String> = emptyList(),
+    val images: List<ByteArray> = emptyList()
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is LocalHistoryMessage) return false
+        return role == other.role && text == other.text && imageIds == other.imageIds
+    }
+
+    override fun hashCode(): Int {
+        var result = role.hashCode()
+        result = 31 * result + text.hashCode()
+        result = 31 * result + imageIds.hashCode()
+        return result
+    }
+}
 
 data class LocalConversationConfig(
     val sampler: LocalSamplerConfig,
@@ -42,7 +57,7 @@ sealed interface LocalRuntimeEvent {
 interface LocalRuntime {
     suspend fun loadEngine(spec: LocalEngineSpec)
     suspend fun createConversation(config: LocalConversationConfig)
-    fun sendMessage(text: String): Flow<LocalRuntimeEvent>
+    fun sendMessage(text: String, images: List<ByteArray> = emptyList()): Flow<LocalRuntimeEvent>
     fun cancelActive()
     suspend fun closeConversation()
     suspend fun unloadEngine()

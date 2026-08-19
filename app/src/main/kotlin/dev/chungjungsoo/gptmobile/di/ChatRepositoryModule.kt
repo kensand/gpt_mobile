@@ -23,6 +23,7 @@ import dev.chungjungsoo.gptmobile.data.network.OpenAIAPI
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepositoryImpl
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import dev.chungjungsoo.gptmobile.data.repository.ToolEventRecorder
 import javax.inject.Singleton
@@ -52,7 +53,8 @@ object ChatRepositoryModule {
         agentToolResolver: AgentToolResolver,
         toolEventRecorder: ToolEventRecorder,
         localRuntime: LocalRuntime,
-        localModelRepository: LocalModelRepository
+        localModelRepository: LocalModelRepository,
+        modelCatalogRepository: ModelCatalogRepository
     ): ChatRepository = ChatRepositoryImpl(
         context,
         chatRoomDao,
@@ -72,6 +74,7 @@ object ChatRepositoryModule {
         agentToolResolver,
         toolEventRecorder,
         localRuntime,
-        localModelRepository
+        localModelRepository,
+        modelCatalogRepository
     )
 }
