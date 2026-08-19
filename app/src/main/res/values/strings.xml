@@ -276,8 +276,10 @@
     <string name="client_type_litert_lm_desc">Run a downloaded Local Model on this device</string>
     <string name="litert_lm">Local</string>
     <string name="litert_lm_description">Chat with a Local Model on-device. No API key or network required.</string>
-    <string name="local_platform_select_model">Choose a downloaded Local Model</string>
+    <string name="local_platform_select_model">Choose a Local Model</string>
     <string name="local_platform_select_model_description">This Local Platform uses a Local Model already on the device. Download more from Settings → Local Models.</string>
+    <string name="local_platform_catalog_select_description">Pick a Local Model for this Local Platform. Downloaded models are ready to use. Others can be downloaded here.</string>
+    <string name="local_platform_waiting_for_download">Waiting for model download</string>
     <string name="local_platform_no_downloaded_models">No Local Models are downloaded yet.</string>
     <string name="local_platform_go_to_local_models">Go to Settings → Local Models</string>
     <string name="local_platform_ignored_attachments">The local platform ignored attachments</string>

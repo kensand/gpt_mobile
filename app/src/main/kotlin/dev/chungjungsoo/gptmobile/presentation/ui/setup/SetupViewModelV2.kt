@@ -1,5 +1,6 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setup
 
+import android.content.Intent
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -7,13 +8,21 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.chungjungsoo.gptmobile.data.ModelConstants
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
-import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
+import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
+import dev.chungjungsoo.gptmobile.data.localmodel.GatedDownloadCoordinator
 import dev.chungjungsoo.gptmobile.data.localruntime.localSamplingDefaults
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import dev.chungjungsoo.gptmobile.di.DeviceSocModel
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClient
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuards
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadActions
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelDownloadUiState
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelItemStatus
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelListItem
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.catalogLocalModelItems
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,8 +50,21 @@ class SetupViewModelV2 @Inject constructor(
     private val settingRepository: SettingRepository,
     private val localModelRepository: LocalModelRepository,
     private val modelCatalogRepository: ModelCatalogRepository,
+    gatedDownloadCoordinator: GatedDownloadCoordinator,
+    huggingFaceTokenStore: HuggingFaceTokenStore,
+    downloadGuards: LocalDownloadGuards,
+    huggingFaceAuthClient: HuggingFaceAuthClient,
     @param:DeviceSocModel private val deviceSocModel: String
 ) : ViewModel() {
+
+    private val downloadActions = LocalModelDownloadActions(
+        localModelRepository = localModelRepository,
+        gatedDownloadCoordinator = gatedDownloadCoordinator,
+        huggingFaceTokenStore = huggingFaceTokenStore,
+        downloadGuards = downloadGuards,
+        huggingFaceAuthClient = huggingFaceAuthClient,
+        scope = viewModelScope
+    )
 
     private val _platforms = MutableStateFlow<List<PlatformV2>>(emptyList())
     val platforms: StateFlow<List<PlatformV2>> = _platforms.asStateFlow()
@@ -71,18 +93,15 @@ class SetupViewModelV2 @Inject constructor(
 
     private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
 
-    val downloadedLocalModels: StateFlow<List<DownloadedLocalModelOption>> = combine(
+    val catalogLocalModels: StateFlow<List<LocalModelListItem>> = combine(
+        catalogEntries,
         localModelRepository.observeAll(),
-        catalogEntries
-    ) { models, catalog ->
-        val names = catalog.associate { it.id to it.displayName }
-        models.filter { it.status == LocalModelStatus.DOWNLOADED }.map { model ->
-            DownloadedLocalModelOption(
-                catalogEntryId = model.catalogEntryId,
-                displayName = names[model.catalogEntryId]?.takeIf { it.isNotBlank() } ?: model.catalogEntryId
-            )
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        localModelRepository.observeWorkInfos()
+    ) { catalog, models, workInfos ->
+        catalogLocalModelItems(catalog, models, workInfos)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val localModelDownloadState: StateFlow<LocalModelDownloadUiState> = downloadActions.uiState
 
     init {
         loadPlatforms()
@@ -123,6 +142,43 @@ class SetupViewModelV2 @Inject constructor(
         _model.value = modelName
     }
 
+    fun selectLocalModel(catalogEntryId: String) {
+        _model.value = catalogEntryId
+        val item = catalogLocalModels.value.firstOrNull { it.entry.id == catalogEntryId } ?: return
+        downloadActions.requestDownload(item.entry, item.status)
+    }
+
+    fun confirmRamWarning() {
+        downloadActions.confirmRamWarning()
+    }
+
+    fun confirmMeteredDownload() {
+        downloadActions.confirmMeteredDownload()
+    }
+
+    fun dismissDownloadDialog() {
+        downloadActions.dismissDialog()
+    }
+
+    fun startHuggingFaceSignIn(): Intent? = downloadActions.startHuggingFaceSignIn()
+
+    fun onAuthActivityResult(data: Intent?) {
+        downloadActions.onAuthActivityResult(data)
+    }
+
+    fun onLicenseTabClosed() {
+        downloadActions.onLicenseTabClosed()
+    }
+
+    fun retryAfterLicense() {
+        downloadActions.retryAfterLicense()
+    }
+
+    fun isWaitingForModelDownload(): Boolean {
+        if (!isLiteRtLm()) return false
+        return selectedLocalModelStatus()?.let { it != LocalModelItemStatus.DOWNLOADED } == true
+    }
+
     fun nextWizardStep() {
         if (isLiteRtLm() && _wizardStep.value == WIZARD_STEP_BASICS) {
             _wizardStep.value = WIZARD_STEP_MODEL
@@ -150,6 +206,7 @@ class SetupViewModelV2 @Inject constructor(
 
     fun savePlatform() {
         val clientType = _selectedClientType.value ?: return
+        if (clientType == ClientType.LITERT_LM && !selectedLocalModelIsDownloaded()) return
 
         viewModelScope.launch {
             _saveStatus.value = SaveStatus.Saving
@@ -211,7 +268,7 @@ class SetupViewModelV2 @Inject constructor(
 
         WIZARD_STEP_API_KEY -> true
 
-        WIZARD_STEP_MODEL -> _model.value.isNotBlank()
+        WIZARD_STEP_MODEL -> if (isLiteRtLm()) selectedLocalModelIsDownloaded() else _model.value.isNotBlank()
 
         else -> false
     }
@@ -226,6 +283,19 @@ class SetupViewModelV2 @Inject constructor(
         1
     } else {
         _wizardStep.value
+    }
+
+    override fun onCleared() {
+        downloadActions.release()
+        super.onCleared()
+    }
+
+    private fun selectedLocalModelIsDownloaded(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.DOWNLOADED
+
+    private fun selectedLocalModelStatus(): LocalModelItemStatus? {
+        val catalogEntryId = _model.value
+        if (catalogEntryId.isBlank()) return null
+        return catalogLocalModels.value.firstOrNull { it.entry.id == catalogEntryId }?.status
     }
 
     private fun catalogDefaultsFor(modelId: String) = catalogEntries.value

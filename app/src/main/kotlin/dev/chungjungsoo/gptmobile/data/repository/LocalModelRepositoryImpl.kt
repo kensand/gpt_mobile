@@ -48,10 +48,13 @@ class LocalModelRepositoryImpl(
 
     override suspend fun startDownload(entry: CatalogEntry) {
         withContext(Dispatchers.IO) {
+            val existing = localModelDao.getById(entry.id)
+            if (existing?.status == LocalModelStatus.DOWNLOADING && entry.id in activeDownloadIds()) {
+                return@withContext
+            }
             val resolved = SocModelFileResolver.resolve(entry, deviceSocModel)
             val relativeDirectory = LocalModelDownloadPaths.relativeDirectory(entry.id, resolved.commitHash)
             val now = System.currentTimeMillis() / 1000
-            val existing = localModelDao.getById(entry.id)
             localModelDao.upsert(
                 LocalModel(
                     catalogEntryId = entry.id,

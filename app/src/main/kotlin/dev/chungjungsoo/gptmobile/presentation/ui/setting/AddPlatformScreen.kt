@@ -45,7 +45,9 @@ import dev.chungjungsoo.gptmobile.data.ModelConstants
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.presentation.common.DestinationCard
-import dev.chungjungsoo.gptmobile.presentation.ui.setup.LocalModelPicker
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadDialogHost
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.rememberLocalModelDownloader
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.LocalModelCatalogPicker
 import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
 
 private enum class AddPlatformStep { API_TYPE, DETAILS }
@@ -70,12 +72,21 @@ fun AddPlatformScreen(
     val scrollBehavior = pinnedExitUntilCollapsedScrollBehavior(
         canScroll = { scrollState.canScrollForward || scrollState.canScrollBackward }
     )
-    val downloadedLocalModels by viewModel.downloadedLocalModels.collectAsStateWithLifecycle()
+    val catalogModels by viewModel.catalogLocalModels.collectAsStateWithLifecycle()
+    val downloadState by viewModel.localModelDownloadState.collectAsStateWithLifecycle()
+    val selectedLocalModelId by viewModel.selectedCatalogEntryId.collectAsStateWithLifecycle()
+    val requestDownload = rememberLocalModelDownloader { entry ->
+        viewModel.selectLocalModel(entry.id)
+    }
     val isLocalPlatform = selectedClientType == ClientType.LITERT_LM
     val title = stringResource(if (step == AddPlatformStep.API_TYPE) R.string.choose_platform_type else R.string.platform_details)
+    val isWaitingForDownload = isLocalPlatform && viewModel.isWaitingForModelDownload()
     val isSaveEnabled = platformName.isNotBlank() &&
-        model.isNotBlank() &&
-        (isLocalPlatform || apiUrl.isNotBlank())
+        if (isLocalPlatform) {
+            viewModel.canSaveLocalModel()
+        } else {
+            model.isNotBlank() && apiUrl.isNotBlank()
+        }
     val navigateBack = { if (step == AddPlatformStep.DETAILS) step = AddPlatformStep.API_TYPE else onNavigationClick() }
     BackHandler(enabled = step == AddPlatformStep.DETAILS) { step = AddPlatformStep.API_TYPE }
 
@@ -85,13 +96,23 @@ fun AddPlatformScreen(
             AddPlatformTopBar(
                 title = title,
                 scrollBehavior = scrollBehavior,
-                actionLabel = if (step == AddPlatformStep.DETAILS) stringResource(R.string.save) else null,
+                actionLabel = when {
+                    step != AddPlatformStep.DETAILS -> null
+                    isWaitingForDownload -> stringResource(R.string.local_platform_waiting_for_download)
+                    else -> stringResource(R.string.save)
+                },
                 isActionEnabled = isSaveEnabled,
                 onNavigationClick = navigateBack,
                 onActionClick = {
                     val clientType = selectedClientType ?: return@AddPlatformTopBar
+                    val selectedModel = if (clientType == ClientType.LITERT_LM) {
+                        selectedLocalModelId.trim()
+                    } else {
+                        model.trim()
+                    }
+                    if (clientType == ClientType.LITERT_LM && !viewModel.canSaveLocalModel()) return@AddPlatformTopBar
                     val defaults = if (clientType == ClientType.LITERT_LM) {
-                        viewModel.defaultsFor(model.trim())
+                        viewModel.defaultsFor(selectedModel)
                     } else {
                         null
                     }
@@ -102,7 +123,7 @@ fun AddPlatformScreen(
                             enabled = true,
                             apiUrl = if (clientType == ClientType.LITERT_LM) "" else apiUrl.trim(),
                             token = apiKey.trim().takeIf { it.isNotEmpty() && clientType != ClientType.LITERT_LM },
-                            model = model.trim(),
+                            model = selectedModel,
                             temperature = defaults?.temperature ?: 1.0f,
                             topP = defaults?.topP ?: 1.0f,
                             topK = defaults?.topK,
@@ -172,10 +193,18 @@ fun AddPlatformScreen(
                     }
                 } else {
                     Spacer(modifier = Modifier.height(16.dp))
-                    LocalModelPicker(
-                        models = downloadedLocalModels,
-                        selectedCatalogEntryId = model,
-                        onModelSelected = { model = it },
+                    LocalModelCatalogPicker(
+                        items = catalogModels,
+                        selectedCatalogEntryId = selectedLocalModelId,
+                        checkingAccessEntryId = downloadState.checkingAccessEntryId,
+                        onModelSelected = { catalogEntryId ->
+                            val entry = catalogModels.firstOrNull { it.entry.id == catalogEntryId }?.entry
+                            if (entry != null) {
+                                requestDownload(entry)
+                            } else {
+                                viewModel.selectLocalModel(catalogEntryId)
+                            }
+                        },
                         onNavigateToLocalModels = onNavigateToLocalModels
                     )
                 }
@@ -183,6 +212,17 @@ fun AddPlatformScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
+
+    LocalModelDownloadDialogHost(
+        dialog = downloadState.dialog,
+        onConfirmRamWarning = viewModel::confirmRamWarning,
+        onConfirmMeteredDownload = viewModel::confirmMeteredDownload,
+        onDismissDialog = viewModel::dismissDownloadDialog,
+        onStartSignIn = viewModel::startHuggingFaceSignIn,
+        onAuthActivityResult = viewModel::onAuthActivityResult,
+        onLicenseTabClosed = viewModel::onLicenseTabClosed,
+        onRetryAfterLicense = viewModel::retryAfterLicense
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

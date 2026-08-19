@@ -15,6 +15,10 @@ import dev.chungjungsoo.gptmobile.data.localmodel.HttpLocalModelDownloadProber
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadProber
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepositoryImpl
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.AndroidHuggingFaceAuthClient
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.AndroidLocalDownloadGuards
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClient
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuards
 import javax.inject.Singleton
 
 @Module
@@ -42,6 +46,17 @@ object LocalModelModule {
             )
         }
     )
+
+    @Provides
+    @Singleton
+    fun provideLocalDownloadGuards(
+        impl: AndroidLocalDownloadGuards
+    ): LocalDownloadGuards = impl
+
+    @Provides
+    fun provideHuggingFaceAuthClient(
+        impl: AndroidHuggingFaceAuthClient
+    ): HuggingFaceAuthClient = impl
 
     @Provides
     @Singleton

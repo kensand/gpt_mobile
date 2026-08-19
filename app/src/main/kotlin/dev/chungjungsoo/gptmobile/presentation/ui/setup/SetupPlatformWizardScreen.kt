@@ -45,6 +45,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadDialogHost
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.rememberLocalModelDownloader
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelListItem
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2.Companion.WIZARD_STEP_API_KEY
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2.Companion.WIZARD_STEP_BASICS
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2.Companion.WIZARD_STEP_MODEL
@@ -64,6 +67,11 @@ fun SetupPlatformWizardScreen(
     val apiUrlState = setupViewModel.apiUrl.collectAsStateWithLifecycle()
     val apiKeyState = setupViewModel.apiKey.collectAsStateWithLifecycle()
     val modelState = setupViewModel.model.collectAsStateWithLifecycle()
+    val catalogModels by setupViewModel.catalogLocalModels.collectAsStateWithLifecycle()
+    val downloadState by setupViewModel.localModelDownloadState.collectAsStateWithLifecycle()
+    val requestDownload = rememberLocalModelDownloader { entry ->
+        setupViewModel.selectLocalModel(entry.id)
+    }
 
     // Extract values for use in composables
     val wizardStep = wizardStepState.value
@@ -80,9 +88,12 @@ fun SetupPlatformWizardScreen(
             apiUrlState.value
             modelState.value
             selectedClientTypeState.value
+            catalogModels
             setupViewModel.canProceedFromStep(wizardStepState.value)
         }
     }
+    val isWaitingForDownload = selectedClientType == ClientType.LITERT_LM &&
+        setupViewModel.isWaitingForModelDownload()
 
     // Handle back press
     BackHandler {
@@ -166,11 +177,18 @@ fun SetupPlatformWizardScreen(
                         // Collect model state directly inside AnimatedContent for proper recomposition
                         val currentModel by setupViewModel.model.collectAsStateWithLifecycle()
                         if (selectedClientType == ClientType.LITERT_LM) {
-                            val downloadedModels by setupViewModel.downloadedLocalModels.collectAsStateWithLifecycle()
                             LocalModelStep(
-                                models = downloadedModels,
+                                items = catalogModels,
                                 selectedCatalogEntryId = currentModel,
-                                onModelSelected = setupViewModel::updateModel,
+                                checkingAccessEntryId = downloadState.checkingAccessEntryId,
+                                onModelSelected = { catalogEntryId ->
+                                    val entry = catalogModels.firstOrNull { it.entry.id == catalogEntryId }?.entry
+                                    if (entry != null) {
+                                        requestDownload(entry)
+                                    } else {
+                                        setupViewModel.selectLocalModel(catalogEntryId)
+                                    }
+                                },
                                 onNavigateToLocalModels = onNavigateToLocalModels
                             )
                         } else {
@@ -203,10 +221,22 @@ fun SetupPlatformWizardScreen(
                         setupViewModel.nextWizardStep()
                     }
                 },
-                isLastStep = wizardStep == WIZARD_STEP_MODEL
+                isLastStep = wizardStep == WIZARD_STEP_MODEL,
+                waitingForDownload = isWaitingForDownload
             )
         }
     }
+
+    LocalModelDownloadDialogHost(
+        dialog = downloadState.dialog,
+        onConfirmRamWarning = setupViewModel::confirmRamWarning,
+        onConfirmMeteredDownload = setupViewModel::confirmMeteredDownload,
+        onDismissDialog = setupViewModel::dismissDownloadDialog,
+        onStartSignIn = setupViewModel::startHuggingFaceSignIn,
+        onAuthActivityResult = setupViewModel::onAuthActivityResult,
+        onLicenseTabClosed = setupViewModel::onLicenseTabClosed,
+        onRetryAfterLicense = setupViewModel::retryAfterLicense
+    )
 }
 
 @Composable
@@ -447,8 +477,9 @@ private fun ApiKeyStep(
 
 @Composable
 private fun LocalModelStep(
-    models: List<DownloadedLocalModelOption>,
+    items: List<LocalModelListItem>,
     selectedCatalogEntryId: String,
+    checkingAccessEntryId: String?,
     onModelSelected: (String) -> Unit,
     onNavigateToLocalModels: () -> Unit,
     modifier: Modifier = Modifier
@@ -465,9 +496,10 @@ private fun LocalModelStep(
             style = MaterialTheme.typography.headlineSmall
         )
         Spacer(modifier = Modifier.height(16.dp))
-        LocalModelPicker(
-            models = models,
+        LocalModelCatalogPicker(
+            items = items,
             selectedCatalogEntryId = selectedCatalogEntryId,
+            checkingAccessEntryId = checkingAccessEntryId,
             onModelSelected = onModelSelected,
             onNavigateToLocalModels = onNavigateToLocalModels
         )
@@ -533,6 +565,7 @@ private fun WizardNavigationButtons(
     onBack: () -> Unit,
     onNext: () -> Unit,
     isLastStep: Boolean,
+    waitingForDownload: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -562,10 +595,10 @@ private fun WizardNavigationButtons(
             enabled = canProceed
         ) {
             Text(
-                text = if (isLastStep) {
-                    stringResource(R.string.finish)
-                } else {
-                    stringResource(R.string.next)
+                text = when {
+                    isLastStep && waitingForDownload -> stringResource(R.string.local_platform_waiting_for_download)
+                    isLastStep -> stringResource(R.string.finish)
+                    else -> stringResource(R.string.next)
                 }
             )
         }

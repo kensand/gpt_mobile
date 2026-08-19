@@ -14,6 +14,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.presentation.common.RadioItem
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadStatus
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelRequirements
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelListItem
 
 @Composable
 fun LocalModelPicker(
@@ -53,6 +56,64 @@ fun LocalModelPicker(
                     onSelected = onModelSelected,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun LocalModelCatalogPicker(
+    items: List<LocalModelListItem>,
+    selectedCatalogEntryId: String,
+    checkingAccessEntryId: String?,
+    onModelSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    onNavigateToLocalModels: (() -> Unit)? = null
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.local_platform_select_model),
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.local_platform_catalog_select_description),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        if (items.isEmpty()) {
+            Text(
+                text = stringResource(R.string.local_models_empty),
+                style = MaterialTheme.typography.bodyLarge
+            )
+        } else {
+            items.forEach { item ->
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    RadioItem(
+                        value = item.entry.id,
+                        selected = item.entry.id == selectedCatalogEntryId,
+                        title = item.entry.displayName,
+                        description = null,
+                        onSelected = onModelSelected
+                    )
+                    LocalModelRequirements(
+                        item = item,
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                        showCapabilities = false
+                    )
+                    LocalModelDownloadStatus(
+                        item = item,
+                        isCheckingAccess = checkingAccessEntryId == item.entry.id,
+                        onDownload = { onModelSelected(item.entry.id) },
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
+            }
+        }
+        if (onNavigateToLocalModels != null) {
+            TextButton(onClick = onNavigateToLocalModels) {
+                Text(text = stringResource(R.string.local_platform_go_to_local_models))
             }
         }
     }
