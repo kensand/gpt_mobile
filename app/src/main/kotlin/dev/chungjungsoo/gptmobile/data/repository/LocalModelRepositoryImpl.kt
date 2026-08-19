@@ -19,14 +19,20 @@ import dev.chungjungsoo.gptmobile.data.localmodel.SocVariantResolver
 import dev.chungjungsoo.gptmobile.data.worker.LocalModelDownloadWorker
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class LocalModelRepositoryImpl(
     private val context: Context,
     private val localModelDao: LocalModelDao,
-    private val deviceSocModel: String
+    private val deviceSocModel: String,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val diskFiles: (() -> Set<String>)? = null,
+    private val workInfos: (() -> Flow<List<WorkInfo>>)? = null
 ) : LocalModelRepository {
 
     private val workManager: WorkManager
@@ -34,11 +40,11 @@ class LocalModelRepositoryImpl(
 
     override fun observeAll(): Flow<List<LocalModel>> = localModelDao.observeAll()
 
-    override fun observeWorkInfos(): Flow<List<WorkInfo>> = workManager.getWorkInfosByTagFlow(LocalModelDownloadWorker.WORK_TAG)
+    override fun observeWorkInfos(): Flow<List<WorkInfo>> = workInfosFlow()
 
     override suspend fun getById(catalogEntryId: String): LocalModel? = localModelDao.getById(catalogEntryId)
 
-    override suspend fun resolveDownloadedPath(catalogEntryId: String): String? = withContext(Dispatchers.IO) {
+    override suspend fun resolveDownloadedPath(catalogEntryId: String): String? = withContext(ioDispatcher) {
         val model = localModelDao.getById(catalogEntryId) ?: return@withContext null
         if (model.status != LocalModelStatus.READY) return@withContext null
         val file = File(
@@ -49,7 +55,7 @@ class LocalModelRepositoryImpl(
     }
 
     override suspend fun startDownload(entry: CatalogEntry) {
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val existing = localModelDao.getById(entry.id)
             if (existing?.status == LocalModelStatus.DOWNLOADING && entry.id in activeDownloadIds()) {
                 return@withContext
@@ -101,7 +107,7 @@ class LocalModelRepositoryImpl(
     }
 
     override suspend fun cancelDownload(catalogEntryId: String) {
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             workManager.cancelUniqueWork(LocalModelDownloadPaths.uniqueWorkName(catalogEntryId))
             val row = localModelDao.getById(catalogEntryId) ?: return@withContext
             val plan = LocalModelReconciler.planUserCancel()
@@ -121,7 +127,7 @@ class LocalModelRepositoryImpl(
     }
 
     override suspend fun deleteModel(catalogEntryId: String) {
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             workManager.cancelUniqueWork(LocalModelDownloadPaths.uniqueWorkName(catalogEntryId))
             val row = localModelDao.getById(catalogEntryId)
             if (row != null) {
@@ -135,7 +141,7 @@ class LocalModelRepositoryImpl(
         }
     }
 
-    override suspend fun totalStorageUsed(): Long = withContext(Dispatchers.IO) {
+    override suspend fun totalStorageUsed(): Long = withContext(ioDispatcher) {
         localModelDao.getAll()
             .filter { it.status == LocalModelStatus.READY }
             .sumOf { diskBytes(it) }
@@ -150,10 +156,10 @@ class LocalModelRepositoryImpl(
     }
 
     override suspend fun reconcile() {
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val actions = LocalModelReconciler.reconcile(
                 rows = localModelDao.getAll().map { it.toRecord() },
-                diskFiles = listDiskFiles(),
+                diskFiles = diskFilesOrDefault(),
                 activeDownloadIds = activeDownloadIds()
             )
             val now = System.currentTimeMillis() / 1000
@@ -173,9 +179,29 @@ class LocalModelRepositoryImpl(
         }
     }
 
+    override suspend fun awaitActiveDownloadScheduling() = withContext(ioDispatcher) {
+        val snapshot = runCatching { workInfosFlow().first() }.getOrDefault(emptyList())
+        val unfinished = snapshot.filter { !it.state.isFinished }
+        if (unfinished.isEmpty() || unfinished.any { it.state == WorkInfo.State.RUNNING }) {
+            return@withContext
+        }
+        withTimeoutOrNull(JOB_DELIVERY_TIMEOUT_MS) {
+            workInfosFlow().first { infos ->
+                val active = infos.filter { !it.state.isFinished }
+                active.isEmpty() || active.any { it.state == WorkInfo.State.RUNNING }
+            }
+        }
+        Unit
+    }
+
     private fun storageRoot(): File = context.getExternalFilesDir(null) ?: context.filesDir
 
-    private fun listDiskFiles(): Set<String> {
+    private fun diskFilesOrDefault(): Set<String> = diskFiles?.invoke() ?: listModelFiles()
+
+    private fun workInfosFlow(): Flow<List<WorkInfo>> = workInfos?.invoke()
+        ?: WorkManager.getInstance(context).getWorkInfosByTagFlow(LocalModelDownloadWorker.WORK_TAG)
+
+    private fun listModelFiles(): Set<String> {
         val root = storageRoot()
         val modelsDir = File(root, LocalModelDownloadPaths.MODELS_DIR)
         if (!modelsDir.exists()) return emptySet()
@@ -185,11 +211,9 @@ class LocalModelRepositoryImpl(
             .toSet()
     }
 
-    private fun activeDownloadIds(): Set<String> {
-        val workInfos = runCatching {
-            workManager.getWorkInfosByTag(LocalModelDownloadWorker.WORK_TAG).get()
-        }.getOrDefault(emptyList())
-        return workInfos
+    private suspend fun activeDownloadIds(): Set<String> {
+        val infos = runCatching { workInfosFlow().first() }.getOrDefault(emptyList())
+        return infos
             .filter { !it.state.isFinished }
             .mapNotNull { info ->
                 info.tags.firstNotNullOfOrNull(LocalModelDownloadWorker::catalogEntryIdFromTag)
@@ -200,5 +224,9 @@ class LocalModelRepositoryImpl(
     private fun diskBytes(model: LocalModel): Long {
         val file = File(storageRoot(), LocalModelDownloadPaths.relativeFilePath(model.catalogEntryId, model.commitHash, model.fileName))
         return if (file.exists()) file.length() else model.totalBytes
+    }
+
+    private companion object {
+        const val JOB_DELIVERY_TIMEOUT_MS = 2_000L
     }
 }

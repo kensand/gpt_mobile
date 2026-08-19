@@ -69,6 +69,7 @@ object LocalModelModule {
     ): LocalModelRepository = LocalModelRepositoryImpl(
         context = context,
         localModelDao = localModelDao,
-        deviceSocModel = deviceSocModel
+        deviceSocModel = deviceSocModel,
+        ioDispatcher = Dispatchers.IO
     )
 }

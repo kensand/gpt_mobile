@@ -7,8 +7,12 @@ import android.util.Log
 import android.widget.Toast
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.components.SingletonComponent
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.backup.SanitizedChatBackup
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
@@ -38,24 +42,6 @@ class GPTMobileApp :
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
 
-    @Inject
-    lateinit var agentRunDao: AgentRunDao
-
-    @Inject
-    lateinit var agentPersistenceDao: AgentPersistenceDao
-
-    @Inject
-    lateinit var settingRepository: SettingRepository
-
-    @Inject
-    lateinit var localModelRepository: LocalModelRepository
-
-    @Inject
-    lateinit var localRuntime: LocalRuntime
-
-    @Inject
-    lateinit var pendingLocalPlatformActivator: PendingLocalPlatformActivator
-
     @Volatile
     var secretMigrationErrors: List<SecretMigrationError> = emptyList()
         private set
@@ -65,16 +51,17 @@ class GPTMobileApp :
     override fun onCreate() {
         SanitizedChatBackup.restoreIfPresent(this)
         super.onCreate()
-        pendingLocalPlatformActivator.start()
         registerActivityLifecycleCallbacks(AppForegroundTracker)
         StartupRecoveryGate.start(applicationScope) {
+            val startup = startupDependencies()
+            startup.pendingLocalPlatformActivator().start()
             secretMigrationErrors = runStartupMaintenance(
                 interruptPersistedWork = {
                     val interruptedAt = System.currentTimeMillis() / 1000
-                    agentRunDao.interruptActiveRuns(interruptedAt)
-                    agentPersistenceDao.cancelInterruptedToolEvents(interruptedAt)
+                    startup.agentRunDao().interruptActiveRuns(interruptedAt)
+                    startup.agentPersistenceDao().cancelInterruptedToolEvents(interruptedAt)
                 },
-                migrateSecrets = settingRepository::migrateSecrets
+                migrateSecrets = startup.settingRepository()::migrateSecrets
             )
             if (secretMigrationErrors.isNotEmpty()) {
                 runCatching {
@@ -89,15 +76,16 @@ class GPTMobileApp :
                     Log.e(TAG, "Unable to show credential migration warning.", error)
                 }
             }
-            localModelRepository.reconcile()
+            startup.localModelRepository().reconcile()
+            startup.localModelRepository().awaitActiveDownloadScheduling()
         }
     }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && ::localRuntime.isInitialized) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             applicationScope.launch {
-                localRuntime.unloadEngine()
+                startupDependencies().localRuntime().unloadEngine()
             }
         }
     }
@@ -107,9 +95,25 @@ class GPTMobileApp :
             .setWorkerFactory(workerFactory)
             .build()
 
+    private fun startupDependencies(): StartupDependencies = EntryPointAccessors.fromApplication(
+        this,
+        StartupDependencies::class.java
+    )
+
     private companion object {
         const val TAG = "GPTMobileApp"
     }
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface StartupDependencies {
+    fun pendingLocalPlatformActivator(): PendingLocalPlatformActivator
+    fun localModelRepository(): LocalModelRepository
+    fun settingRepository(): SettingRepository
+    fun agentRunDao(): AgentRunDao
+    fun agentPersistenceDao(): AgentPersistenceDao
+    fun localRuntime(): LocalRuntime
 }
 
 object StartupRecoveryGate {

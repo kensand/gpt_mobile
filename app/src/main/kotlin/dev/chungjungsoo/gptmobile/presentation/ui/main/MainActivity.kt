@@ -11,8 +11,11 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.viewModels
 import androidx.browser.auth.AuthTabIntent
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavHostController
@@ -37,11 +40,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var authTabLauncher: ActivityResultLauncher<Intent>
     private var lastOAuthCallback: String? = null
 
+    @Volatile
+    private var keepSplashOnScreen = true
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen().apply {
-            setKeepOnScreenCondition {
-                !mainViewModel.isReady.value
-            }
+            setKeepOnScreenCondition { keepSplashOnScreen }
         }
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -54,18 +58,24 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val navController = rememberNavController()
-            navController.checkForExistingSettings()
+            val isReady by mainViewModel.isReady.collectAsStateWithLifecycle()
 
             ThemeSettingProvider {
                 GPTMobileTheme(
                     dynamicTheme = LocalDynamicTheme.current,
                     themeMode = LocalThemeMode.current
                 ) {
-                    SetupNavGraph(
-                        navController = navController,
-                        toolConnectionsViewModel = toolConnectionsViewModel,
-                        onLaunchOAuth = ::launchOAuth
-                    )
+                    if (isReady) {
+                        SetupNavGraph(
+                            navController = navController,
+                            toolConnectionsViewModel = toolConnectionsViewModel,
+                            onLaunchOAuth = ::launchOAuth
+                        )
+                        LaunchedEffect(navController) {
+                            navController.checkForExistingSettings()
+                            keepSplashOnScreen = false
+                        }
+                    }
                 }
             }
         }
