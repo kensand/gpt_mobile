@@ -164,7 +164,8 @@ fun NavGraphBuilder.chatScreenNavigation(navController: NavHostController) {
         )
     ) {
         ChatScreen(
-            onBackAction = { navController.navigateUp() }
+            onBackAction = { navController.navigateUp() },
+            onNavigateToLocalModels = { navController.navigate(Route.LOCAL_MODELS) }
         )
     }
 }
@@ -213,7 +214,8 @@ fun NavGraphBuilder.settingNavigation(
             arguments = listOf(navArgument("platformUid") { type = NavType.StringType })
         ) {
             PlatformSettingScreen(
-                onNavigationClick = { navController.navigateUp() }
+                onNavigationClick = { navController.navigateUp() },
+                onNavigateToLocalModels = { navController.navigate(Route.LOCAL_MODELS) }
             )
         }
         composable(Route.LOCAL_MODELS) {

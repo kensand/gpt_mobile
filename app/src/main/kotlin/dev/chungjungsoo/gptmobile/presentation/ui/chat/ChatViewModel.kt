@@ -12,6 +12,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunCoordinator
 import dev.chungjungsoo.gptmobile.data.agent.AgentRunRequest
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunDraft
@@ -33,11 +34,15 @@ import dev.chungjungsoo.gptmobile.data.database.entity.rebuildAssistantTimelineF
 import dev.chungjungsoo.gptmobile.data.database.entity.resetActiveRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.selectRevision
 import dev.chungjungsoo.gptmobile.data.database.entity.snapshotLatestAssistantRevision
+import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.repository.AttachmentUploadCoordinator
 import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
+import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
 import dev.chungjungsoo.gptmobile.presentation.StartupRecoveryGate
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.DownloadedLocalModelOption
 import dev.chungjungsoo.gptmobile.util.AttachmentPayloadCache
 import dev.chungjungsoo.gptmobile.util.FileUtils
 import dev.chungjungsoo.gptmobile.util.buildAssistantErrorContent
@@ -50,11 +55,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,7 +76,9 @@ class ChatViewModel @Inject constructor(
     private val settingRepository: SettingRepository,
     private val attachmentUploadCoordinator: AttachmentUploadCoordinator,
     private val agentRunCoordinator: AgentRunCoordinator,
-    private val toolConnectionRepository: ToolConnectionRepository
+    private val toolConnectionRepository: ToolConnectionRepository,
+    private val localModelRepository: LocalModelRepository,
+    private val modelCatalogRepository: ModelCatalogRepository
 ) : ViewModel() {
     sealed class LoadingState {
         data object Idle : LoadingState()
@@ -116,6 +127,20 @@ class ChatViewModel @Inject constructor(
 
     private val _chatPlatformModels = MutableStateFlow<Map<String, String>>(emptyMap())
     val chatPlatformModels = _chatPlatformModels.asStateFlow()
+
+    private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    val downloadedLocalModels: StateFlow<List<DownloadedLocalModelOption>> = combine(
+        localModelRepository.observeAll(),
+        catalogEntries
+    ) { models, catalog ->
+        val names = catalog.associate { it.id to it.displayName }
+        models.filter { it.status == LocalModelStatus.DOWNLOADED }.map { model ->
+            DownloadedLocalModelOption(
+                catalogEntryId = model.catalogEntryId,
+                displayName = names[model.catalogEntryId]?.takeIf { it.isNotBlank() } ?: model.catalogEntryId
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // All platforms configured in app (including disabled)
     private val _platformsInApp = MutableStateFlow(listOf<PlatformV2>())
@@ -175,6 +200,9 @@ class ChatViewModel @Inject constructor(
         observeAgentRuns()
         observeToolEvents()
         observeAgentNotices()
+        viewModelScope.launch {
+            catalogEntries.value = modelCatalogRepository.getVisibleEntries()
+        }
     }
 
     fun addMessage(userMessage: MessageV2) {
@@ -1122,12 +1150,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun resolvePlatformModel(platform: PlatformV2): PlatformV2 {
-        val chatModel = _chatPlatformModels.value[platform.uid]?.trim().orEmpty()
-        if (chatModel.isBlank() || chatModel == platform.model) return platform
-
-        return platform.copy(model = chatModel)
-    }
+    private fun resolvePlatformModel(platform: PlatformV2): PlatformV2 = resolvePlatformModel(platform, _chatPlatformModels.value)
 
     private fun persistCurrentChatSnapshot() {
         viewModelScope.launch {
@@ -1193,6 +1216,16 @@ internal fun groupedMessagesThroughTurn(
     userMessages = groupedMessages.userMessages.take(turnIndex + 1),
     assistantMessages = groupedMessages.assistantMessages.take(turnIndex + 1)
 )
+
+internal fun resolvePlatformModel(
+    platform: PlatformV2,
+    chatPlatformModels: Map<String, String>
+): PlatformV2 {
+    val chatModel = chatPlatformModels[platform.uid]?.trim().orEmpty()
+    if (chatModel.isBlank() || chatModel == platform.model) return platform
+
+    return platform.copy(model = chatModel)
+}
 
 internal fun resolveSelectedPlatforms(
     selectedProfileUids: List<String>,

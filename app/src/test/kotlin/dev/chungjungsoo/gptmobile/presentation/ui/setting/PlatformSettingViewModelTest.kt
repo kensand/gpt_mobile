@@ -5,6 +5,8 @@ import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpClientManager
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClient
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCoordinator
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogDefaultConfig
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentToolBinding
@@ -14,8 +16,12 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.dto.Platform
 import dev.chungjungsoo.gptmobile.data.dto.ThemeSetting
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.network.NetworkClient
+import dev.chungjungsoo.gptmobile.data.repository.FakeLocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
@@ -133,7 +139,131 @@ class PlatformSettingViewModelTest {
         assertFalse(viewModel.toolBindingState.value.isMcpToolsLoading)
     }
 
-    private fun testViewModel(dao: FakeToolConnectionDao): PlatformSettingViewModel {
+    @Test
+    fun `updating top-k persists to the local profile`() = runTest {
+        val settings = FakeSettingRepository(localPlatform())
+        val viewModel = localSettingsViewModel(settings)
+
+        viewModel.updateTopK(80)
+
+        assertEquals(80, viewModel.platformState.value?.topK)
+        assertEquals(80, settings.updatedPlatforms.single().topK)
+        assertFalse(viewModel.dialogState.value.isTopKDialogOpen)
+    }
+
+    @Test
+    fun `updating max tokens persists to the local profile`() = runTest {
+        val settings = FakeSettingRepository(localPlatform())
+        val viewModel = localSettingsViewModel(settings)
+
+        viewModel.updateMaxTokens(4096)
+
+        assertEquals(4096, viewModel.platformState.value?.maxTokens)
+        assertEquals(4096, settings.updatedPlatforms.single().maxTokens)
+        assertFalse(viewModel.dialogState.value.isMaxTokensDialogOpen)
+    }
+
+    @Test
+    fun `updating accelerator persists to the local profile`() = runTest {
+        val settings = FakeSettingRepository(localPlatform())
+        val viewModel = localSettingsViewModel(settings)
+
+        viewModel.updateAccelerator(LocalAccelerators.CPU)
+
+        assertEquals(LocalAccelerators.CPU, viewModel.platformState.value?.accelerator)
+        assertEquals(LocalAccelerators.CPU, settings.updatedPlatforms.single().accelerator)
+        assertFalse(viewModel.dialogState.value.isAcceleratorDialogOpen)
+    }
+
+    @Test
+    fun `accelerator options are CPU and GPU supported by the catalog entry`() = runTest {
+        val viewModel = localSettingsViewModel(
+            settings = FakeSettingRepository(localPlatform(model = "gpu-only")),
+            catalog = FakeModelCatalogRepository(
+                listOf(
+                    catalogEntry("gpu-only", supportedAccelerators = listOf("gpu", "npu")),
+                    catalogEntry("cpu-gpu", supportedAccelerators = listOf("cpu", "gpu", "npu"))
+                )
+            )
+        )
+
+        assertEquals(listOf(LocalAccelerators.GPU), viewModel.acceleratorOptions.value)
+    }
+
+    @Test
+    fun `accelerator options omit NPU even when the catalog lists it`() = runTest {
+        val viewModel = localSettingsViewModel(
+            settings = FakeSettingRepository(localPlatform(model = "cpu-gpu")),
+            catalog = FakeModelCatalogRepository(
+                listOf(catalogEntry("cpu-gpu", supportedAccelerators = listOf("npu", "cpu", "gpu")))
+            )
+        )
+
+        assertEquals(listOf(LocalAccelerators.CPU, LocalAccelerators.GPU), viewModel.acceleratorOptions.value)
+    }
+
+    @Test
+    fun `changing the local model reseeds sampling defaults from the new catalog entry`() = runTest {
+        val settings = FakeSettingRepository(
+            localPlatform(
+                model = "gemma3-1b-it",
+                temperature = 0.2f,
+                topP = 0.4f,
+                topK = 8,
+                maxTokens = 256,
+                accelerator = LocalAccelerators.CPU
+            )
+        )
+        val viewModel = localSettingsViewModel(
+            settings = settings,
+            catalog = FakeModelCatalogRepository(
+                listOf(
+                    catalogEntry(
+                        id = "gemma3-1b-it",
+                        supportedAccelerators = listOf("cpu", "gpu"),
+                        defaults = CatalogDefaultConfig(topK = 64, topP = 0.95f, temperature = 1.0f, maxTokens = 1024)
+                    ),
+                    catalogEntry(
+                        id = "gemma-3n-e2b-it",
+                        supportedAccelerators = listOf("cpu"),
+                        defaults = CatalogDefaultConfig(topK = 20, topP = 0.8f, temperature = 0.7f, maxTokens = 4096)
+                    )
+                )
+            )
+        )
+
+        viewModel.updateApiModel("gemma-3n-e2b-it")
+
+        val updated = settings.updatedPlatforms.single()
+        assertEquals("gemma-3n-e2b-it", updated.model)
+        assertEquals(0.7f, updated.temperature)
+        assertEquals(0.8f, updated.topP)
+        assertEquals(20, updated.topK)
+        assertEquals(4096, updated.maxTokens)
+        assertEquals(LocalAccelerators.CPU, updated.accelerator)
+    }
+
+    private fun localSettingsViewModel(
+        settings: FakeSettingRepository,
+        catalog: FakeModelCatalogRepository = FakeModelCatalogRepository(
+            listOf(catalogEntry("gemma3-1b-it", supportedAccelerators = listOf("cpu", "gpu")))
+        ),
+        localModels: LocalModelRepository = FakeLocalModelRepository()
+    ): PlatformSettingViewModel = testViewModel(
+        dao = FakeToolConnectionDao(),
+        settingRepository = settings,
+        catalogRepository = catalog,
+        localModelRepository = localModels,
+        platformUid = "local-1"
+    )
+
+    private fun testViewModel(
+        dao: FakeToolConnectionDao,
+        settingRepository: SettingRepository = FakeSettingRepository(),
+        catalogRepository: ModelCatalogRepository = FakeModelCatalogRepository(),
+        localModelRepository: LocalModelRepository = FakeLocalModelRepository(),
+        platformUid: String = "profile-1"
+    ): PlatformSettingViewModel {
         val vault = FakeSecretVault()
         val repository = ToolConnectionRepository(dao, vault)
         val networkClient = NetworkClient(CIO)
@@ -146,11 +276,13 @@ class PlatformSettingViewModelTest {
             McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
         )
         return PlatformSettingViewModel(
-            settingRepository = FakeSettingRepository(),
+            settingRepository = settingRepository,
             toolConnectionDao = dao,
             secretVault = vault,
             agentToolResolver = resolver,
-            savedStateHandle = SavedStateHandle(mapOf("platformUid" to "profile-1"))
+            modelCatalogRepository = catalogRepository,
+            localModelRepository = localModelRepository,
+            savedStateHandle = SavedStateHandle(mapOf("platformUid" to platformUid))
         )
     }
 
@@ -244,19 +376,22 @@ internal class FakeSecretVault : SecretVault {
     }
 }
 
-private class FakeSettingRepository : SettingRepository {
+private class FakeSettingRepository(
+    initialPlatform: PlatformV2 = PlatformV2(
+        uid = "profile-1",
+        name = "OpenAI",
+        compatibleType = ClientType.OPENAI,
+        enabled = true,
+        apiUrl = "https://example.com",
+        model = "gpt"
+    )
+) : SettingRepository {
+    private var platform = initialPlatform
+    val updatedPlatforms = mutableListOf<PlatformV2>()
+
     override suspend fun fetchPlatforms(): List<Platform> = emptyList()
 
-    override suspend fun fetchPlatformV2s(): List<PlatformV2> = listOf(
-        PlatformV2(
-            uid = "profile-1",
-            name = "OpenAI",
-            compatibleType = ClientType.OPENAI,
-            enabled = true,
-            apiUrl = "https://example.com",
-            model = "gpt"
-        )
-    )
+    override suspend fun fetchPlatformV2s(): List<PlatformV2> = listOf(platform)
 
     override suspend fun fetchThemes(): ThemeSetting = ThemeSetting()
     override suspend fun migrateToPlatformV2() = Unit
@@ -264,7 +399,48 @@ private class FakeSettingRepository : SettingRepository {
     override suspend fun updatePlatforms(platforms: List<Platform>) = Unit
     override suspend fun updateThemes(themeSetting: ThemeSetting) = Unit
     override suspend fun addPlatformV2(platform: PlatformV2) = Unit
-    override suspend fun updatePlatformV2(platform: PlatformV2) = Unit
+    override suspend fun updatePlatformV2(platform: PlatformV2) {
+        this.platform = platform
+        updatedPlatforms += platform
+    }
     override suspend fun deletePlatformV2(platform: PlatformV2) = Unit
     override suspend fun getPlatformV2ById(id: Int): PlatformV2? = null
 }
+
+private class FakeModelCatalogRepository(
+    private val entries: List<CatalogEntry> = emptyList()
+) : ModelCatalogRepository {
+    override suspend fun getVisibleEntries(): List<CatalogEntry> = entries
+}
+
+private fun localPlatform(
+    model: String = "gemma3-1b-it",
+    temperature: Float? = 1.0f,
+    topP: Float? = 0.95f,
+    topK: Int? = 64,
+    maxTokens: Int? = 1024,
+    accelerator: String? = LocalAccelerators.GPU
+) = PlatformV2(
+    uid = "local-1",
+    name = "Local",
+    compatibleType = ClientType.LITERT_LM,
+    enabled = true,
+    apiUrl = "",
+    model = model,
+    temperature = temperature,
+    topP = topP,
+    topK = topK,
+    maxTokens = maxTokens,
+    accelerator = accelerator
+)
+
+private fun catalogEntry(
+    id: String,
+    supportedAccelerators: List<String>,
+    defaults: CatalogDefaultConfig = CatalogDefaultConfig()
+) = CatalogEntry(
+    id = id,
+    displayName = id,
+    supportedAccelerators = supportedAccelerators,
+    defaultConfig = defaults
+)

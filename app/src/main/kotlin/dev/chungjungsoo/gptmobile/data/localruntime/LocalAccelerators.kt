@@ -22,4 +22,9 @@ object LocalAccelerators {
             CPU
         }
     }
+
+    fun selectable(supported: List<String>): List<String> {
+        val normalized = supported.map { it.lowercase() }.toSet()
+        return listOf(CPU, GPU).filter { it in normalized }
+    }
 }

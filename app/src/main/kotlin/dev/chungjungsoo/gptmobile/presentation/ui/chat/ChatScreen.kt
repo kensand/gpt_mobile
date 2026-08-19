@@ -119,7 +119,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ChatScreen(
     chatViewModel: ChatViewModel = hiltViewModel(),
-    onBackAction: () -> Unit
+    onBackAction: () -> Unit,
+    onNavigateToLocalModels: () -> Unit = {}
 ) {
     val containerSize = LocalWindowInfo.current.containerSize
     val screenWidthDp = with(LocalDensity.current) { containerSize.width.toDp() }
@@ -148,6 +149,7 @@ fun ChatScreen(
     val appEnabledPlatforms by chatViewModel.enabledPlatformsInApp.collectAsStateWithLifecycle()
     val appAllPlatforms by chatViewModel.platformsInApp.collectAsStateWithLifecycle()
     val chatPlatformModels by chatViewModel.chatPlatformModels.collectAsStateWithLifecycle()
+    val downloadedLocalModels by chatViewModel.downloadedLocalModels.collectAsStateWithLifecycle()
     val enabledPlatformLookup = remember(appEnabledPlatforms) { appEnabledPlatforms.associateBy { it.uid } }
     val canUseChat = (chatViewModel.enabledPlatformsInChat.toSet() - appEnabledPlatforms.map { it.uid }.toSet()).isEmpty()
     val isIdle = loadingStates.all { it == ChatViewModel.LoadingState.Idle }
@@ -361,6 +363,9 @@ fun ChatScreen(
                 platformOrder = chatViewModel.enabledPlatformsInChat,
                 initialModels = chatPlatformModels,
                 platformNames = platformNames,
+                platformClientTypes = appAllPlatforms.associate { it.uid to it.compatibleType },
+                downloadedLocalModels = downloadedLocalModels,
+                onNavigateToLocalModels = onNavigateToLocalModels,
                 onDismissRequest = chatViewModel::closeChatModelDialog,
                 onConfirmRequest = { models ->
                     chatViewModel.updateChatPlatformModels(models)

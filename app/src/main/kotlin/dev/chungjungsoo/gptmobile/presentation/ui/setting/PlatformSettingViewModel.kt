@@ -6,16 +6,24 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
 import dev.chungjungsoo.gptmobile.data.agent.tool.namespaceMcpToolName
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.BuiltInAgentTool
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
+import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
+import dev.chungjungsoo.gptmobile.data.localruntime.localSamplingDefaults
+import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
+import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import dev.chungjungsoo.gptmobile.data.repository.ToolBindingSelection
 import dev.chungjungsoo.gptmobile.data.repository.ToolConnectionRepository
 import dev.chungjungsoo.gptmobile.data.security.SecretVault
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.DownloadedLocalModelOption
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -23,8 +31,11 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -34,6 +45,8 @@ class PlatformSettingViewModel @Inject constructor(
     toolConnectionDao: ToolConnectionDao,
     secretVault: SecretVault,
     private val agentToolResolver: AgentToolResolver,
+    private val modelCatalogRepository: ModelCatalogRepository,
+    private val localModelRepository: LocalModelRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val toolConnectionRepository = ToolConnectionRepository(toolConnectionDao, secretVault)
@@ -42,6 +55,26 @@ class PlatformSettingViewModel @Inject constructor(
 
     private val _platformState = MutableStateFlow<PlatformV2?>(null)
     val platformState: StateFlow<PlatformV2?> = _platformState.asStateFlow()
+
+    private val catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
+
+    val downloadedLocalModels: StateFlow<List<DownloadedLocalModelOption>> = combine(
+        localModelRepository.observeAll(),
+        catalogEntries
+    ) { models, catalog ->
+        val names = catalog.associate { it.id to it.displayName }
+        models.filter { it.status == LocalModelStatus.DOWNLOADED }.map { model ->
+            DownloadedLocalModelOption(
+                catalogEntryId = model.catalogEntryId,
+                displayName = names[model.catalogEntryId]?.takeIf { it.isNotBlank() } ?: model.catalogEntryId
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val acceleratorOptions: StateFlow<List<String>> = combine(_platformState, catalogEntries) { platform, catalog ->
+        val entry = catalog.firstOrNull { it.id == platform?.model }
+        LocalAccelerators.selectable(entry?.supportedAccelerators.orEmpty())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _dialogState = MutableStateFlow(DialogState())
     val dialogState: StateFlow<DialogState> = _dialogState.asStateFlow()
@@ -56,6 +89,13 @@ class PlatformSettingViewModel @Inject constructor(
     init {
         loadPlatform()
         loadToolBindings()
+        loadCatalog()
+    }
+
+    private fun loadCatalog() {
+        viewModelScope.launch {
+            catalogEntries.value = modelCatalogRepository.getVisibleEntries()
+        }
     }
 
     private fun loadPlatform() {
@@ -130,6 +170,15 @@ class PlatformSettingViewModel @Inject constructor(
     fun openTopPDialog() = _dialogState.update { it.copy(isTopPDialogOpen = true) }
     fun closeTopPDialog() = _dialogState.update { it.copy(isTopPDialogOpen = false) }
 
+    fun openTopKDialog() = _dialogState.update { it.copy(isTopKDialogOpen = true) }
+    fun closeTopKDialog() = _dialogState.update { it.copy(isTopKDialogOpen = false) }
+
+    fun openMaxTokensDialog() = _dialogState.update { it.copy(isMaxTokensDialogOpen = true) }
+    fun closeMaxTokensDialog() = _dialogState.update { it.copy(isMaxTokensDialogOpen = false) }
+
+    fun openAcceleratorDialog() = _dialogState.update { it.copy(isAcceleratorDialogOpen = true) }
+    fun closeAcceleratorDialog() = _dialogState.update { it.copy(isAcceleratorDialogOpen = false) }
+
     fun openSystemPromptDialog() = _dialogState.update { it.copy(isSystemPromptDialogOpen = true) }
     fun closeSystemPromptDialog() = _dialogState.update { it.copy(isSystemPromptDialogOpen = false) }
 
@@ -162,9 +211,29 @@ class PlatformSettingViewModel @Inject constructor(
 
     fun updateApiModel(model: String) {
         _platformState.value?.let { platform ->
-            updatePlatform(platform.copy(model = model.trim()))
+            val trimmed = model.trim()
+            val updated = if (platform.compatibleType == ClientType.LITERT_LM) {
+                reseedLocalModelDefaults(platform, trimmed)
+            } else {
+                platform.copy(model = trimmed)
+            }
+            updatePlatform(updated)
             closeApiModelDialog()
         }
+    }
+
+    private fun reseedLocalModelDefaults(platform: PlatformV2, catalogEntryId: String): PlatformV2 {
+        val defaults = catalogEntries.value
+            .firstOrNull { it.id == catalogEntryId }
+            ?.let(::localSamplingDefaults)
+        return platform.copy(
+            model = catalogEntryId,
+            temperature = defaults?.temperature ?: platform.temperature,
+            topP = defaults?.topP ?: platform.topP,
+            topK = defaults?.topK,
+            maxTokens = defaults?.maxTokens,
+            accelerator = defaults?.accelerator
+        )
     }
 
     fun updateTemperature(temperature: Float?) {
@@ -178,6 +247,31 @@ class PlatformSettingViewModel @Inject constructor(
         _platformState.value?.let { platform ->
             updatePlatform(platform.copy(topP = topP))
             closeTopPDialog()
+        }
+    }
+
+    fun updateTopK(topK: Int?) {
+        _platformState.value?.let { platform ->
+            updatePlatform(platform.copy(topK = topK?.coerceIn(MIN_TOP_K, MAX_TOP_K)))
+            closeTopKDialog()
+        }
+    }
+
+    fun updateMaxTokens(maxTokens: Int?) {
+        _platformState.value?.let { platform ->
+            updatePlatform(platform.copy(maxTokens = maxTokens?.coerceIn(MIN_MAX_TOKENS, DEFAULT_MAX_TOKENS_CAP)))
+            closeMaxTokensDialog()
+        }
+    }
+
+    fun updateAccelerator(accelerator: String) {
+        val normalized = accelerator.lowercase()
+        if (normalized != LocalAccelerators.CPU && normalized != LocalAccelerators.GPU) return
+        val options = acceleratorOptions.value
+        if (options.isNotEmpty() && normalized !in options) return
+        _platformState.value?.let { platform ->
+            updatePlatform(platform.copy(accelerator = normalized))
+            closeAcceleratorDialog()
         }
     }
 
@@ -359,6 +453,9 @@ class PlatformSettingViewModel @Inject constructor(
         val isApiModelDialogOpen: Boolean = false,
         val isTemperatureDialogOpen: Boolean = false,
         val isTopPDialogOpen: Boolean = false,
+        val isTopKDialogOpen: Boolean = false,
+        val isMaxTokensDialogOpen: Boolean = false,
+        val isAcceleratorDialogOpen: Boolean = false,
         val isSystemPromptDialogOpen: Boolean = false,
         val isTimeoutDialogOpen: Boolean = false,
         val isGeminiSafetyDialogOpen: Boolean = false,
@@ -390,5 +487,9 @@ class PlatformSettingViewModel @Inject constructor(
     companion object {
         private const val WEB_SEARCH_TOOL = "web_search"
         private val WEB_SEARCH_TYPES = setOf(ToolConnectionType.FIRECRAWL, ToolConnectionType.PERPLEXITY, ToolConnectionType.EXA)
+        const val MIN_TOP_K = 1
+        const val MAX_TOP_K = 128
+        const val MIN_MAX_TOKENS = 1
+        const val DEFAULT_MAX_TOKENS_CAP = 32768
     }
 }
