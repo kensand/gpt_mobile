@@ -21,6 +21,7 @@ import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogCapabilities
 import dev.chungjungsoo.gptmobile.data.catalog.ModelCatalogParser
 import dev.chungjungsoo.gptmobile.data.localmodel.DownloadFailureKind
+import dev.chungjungsoo.gptmobile.data.localmodel.DownloadProgress
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelItemStatus
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelListItem
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.downloadFailureMessageRes
@@ -100,12 +101,9 @@ fun LocalModelDownloadStatus(
             }
 
             item.status == LocalModelItemStatus.DOWNLOADING -> {
-                val percent = if (item.diskBytes > 0L) {
-                    ((item.receivedBytes * 100) / item.diskBytes).toInt().coerceIn(0, 100)
-                } else {
-                    0
-                }
-                if (item.receivedBytes <= 0L) {
+                val fraction = DownloadProgress.fraction(item.receivedBytes, item.diskBytes)
+                val percent = DownloadProgress.percent(item.receivedBytes, item.diskBytes)
+                if (fraction == null) {
                     LinearProgressIndicator(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -113,7 +111,7 @@ fun LocalModelDownloadStatus(
                     )
                 } else {
                     LinearProgressIndicator(
-                        progress = { percent / 100f },
+                        progress = { fraction },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 12.dp)

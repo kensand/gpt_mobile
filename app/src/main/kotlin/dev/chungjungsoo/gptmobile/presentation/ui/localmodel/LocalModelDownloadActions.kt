@@ -35,6 +35,10 @@ class LocalModelDownloadActions(
         if (currentStatus == LocalModelItemStatus.DOWNLOADING || currentStatus == LocalModelItemStatus.READY) {
             return
         }
+        if (currentStatus == LocalModelItemStatus.FAILED) {
+            beginDownload(entry)
+            return
+        }
         when {
             downloadGuards.belowRamRequirement(entry) -> {
                 _uiState.update { it.copy(dialog = LocalModelsDialog.RamWarning(entry)) }

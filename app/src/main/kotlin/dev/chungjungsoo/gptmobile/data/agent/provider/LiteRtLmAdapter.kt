@@ -1,5 +1,6 @@
 package dev.chungjungsoo.gptmobile.data.agent.provider
 
+import android.util.Log
 import dev.chungjungsoo.gptmobile.data.agent.AgentProviderSession
 import dev.chungjungsoo.gptmobile.data.agent.AgentTool
 import dev.chungjungsoo.gptmobile.data.agent.AgentToolDefinition
@@ -41,6 +42,9 @@ class LiteRtLmAdapter(
     private val waitingForEngineNotice: String = DEFAULT_WAITING_FOR_ENGINE,
     private val tooManyImagesNotice: String = DEFAULT_TOO_MANY_IMAGES,
     private val loadingModelNotice: String = DEFAULT_LOADING_MODEL,
+    private val gpuUnavailableNotice: String = DEFAULT_GPU_UNAVAILABLE,
+    private val engineLoadFailedError: String = DEFAULT_ENGINE_LOAD_FAILED,
+    private val persistAcceleratorFallback: (suspend (String, String) -> Unit)? = null,
     private val modelCatalogRepository: ModelCatalogRepository? = null,
     private val loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { null }
 ) {
@@ -55,6 +59,7 @@ class LiteRtLmAdapter(
 
     private var openConversation: OpenConversation? = null
     private var isConversationDirty = false
+    private val cpuFallbackByModelPath = mutableMapOf<String, Boolean>()
     private var exclusiveToolsByName: Map<String, AgentTool> = emptyMap()
     private var exclusiveToolEventSink: (suspend (ProviderEvent) -> Unit)? = null
 
@@ -107,7 +112,7 @@ class LiteRtLmAdapter(
                     visionCapable = visionCapable,
                     includeImageBytes = false
                 )
-                val spec = LocalEngineSpec(
+                val spec = rememberedEngineSpec(
                     modelPath = modelPath,
                     accelerator = LocalAccelerators.normalize(platform.accelerator),
                     maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
@@ -131,13 +136,13 @@ class LiteRtLmAdapter(
                         if (!isEngineLoaded(spec) && loadingModelNotice.isNotBlank()) {
                             send(ProviderEvent.Notice(loadingModelNotice))
                         }
-                        loadEngine(spec)
+                        val loadedSpec = loadEngineOrFallback(spec, platform.uid) { event -> send(event) }
                         val snapshot = openConversation
                         val canReuse = !isConversationDirty &&
                             hasOpenConversation() &&
                             snapshot != null &&
                             snapshot.profileUid == platform.uid &&
-                            snapshot.engineSpec == spec &&
+                            snapshot.engineSpec == loadedSpec &&
                             snapshot.sampler == sampler &&
                             snapshot.systemPrompt == platform.systemPrompt &&
                             snapshot.toolsKey == toolsKey &&
@@ -178,7 +183,7 @@ class LiteRtLmAdapter(
                             )
                             openConversation = OpenConversation(
                                 profileUid = platform.uid,
-                                engineSpec = spec,
+                                engineSpec = loadedSpec,
                                 sampler = sampler,
                                 systemPrompt = platform.systemPrompt,
                                 toolsKey = toolsKey,
@@ -230,6 +235,9 @@ class LiteRtLmAdapter(
                     localRuntime.cancelActive()
                     isConversationDirty = true
                     throw error
+                } catch (error: LocalEngineLoadException) {
+                    isConversationDirty = true
+                    send(ProviderEvent.Failed(error.message ?: engineLoadFailedError))
                 } catch (error: Exception) {
                     isConversationDirty = true
                     send(ProviderEvent.Failed(error.message ?: "Local inference failed"))
@@ -280,10 +288,10 @@ class LiteRtLmAdapter(
             val images = latestAttachments.filter { attachment -> attachment.isImageAttachment() }
             val nonImages = latestAttachments.filter { attachment -> !attachment.isImageAttachment() }
             if (images.size > MAX_IMAGES_PER_MESSAGE) {
-                add(ProviderEvent.Notice(tooManyImagesNotice))
+                add(ProviderEvent.Notice(tooManyImagesNotice, persistent = true))
             }
             if (nonImages.isNotEmpty()) {
-                add(ProviderEvent.Notice(ignoredAttachmentsNotice))
+                add(ProviderEvent.Notice(ignoredAttachmentsNotice, persistent = true))
             }
             return@buildList
         }
@@ -292,7 +300,71 @@ class LiteRtLmAdapter(
                 turn.assistantMessage?.attachments?.isNotEmpty() == true
         }
         if (hasAttachments) {
-            add(ProviderEvent.Notice(ignoredAttachmentsNotice))
+            add(ProviderEvent.Notice(ignoredAttachmentsNotice, persistent = true))
+        }
+    }
+
+    private fun rememberedEngineSpec(
+        modelPath: String,
+        accelerator: String,
+        maxTokens: Int,
+        isVisionEnabled: Boolean
+    ): LocalEngineSpec {
+        val requested = LocalEngineSpec(
+            modelPath = modelPath,
+            accelerator = accelerator,
+            maxTokens = maxTokens,
+            isVisionEnabled = isVisionEnabled
+        )
+        return if (cpuFallbackByModelPath[modelPath] == true) {
+            requested.copy(accelerator = LocalAccelerators.CPU)
+        } else {
+            requested
+        }
+    }
+
+    private suspend fun LocalRuntime.loadEngineOrFallback(
+        requested: LocalEngineSpec,
+        platformUid: String,
+        send: suspend (ProviderEvent) -> Unit
+    ): LocalEngineSpec {
+        try {
+            loadEngine(requested)
+            return requested
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            logEngineFailure(requested, error)
+            if (LocalAccelerators.normalize(requested.accelerator) == LocalAccelerators.CPU) {
+                throw LocalEngineLoadException(engineLoadFailedError)
+            }
+            val cpuSpec = requested.copy(accelerator = LocalAccelerators.CPU)
+            try {
+                loadEngine(cpuSpec)
+            } catch (cpuCancelled: CancellationException) {
+                throw cpuCancelled
+            } catch (cpuError: Exception) {
+                logEngineFailure(cpuSpec, cpuError)
+                throw LocalEngineLoadException(engineLoadFailedError)
+            }
+            cpuFallbackByModelPath[requested.modelPath] = true
+            if (gpuUnavailableNotice.isNotBlank()) {
+                send(ProviderEvent.Notice(gpuUnavailableNotice, persistent = true))
+            }
+            persistAcceleratorFallback?.let { persist ->
+                runCatching { persist(platformUid, LocalAccelerators.CPU) }
+            }
+            return cpuSpec
+        }
+    }
+
+    private fun logEngineFailure(spec: LocalEngineSpec, error: Throwable) {
+        runCatching {
+            Log.e(
+                TAG,
+                "Failed to load local engine path=${spec.modelPath} accelerator=${spec.accelerator}",
+                error
+            )
         }
     }
 
@@ -369,10 +441,15 @@ class LiteRtLmAdapter(
         const val DEFAULT_WAITING_FOR_ENGINE = "Waiting for the local engine"
         const val DEFAULT_TOO_MANY_IMAGES = "The local platform accepted only the first 10 images"
         const val DEFAULT_LOADING_MODEL = "Loading local model…"
+        const val DEFAULT_GPU_UNAVAILABLE = "GPU unavailable on this device — running on CPU"
+        const val DEFAULT_ENGINE_LOAD_FAILED = "Couldn't load the local model on this device"
         const val MAX_IMAGES_PER_MESSAGE = 10
+        private const val TAG = "LiteRtLmAdapter"
         const val DEFAULT_TOP_K = 40
         const val DEFAULT_TOP_P = 0.95f
         const val DEFAULT_TEMPERATURE = 1.0f
         const val DEFAULT_MAX_TOKENS = 1024
     }
 }
+
+private class LocalEngineLoadException(message: String) : Exception(message)

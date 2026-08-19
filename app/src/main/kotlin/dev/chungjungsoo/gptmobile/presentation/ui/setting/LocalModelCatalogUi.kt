@@ -5,6 +5,7 @@ import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.database.entity.LocalModel
 import dev.chungjungsoo.gptmobile.data.localmodel.DownloadFailureKind
+import dev.chungjungsoo.gptmobile.data.localmodel.DownloadProgress
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.worker.LocalModelDownloadWorker
 
@@ -56,7 +57,8 @@ sealed class LocalModelsDialog {
 fun catalogLocalModelItems(
     catalog: List<CatalogEntry>,
     records: List<LocalModel>,
-    workInfos: List<WorkInfo>
+    workInfos: List<WorkInfo>,
+    partialBytesById: Map<String, Long> = emptyMap()
 ): List<LocalModelListItem> {
     val workById = workInfos.mapNotNull { info ->
         val id = info.tags.firstNotNullOfOrNull(LocalModelDownloadWorker::catalogEntryIdFromTag)
@@ -64,16 +66,23 @@ fun catalogLocalModelItems(
     }.toMap()
     val modelsById = records.associateBy { it.catalogEntryId }
     return catalog.map { entry ->
-        toLocalModelListItem(entry, modelsById[entry.id], workById[entry.id])
+        toLocalModelListItem(
+            entry,
+            modelsById[entry.id],
+            workById[entry.id],
+            diskPartialBytes = partialBytesById[entry.id] ?: 0L
+        )
     }
 }
 
 fun toLocalModelListItem(
     entry: CatalogEntry,
     record: LocalModel?,
-    workInfo: WorkInfo?
+    workInfo: WorkInfo?,
+    diskPartialBytes: Long = 0L
 ): LocalModelListItem {
-    val receivedBytes = workInfo?.progress?.getLong(LocalModelDownloadWorker.KEY_RECEIVED_BYTES, 0L) ?: 0L
+    val workReceived = workInfo?.progress?.getLong(LocalModelDownloadWorker.KEY_RECEIVED_BYTES, 0L) ?: 0L
+    val receivedBytes = DownloadProgress.receivedBytes(workReceived, diskPartialBytes)
     val bytesPerSecond = workInfo?.progress?.getLong(LocalModelDownloadWorker.KEY_DOWNLOAD_RATE, 0L) ?: 0L
     val remainingMs = workInfo?.progress?.getLong(LocalModelDownloadWorker.KEY_REMAINING_MS, 0L) ?: 0L
     val errorMessage = workInfo?.outputData?.getString(LocalModelDownloadWorker.KEY_ERROR_MESSAGE)

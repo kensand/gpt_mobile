@@ -68,7 +68,7 @@ class AgentRunner(
                                     emit(AgentRunEvent.Provider(event))
                                 }
 
-                                is ProviderEvent.Notice -> emit(AgentRunEvent.Notice(event.message))
+                                is ProviderEvent.Notice -> emit(AgentRunEvent.Notice(event.message, event.persistent))
 
                                 ProviderEvent.Completed -> completed = true
 
@@ -83,7 +83,7 @@ class AgentRunner(
                         exposedDefinitions = emptyList()
                         executableToolByName = emptyMap()
                         rounds -= 1
-                        emit(AgentRunEvent.Notice(TOOLS_UNAVAILABLE_MESSAGE))
+                        emit(AgentRunEvent.Notice(TOOLS_UNAVAILABLE_MESSAGE, persistent = true))
                         continue
                     }
                     emit(failed(error.message ?: "Tools are unavailable for this model."))

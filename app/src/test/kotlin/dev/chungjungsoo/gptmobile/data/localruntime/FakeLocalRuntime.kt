@@ -20,6 +20,7 @@ class FakeLocalRuntime : LocalRuntime {
 
     var scriptedEvents: List<List<LocalRuntimeEvent>> = emptyList()
     var scriptedToolInvocations: List<List<ScriptedToolInvocation>> = emptyList()
+    var failLoadEngineIf: (LocalEngineSpec) -> Throwable? = { null }
     var emitDelayMillis: Long = 0L
     var pauseAfterFirst: CompletableDeferred<Unit>? = null
     val generationMutex = Mutex()
@@ -36,6 +37,7 @@ class FakeLocalRuntime : LocalRuntime {
 
     override suspend fun loadEngine(spec: LocalEngineSpec) {
         loadEngineCalls += spec
+        failLoadEngineIf(spec)?.let { throw it }
         loadedSpec = spec
     }
 

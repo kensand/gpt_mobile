@@ -23,6 +23,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Numbers
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -128,8 +130,9 @@ fun PlatformSettingScreen(
                     .padding(innerPadding)
                     .verticalScroll(scrollState)
             ) {
+                val isLocalPlatform = platformData.compatibleType == ClientType.LITERT_LM
                 PreferenceSwitchWithContainer(
-                    title = stringResource(R.string.enable_api),
+                    title = stringResource(if (isLocalPlatform) R.string.enable_platform else R.string.enable_api),
                     isChecked = platformData.enabled
                 ) { settingViewModel.toggleEnabled() }
                 SettingItem(
@@ -147,7 +150,6 @@ fun PlatformSettingScreen(
                         )
                     }
                 )
-                val isLocalPlatform = platformData.compatibleType == ClientType.LITERT_LM
                 if (!isLocalPlatform) {
                     SettingItem(
                         modifier = Modifier.height(64.dp),
@@ -262,7 +264,7 @@ fun PlatformSettingScreen(
                         showLeadingIcon = true,
                         leadingIcon = {
                             Icon(
-                                ImageVector.vectorResource(id = R.drawable.ic_model),
+                                imageVector = Icons.Outlined.Numbers,
                                 contentDescription = stringResource(R.string.max_tokens_icon)
                             )
                         }
@@ -277,7 +279,7 @@ fun PlatformSettingScreen(
                         showLeadingIcon = true,
                         leadingIcon = {
                             Icon(
-                                ImageVector.vectorResource(id = R.drawable.ic_model),
+                                imageVector = Icons.Outlined.Speed,
                                 contentDescription = stringResource(R.string.accelerator_icon)
                             )
                         }

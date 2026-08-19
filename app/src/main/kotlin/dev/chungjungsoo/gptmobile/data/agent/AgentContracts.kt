@@ -10,7 +10,7 @@ sealed interface ProviderEvent {
     data class ToolCall(val callId: String, val name: String, val arguments: JsonObject) : ProviderEvent
     data class ToolResult(val call: ToolCall, val result: AgentToolResult) : ProviderEvent
     data class Failed(val message: String) : ProviderEvent
-    data class Notice(val message: String) : ProviderEvent
+    data class Notice(val message: String, val persistent: Boolean = false) : ProviderEvent
     data object Completed : ProviderEvent
 }
 
@@ -72,7 +72,7 @@ sealed interface AgentRunEvent {
     data class Provider(val event: ProviderEvent) : AgentRunEvent
     data class ToolStarted(val call: ProviderEvent.ToolCall) : AgentRunEvent
     data class ToolFinished(val call: ProviderEvent.ToolCall, val result: AgentToolResult) : AgentRunEvent
-    data class Notice(val message: String) : AgentRunEvent
+    data class Notice(val message: String, val persistent: Boolean = false) : AgentRunEvent
 }
 
 class ToolDefinitionsRejectedException(message: String, cause: Throwable? = null) : Exception(message, cause)

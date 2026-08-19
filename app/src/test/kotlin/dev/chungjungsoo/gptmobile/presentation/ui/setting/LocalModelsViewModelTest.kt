@@ -1,11 +1,14 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
+import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.repository.FakeLocalModelRepository
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.FakeLocalDownloadGuards
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.MapSecretVault
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.RecordingProber
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.localModelsViewModel
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.wizardGatedCoordinator
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.wizardStoredModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -109,5 +112,37 @@ class LocalModelsViewModelTest {
         assertTrue(dialog is LocalModelsDialog.OAuthNotConfigured)
         assertTrue((dialog as LocalModelsDialog.OAuthNotConfigured).isSessionExpired)
         assertNull(tokenStore.readAccessToken())
+    }
+
+    @Test
+    fun `retry of a failed download skips ram and metered guards`() = runTest {
+        val localModels = FakeLocalModelRepository(
+            listOf(wizardStoredModel("pending-model", status = LocalModelStatus.FAILED))
+        )
+        val viewModel = localModelsViewModel(
+            localModels = localModels,
+            guards = FakeLocalDownloadGuards(metered = true, lowRamEntryIds = setOf("pending-model"))
+        )
+        val entry = viewModel.uiState.value.items.single { it.entry.id == "pending-model" }.entry
+
+        viewModel.onDownloadClick(entry)
+
+        assertEquals(listOf("pending-model"), localModels.startDownloadCalls)
+        assertEquals(LocalModelsDialog.Hidden, viewModel.uiState.value.dialog)
+    }
+
+    @Test
+    fun `fresh download still shows the ram warning`() = runTest {
+        val localModels = FakeLocalModelRepository()
+        val viewModel = localModelsViewModel(
+            localModels = localModels,
+            guards = FakeLocalDownloadGuards(lowRamEntryIds = setOf("pending-model"))
+        )
+        val entry = viewModel.uiState.value.items.single { it.entry.id == "pending-model" }.entry
+
+        viewModel.onDownloadClick(entry)
+
+        assertTrue(viewModel.uiState.value.dialog is LocalModelsDialog.RamWarning)
+        assertTrue(localModels.startDownloadCalls.isEmpty())
     }
 }

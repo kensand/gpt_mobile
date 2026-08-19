@@ -18,7 +18,10 @@ import dagger.assisted.AssistedInject
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.dao.LocalModelDao
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
+import dev.chungjungsoo.gptmobile.data.localmodel.DownloadAuthException
+import dev.chungjungsoo.gptmobile.data.localmodel.DownloadErrorClassifier
 import dev.chungjungsoo.gptmobile.data.localmodel.DownloadFailureKind
+import dev.chungjungsoo.gptmobile.data.localmodel.DownloadProgress
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadPaths
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.presentation.ui.main.MainActivity
@@ -56,7 +59,13 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         }
 
         ensureNotificationChannel()
-        runCatching { setForeground(createForegroundInfo(progress = 0, modelName = displayName)) }
+        val seededPercent = seedPercent(
+            catalogEntryId = catalogEntryId,
+            commitHash = commitHash,
+            fileName = fileName,
+            totalBytes = totalBytes
+        )
+        runCatching { setForeground(createForegroundInfo(progress = seededPercent, modelName = displayName)) }
 
         return withContext(Dispatchers.IO) {
             try {
@@ -85,18 +94,33 @@ class LocalModelDownloadWorker @AssistedInject constructor(
                 )
             } catch (error: IOException) {
                 Log.e(TAG, error.message, error)
-                markStatus(catalogEntryId, LocalModelStatus.FAILED)
-                Result.failure(
-                    Data.Builder()
-                        .putString(KEY_ERROR_MESSAGE, error.message)
-                        .putString(KEY_FAILURE_KIND, DownloadFailureKind.GENERIC.name)
-                        .build()
-                )
+                val hadProgress = hadPartialProgress(catalogEntryId, commitHash, fileName)
+                val classification = DownloadErrorClassifier.classify(error, hadProgress)
+                if (DownloadErrorClassifier.shouldRetry(classification, runAttemptCount)) {
+                    Result.retry()
+                } else {
+                    markStatus(catalogEntryId, LocalModelStatus.FAILED)
+                    Result.failure(
+                        Data.Builder()
+                            .putString(KEY_ERROR_MESSAGE, error.message)
+                            .putString(KEY_FAILURE_KIND, DownloadFailureKind.GENERIC.name)
+                            .build()
+                    )
+                }
             }
         }
     }
 
-    override suspend fun getForegroundInfo(): ForegroundInfo = createForegroundInfo(0)
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val displayName = inputData.getString(KEY_DISPLAY_NAME)
+        val percent = seedPercent(
+            catalogEntryId = inputData.getString(KEY_CATALOG_ENTRY_ID),
+            commitHash = inputData.getString(KEY_COMMIT_HASH),
+            fileName = inputData.getString(KEY_FILE_NAME),
+            totalBytes = inputData.getLong(KEY_TOTAL_BYTES, 0L)
+        )
+        return createForegroundInfo(percent, displayName)
+    }
 
     private suspend fun downloadFile(
         catalogEntryId: String,
@@ -115,6 +139,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
 
         val outputTmpFile = File(outputDir, LocalModelDownloadPaths.partialFileName(fileName))
         val partialLength = outputTmpFile.length()
+        publishSeededProgress(partialLength, totalBytes, displayName)
         val connection = URL(downloadUrl).openConnection() as HttpURLConnection
         try {
             if (accessToken != null) {
@@ -236,12 +261,12 @@ class LocalModelDownloadWorker @AssistedInject constructor(
     }
 
     private fun createForegroundInfo(progress: Int, modelName: String? = null): ForegroundInfo {
-        val title = if (modelName != null) {
-            applicationContext.getString(R.string.local_model_download_notification_title, modelName)
+        val title = applicationContext.getString(R.string.local_model_download_notification_title)
+        val content = if (modelName != null) {
+            applicationContext.getString(R.string.local_model_download_notification_content, modelName, progress)
         } else {
-            applicationContext.getString(R.string.local_model_download_notification_title_generic)
+            applicationContext.getString(R.string.local_model_download_notification_progress, progress)
         }
-        val content = applicationContext.getString(R.string.local_model_download_notification_progress, progress)
         val intent = Intent(applicationContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -284,6 +309,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         const val KEY_REMAINING_MS = "remaining_ms"
         const val KEY_ERROR_MESSAGE = "error_message"
         const val KEY_FAILURE_KIND = "failure_kind"
+        const val INITIAL_BACKOFF_SECONDS = 10L
         private const val TAG = "LocalModelDownload"
         private const val CHANNEL_ID = "local_model_downloads"
         private const val PROGRESS_INTERVAL_MS = 200L
@@ -294,6 +320,37 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         fun catalogEntryIdFromTag(tag: String): String? = tag.takeIf { it.startsWith(ID_TAG_PREFIX) }?.removePrefix(ID_TAG_PREFIX)
     }
 
+    private fun seedPercent(
+        catalogEntryId: String?,
+        commitHash: String?,
+        fileName: String?,
+        totalBytes: Long
+    ): Int {
+        if (catalogEntryId.isNullOrBlank() || commitHash.isNullOrBlank() || fileName.isNullOrBlank()) return 0
+        return DownloadProgress.percent(partialFileBytes(catalogEntryId, commitHash, fileName), totalBytes)
+    }
+
+    private fun hadPartialProgress(catalogEntryId: String, commitHash: String, fileName: String): Boolean = partialFileBytes(catalogEntryId, commitHash, fileName) > 0L
+
+    private fun partialFileBytes(catalogEntryId: String, commitHash: String, fileName: String): Long {
+        val storageRoot = applicationContext.getExternalFilesDir(null) ?: applicationContext.filesDir
+        val file = File(storageRoot, LocalModelDownloadPaths.relativePartialFilePath(catalogEntryId, commitHash, fileName))
+        return file.takeIf { it.exists() }?.length() ?: 0L
+    }
+
+    private suspend fun publishSeededProgress(partialLength: Long, totalBytes: Long, displayName: String) {
+        if (partialLength <= 0L) return
+        val percent = DownloadProgress.percent(partialLength, totalBytes)
+        setProgress(
+            Data.Builder()
+                .putLong(KEY_RECEIVED_BYTES, partialLength)
+                .putLong(KEY_DOWNLOAD_RATE, 0L)
+                .putLong(KEY_REMAINING_MS, 0L)
+                .build()
+        )
+        runCatching { setForeground(createForegroundInfo(progress = percent, modelName = displayName)) }
+    }
+
     private fun messageResFor(kind: DownloadFailureKind): Int = when (kind) {
         DownloadFailureKind.SESSION_EXPIRED -> R.string.local_model_session_expired
         DownloadFailureKind.AUTH_REQUIRED -> R.string.local_model_auth_required
@@ -301,8 +358,3 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         DownloadFailureKind.GENERIC -> R.string.local_model_failed
     }
 }
-
-private class DownloadAuthException(
-    val kind: DownloadFailureKind,
-    message: String
-) : IOException(message)

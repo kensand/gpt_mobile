@@ -11,6 +11,7 @@ import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.localruntime.FakeLocalRuntime
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalEngineHolder
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalHistoryMessage
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalHistoryRole
@@ -359,7 +360,7 @@ class LiteRtLmAdapterTest {
 
         assertEquals(
             listOf(
-                ProviderEvent.Notice("The local platform ignored attachments"),
+                ProviderEvent.Notice("The local platform ignored attachments", persistent = true),
                 ProviderEvent.TextDelta("ok"),
                 ProviderEvent.Completed
             ),
@@ -406,7 +407,7 @@ class LiteRtLmAdapterTest {
 
         assertEquals(
             listOf(
-                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS),
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS, persistent = true),
                 ProviderEvent.TextDelta("ok"),
                 ProviderEvent.Completed
             ),
@@ -430,7 +431,7 @@ class LiteRtLmAdapterTest {
 
         assertEquals(
             listOf(
-                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS),
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS, persistent = true),
                 ProviderEvent.TextDelta("ok"),
                 ProviderEvent.Completed
             ),
@@ -458,7 +459,7 @@ class LiteRtLmAdapterTest {
 
         assertEquals(
             listOf(
-                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS),
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS, persistent = true),
                 ProviderEvent.TextDelta("ok"),
                 ProviderEvent.Completed
             ),
@@ -485,7 +486,7 @@ class LiteRtLmAdapterTest {
 
         assertEquals(
             listOf(
-                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES),
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES, persistent = true),
                 ProviderEvent.TextDelta("ok"),
                 ProviderEvent.Completed
             ),
@@ -1009,6 +1010,64 @@ class LiteRtLmAdapterTest {
     }
 
     @Test
+    fun `gpu engine load failure falls back to cpu emits notice and later turns use cpu`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            failLoadEngineIf = { spec ->
+                if (spec.accelerator == LocalAccelerators.GPU) {
+                    IllegalStateException("Failed to create engine … CreateSharedMemoryManager unimplemented")
+                } else {
+                    null
+                }
+            }
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("next"), LocalRuntimeEvent.Done)
+            )
+        }
+        val persisted = mutableListOf<Pair<String, String>>()
+        val adapter = adapter(
+            runtime,
+            persistAcceleratorFallback = { uid, accelerator -> persisted += uid to accelerator }
+        )
+        val platform = localPlatform()
+
+        val first = adapter.openSession(turns("hello"), platform).streamRound(emptyList(), emptyList()).toList()
+        val second = adapter.openSession(
+            listOf(completedTurn("hello", "ok"), pendingTurn("again")),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertTrue(first.any { it is ProviderEvent.Notice && it.message == LiteRtLmAdapter.DEFAULT_GPU_UNAVAILABLE })
+        assertTrue(first.any { it is ProviderEvent.TextDelta && it.text == "ok" })
+        assertTrue(first.last() is ProviderEvent.Completed)
+        assertFalse(first.any { it is ProviderEvent.Failed })
+        assertEquals(
+            listOf(LocalAccelerators.GPU, LocalAccelerators.CPU, LocalAccelerators.CPU),
+            runtime.loadEngineCalls.map { it.accelerator }
+        )
+        assertEquals(listOf(LocalAccelerators.CPU), runtime.loadEngineCalls.drop(2).map { it.accelerator })
+        assertFalse(second.any { it is ProviderEvent.Notice && it.message == LiteRtLmAdapter.DEFAULT_GPU_UNAVAILABLE })
+        assertEquals(listOf("local" to LocalAccelerators.CPU), persisted)
+    }
+
+    @Test
+    fun `cpu fallback failure surfaces a clean engine error instead of the native dump`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            failLoadEngineIf = {
+                IllegalStateException("Failed to create engine … CreateSharedMemoryManager unimplemented")
+            }
+        }
+        val adapter = adapter(runtime)
+
+        val events = adapter.openSession(turns("hello"), localPlatform()).streamRound(emptyList(), emptyList()).toList()
+
+        val failed = events.filterIsInstance<ProviderEvent.Failed>().single()
+        assertEquals(LiteRtLmAdapter.DEFAULT_ENGINE_LOAD_FAILED, failed.message)
+        assertFalse(failed.message.contains("CreateSharedMemoryManager"))
+        assertFalse(failed.message.contains("Failed to create engine"))
+    }
+
+    @Test
     fun `holding the fake mutex emits waiting notice before the run`() = runBlocking {
         val runtime = FakeLocalRuntime().apply {
             scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
@@ -1049,6 +1108,7 @@ class LiteRtLmAdapterTest {
         ),
         catalog: ModelCatalogRepository = FakeModelCatalogRepository(),
         loadingModelNotice: String = "",
+        persistAcceleratorFallback: (suspend (String, String) -> Unit)? = null,
         loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { attachment ->
             attachment.preparedFilePath.ifBlank { attachment.localFilePath }.toByteArray()
         }
@@ -1059,6 +1119,7 @@ class LiteRtLmAdapterTest {
         modelNotDownloadedError = LiteRtLmAdapter.DEFAULT_MODEL_NOT_DOWNLOADED,
         tooManyImagesNotice = LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES,
         loadingModelNotice = loadingModelNotice,
+        persistAcceleratorFallback = persistAcceleratorFallback,
         modelCatalogRepository = catalog,
         loadImageBytes = loadImageBytes
     )

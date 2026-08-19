@@ -81,6 +81,7 @@
     <string name="google_setting">Google Settings</string>
     <string name="platform_setting_description">API Key, Model, System Prompt</string>
     <string name="enable_api">Enable API</string>
+    <string name="enable_platform">Enable platform</string>
     <string name="api_key">API Key</string>
     <string name="api_model">API Model</string>
     <string name="dynamic_theme">Dynamic Theme</string>
@@ -289,6 +290,8 @@
     <string name="local_platform_model_not_downloaded">This Local Model is not downloaded. Download it from Settings → Local Models.</string>
     <string name="local_platform_waiting_for_engine">Waiting for the local engine</string>
     <string name="local_platform_loading_model">Loading local model…</string>
+    <string name="local_platform_gpu_unavailable_cpu">GPU unavailable on this device — running on CPU</string>
+    <string name="local_platform_engine_load_failed">Couldn\'t load the local model on this device</string>
     <string name="local_platform_basics_description">Give this Local Platform a name. It will run a Local Model on-device.</string>
     <string name="api_url_hint">https://api.example.com</string>
     <string name="api_key_hint">sk-…</string>
@@ -496,8 +499,9 @@
     <string name="local_model_eta_seconds">%1$ds</string>
     <string name="local_model_download_notification_channel">Local Model downloads</string>
     <string name="local_model_download_notification_channel_description">Progress for Local Model downloads</string>
-    <string name="local_model_download_notification_title">Downloading \"%1$s\"</string>
-    <string name="local_model_download_notification_title_generic">Downloading Local Model</string>
+    <string name="local_model_download_notification_title">Downloading model</string>
+    <string name="local_model_download_notification_title_generic">Downloading model</string>
+    <string name="local_model_download_notification_content">%1$s · %2$d%%</string>
     <string name="local_model_download_notification_progress">Downloading in progress: %1$d%%</string>
     <string name="capability_vision">Vision</string>
     <string name="capability_tools">Tools</string>

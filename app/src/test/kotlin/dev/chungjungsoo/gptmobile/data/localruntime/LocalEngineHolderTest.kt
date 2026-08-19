@@ -75,6 +75,31 @@ class LocalEngineHolderTest {
     }
 
     @Test
+    fun `failed load clears the cached spec so a later cpu spec can reload`() = runTest {
+        val gpu = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024)
+        val cpu = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.CPU, 1024)
+        val fake = FakeLocalRuntime().apply {
+            failLoadEngineIf = { spec ->
+                if (spec.accelerator == LocalAccelerators.GPU) {
+                    IllegalStateException("CreateSharedMemoryManager unimplemented")
+                } else {
+                    null
+                }
+            }
+        }
+        val holder = LocalEngineHolder(fake)
+
+        holder.loadEngine(cpu)
+        runCatching { holder.loadEngine(gpu) }
+        holder.loadEngine(cpu)
+
+        assertEquals(listOf(cpu, gpu, cpu), fake.loadEngineCalls)
+        assertEquals(1, fake.unloadEngineCalls)
+        assertTrue(holder.isEngineLoaded(cpu))
+        assertFalse(holder.isEngineLoaded(gpu))
+    }
+
+    @Test
     fun `reloads engine when accelerator changes from GPU to NPU`() = runTest {
         val fake = FakeLocalRuntime()
         val holder = LocalEngineHolder(fake)

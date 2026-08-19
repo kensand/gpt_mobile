@@ -76,7 +76,12 @@ class LocalModelsViewModel @Inject constructor(
                 localModelRepository.observeAll(),
                 localModelRepository.observeWorkInfos()
             ) { localModels, workInfos ->
-                val items = catalogLocalModelItems(catalogEntries, localModels, workInfos)
+                val items = catalogLocalModelItems(
+                    catalogEntries,
+                    localModels,
+                    workInfos,
+                    localModels.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) }
+                )
                 val storage = localModels
                     .filter { it.status == LocalModelStatus.READY }
                     .sumOf { it.totalBytes }

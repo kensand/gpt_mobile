@@ -20,9 +20,15 @@ class LocalEngineHolder(
         if (loadedSpec != null) {
             delegate.closeConversation()
             delegate.unloadEngine()
+            loadedSpec = null
         }
-        delegate.loadEngine(spec)
-        loadedSpec = spec
+        try {
+            delegate.loadEngine(spec)
+            loadedSpec = spec
+        } catch (error: Throwable) {
+            loadedSpec = null
+            throw error
+        }
     }
 
     override suspend fun createConversation(config: LocalConversationConfig) = withGenerationLock {

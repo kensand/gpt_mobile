@@ -1,6 +1,7 @@
 package dev.chungjungsoo.gptmobile.data.repository
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -17,6 +18,7 @@ import dev.chungjungsoo.gptmobile.data.localmodel.ReconcileAction
 import dev.chungjungsoo.gptmobile.data.localmodel.SocVariantResolver
 import dev.chungjungsoo.gptmobile.data.worker.LocalModelDownloadWorker
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -80,6 +82,11 @@ class LocalModelRepositoryImpl(
 
             val request = OneTimeWorkRequestBuilder<LocalModelDownloadWorker>()
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    LocalModelDownloadWorker.INITIAL_BACKOFF_SECONDS,
+                    TimeUnit.SECONDS
+                )
                 .setInputData(inputData)
                 .addTag(LocalModelDownloadWorker.WORK_TAG)
                 .addTag(LocalModelDownloadWorker.idTag(entry.id))
@@ -132,6 +139,14 @@ class LocalModelRepositoryImpl(
         localModelDao.getAll()
             .filter { it.status == LocalModelStatus.READY }
             .sumOf { diskBytes(it) }
+    }
+
+    override fun diskPartialBytes(record: LocalModel): Long {
+        val file = File(
+            storageRoot(),
+            LocalModelDownloadPaths.relativePartialFilePath(record.catalogEntryId, record.commitHash, record.fileName)
+        )
+        return file.takeIf { it.exists() }?.length() ?: 0L
     }
 
     override suspend fun reconcile() {

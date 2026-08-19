@@ -135,6 +135,7 @@ fun ChatScreen(
     val chatRoom by chatViewModel.chatRoom.collectAsStateWithLifecycle()
     val groupedMessages by chatViewModel.groupedMessages.collectAsStateWithLifecycle()
     val agentRunsById by chatViewModel.agentRunsById.collectAsStateWithLifecycle()
+    val runNoticesById by chatViewModel.runNoticesById.collectAsStateWithLifecycle()
     val toolEventsByRun by chatViewModel.toolEventsByRun.collectAsStateWithLifecycle()
     val indexStates by chatViewModel.indexStates.collectAsStateWithLifecycle()
     val loadingStates by chatViewModel.loadingStates.collectAsStateWithLifecycle()
@@ -270,6 +271,7 @@ fun ChatScreen(
                             message = message,
                             assistantMessages = groupedMessages.assistantMessages.getOrNull(index) ?: emptyList(),
                             agentRunsById = agentRunsById,
+                            runNoticesById = runNoticesById,
                             toolEventsByRun = toolEventsByRun,
                             platformIndexState = indexStates.getOrElse(index) { 0 },
                             loadingStates = loadingStates,
@@ -432,6 +434,7 @@ private fun ChatMessagePair(
     message: MessageV2,
     assistantMessages: List<MessageV2>,
     agentRunsById: Map<String, AgentRun>,
+    runNoticesById: Map<String, List<ChatRunNotice>>,
     toolEventsByRun: Map<String, List<ToolEvent>>,
     platformIndexState: Int,
     loadingStates: List<ChatViewModel.LoadingState>,
@@ -540,6 +543,7 @@ private fun ChatMessagePair(
                 timeline = assistantTimeline,
                 attachments = selectedAssistantMessage?.attachments.orEmpty().map { it.filePathForDisplay },
                 agentRun = agentRun,
+                runNotices = selectedRunId?.let(runNoticesById::get).orEmpty(),
                 toolEvents = toolEvents,
                 contentIdentity = "$messageIndex:$selectedPlatformUid:${selectedRunId.orEmpty()}:${selectedAssistantMessage?.activeRevisionIndex}",
                 revisionIndexLabel = selectedAssistantMessage?.let { assistantMessage ->

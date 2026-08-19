@@ -53,7 +53,12 @@ class AddPlatformViewModel @Inject constructor(
         localModelRepository.observeAll(),
         localModelRepository.observeWorkInfos()
     ) { catalog, models, workInfos ->
-        catalogLocalModelItems(catalog, models, workInfos)
+        catalogLocalModelItems(
+            catalog,
+            models,
+            workInfos,
+            models.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) }
+        )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val localModelDownloadState: StateFlow<LocalModelDownloadUiState> = downloadActions.uiState

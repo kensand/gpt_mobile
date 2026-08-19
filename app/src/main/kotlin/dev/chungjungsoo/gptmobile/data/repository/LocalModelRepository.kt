@@ -15,4 +15,5 @@ interface LocalModelRepository {
     suspend fun deleteModel(catalogEntryId: String)
     suspend fun totalStorageUsed(): Long
     suspend fun reconcile()
+    fun diskPartialBytes(record: LocalModel): Long = 0L
 }

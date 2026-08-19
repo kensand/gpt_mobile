@@ -221,7 +221,7 @@ class AgentRunnerTest {
         val events = AgentRunner().run(session, listOf(tool())).toList()
 
         assertEquals(listOf(1, 0), exposedTools.map { it.size })
-        assertTrue(events.contains(AgentRunEvent.Notice("Tools unavailable for this model.")))
+        assertTrue(events.contains(AgentRunEvent.Notice("Tools unavailable for this model.", persistent = true)))
         assertTrue(events.contains(AgentRunEvent.Provider(ProviderEvent.TextDelta("chat fallback"))))
     }
 
@@ -255,7 +255,7 @@ class AgentRunnerTest {
         val events = AgentRunner().run(session, listOf(tool)).toList()
 
         assertEquals(0, executions.get())
-        assertTrue(events.contains(AgentRunEvent.Notice("Tools unavailable for this model.")))
+        assertTrue(events.contains(AgentRunEvent.Notice("Tools unavailable for this model.", persistent = true)))
         assertTrue(events.contains(AgentRunEvent.Provider(ProviderEvent.TextDelta("chat fallback"))))
     }
 

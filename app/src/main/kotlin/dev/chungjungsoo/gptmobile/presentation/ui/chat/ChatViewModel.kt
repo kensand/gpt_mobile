@@ -17,6 +17,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ACTIVE_REVISION_LATEST
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRun
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunDraft
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentRunStatus
+import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItem
 import dev.chungjungsoo.gptmobile.data.database.entity.AssistantTimelineItemType
 import dev.chungjungsoo.gptmobile.data.database.entity.ChatRoomV2
 import dev.chungjungsoo.gptmobile.data.database.entity.LEGACY_ORDER_NOTICE
@@ -160,6 +161,9 @@ class ChatViewModel @Inject constructor(
 
     private val _attachmentNotice = MutableStateFlow<String?>(null)
     val attachmentNotice = _attachmentNotice.asStateFlow()
+
+    private val _runNoticesById = MutableStateFlow<Map<String, List<ChatRunNotice>>>(emptyMap())
+    val runNoticesById = _runNoticesById.asStateFlow()
 
     private val _needsLocalNetworkAccess = MutableStateFlow(false)
     val needsLocalNetworkAccess = _needsLocalNetworkAccess.asStateFlow()
@@ -1101,6 +1105,13 @@ class ChatViewModel @Inject constructor(
                 }
                 .collect { runs ->
                     _agentRunsById.update { runs.associateBy(AgentRun::runId) }
+                    _runNoticesById.update { current ->
+                        pruneTransientChatRunNotices(
+                            current,
+                            runStatuses = runs.associate { it.runId to it.status },
+                            activeRunIds = agentRunCoordinator.activeRuns.value.keys
+                        )
+                    }
                     syncLoadingStates(runs)
                 }
         }
@@ -1110,7 +1121,9 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             agentRunCoordinator.notices.collect { notice ->
                 if (notice.chatId == _chatRoom.value.id) {
-                    _attachmentNotice.update { notice.message }
+                    _runNoticesById.update { current ->
+                        applyChatRunNotice(current, notice.runId, notice.message, notice.persistent)
+                    }
                 }
             }
         }
@@ -1171,6 +1184,44 @@ class ChatViewModel @Inject constructor(
         }
     }
 }
+
+data class ChatRunNotice(
+    val message: String,
+    val persistent: Boolean
+)
+
+internal fun applyChatRunNotice(
+    noticesByRunId: Map<String, List<ChatRunNotice>>,
+    runId: String,
+    message: String,
+    persistent: Boolean
+): Map<String, List<ChatRunNotice>> {
+    if (runId.isBlank() || message.isBlank()) return noticesByRunId
+    val current = noticesByRunId[runId].orEmpty()
+    if (current.any { it.message == message && it.persistent == persistent }) return noticesByRunId
+    return noticesByRunId + (runId to (current + ChatRunNotice(message, persistent)))
+}
+
+internal fun pruneTransientChatRunNotices(
+    noticesByRunId: Map<String, List<ChatRunNotice>>,
+    runStatuses: Map<String, String>,
+    activeRunIds: Set<String>
+): Map<String, List<ChatRunNotice>> = noticesByRunId.mapValues { (runId, notices) ->
+    val status = runStatuses[runId]
+    val isActive = runId in activeRunIds || status == AgentRunStatus.QUEUED || status == AgentRunStatus.RUNNING
+    if (isActive) notices else notices.filter { it.persistent }
+}.filterValues { it.isNotEmpty() }
+
+internal fun visibleChatRunNotices(
+    stored: List<ChatRunNotice>,
+    timelineNotices: List<String>,
+    isRunActive: Boolean
+): List<String> {
+    val fromStore = stored.filter { it.persistent || isRunActive }.map { it.message }
+    return (timelineNotices + fromStore).distinct()
+}
+
+internal fun timelineNoticeMessages(timeline: List<AssistantTimelineItem>): List<String> = timeline.filter { it.type == AssistantTimelineItemType.NOTICE }.map { it.content }.filter { it.isNotBlank() }
 
 internal fun loadingStatesForLatestAssistant(
     platformCount: Int,
@@ -1328,6 +1379,8 @@ internal fun formatAssistantExport(
                     item.toolSequence
                         ?.let(traceBySequence::get)
                         ?.let { appendLine(formatToolTraceMarkdown(listOf(it), toolTraceLabels)) }
+
+                AssistantTimelineItemType.NOTICE -> appendLine("> ${item.content}")
 
                 AssistantTimelineItemType.LEGACY_ORDER -> Unit
             }

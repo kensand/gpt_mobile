@@ -99,6 +99,7 @@ fun OpponentChatBubble(
     timeline: List<AssistantTimelineItem> = emptyList(),
     attachments: List<String> = emptyList(),
     agentRun: AgentRun? = null,
+    runNotices: List<ChatRunNotice> = emptyList(),
     toolEvents: List<ToolEvent> = emptyList(),
     contentIdentity: Any = text,
     canEdit: Boolean = false,
@@ -119,7 +120,18 @@ fun OpponentChatBubble(
         disabledContainerColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.38f)
     )
 
+    val noticeMessages = visibleChatRunNotices(
+        stored = runNotices,
+        timelineNotices = timelineNoticeMessages(timeline),
+        isRunActive = isLoading
+    )
+    val contentTimeline = timeline.filter { it.type != AssistantTimelineItemType.NOTICE }
+
     Column(modifier = modifier) {
+        RunNoticeChips(
+            notices = noticeMessages,
+            modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp)
+        )
         AgentRunStatusBlock(
             run = agentRun,
             modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp)
@@ -127,14 +139,14 @@ fun OpponentChatBubble(
 
         Column {
             val hasUnavailableOrder = hasUnavailableAssistantOrder(
-                timeline = timeline,
+                timeline = contentTimeline,
                 content = text,
                 thoughts = thoughts,
                 hasToolEvents = toolEvents.isNotEmpty()
             )
-            if (timeline.isNotEmpty() && !hasUnavailableOrder) {
+            if (contentTimeline.isNotEmpty() && !hasUnavailableOrder) {
                 AssistantTimelineContent(
-                    timeline = timeline,
+                    timeline = contentTimeline,
                     toolEvents = toolEvents,
                     isLoading = isLoading,
                     contentIdentity = contentIdentity
@@ -255,6 +267,8 @@ private fun AssistantTimelineContent(
                             contentIdentity = "$contentIdentity:tool:${event.sequence}"
                         )
                     }
+
+            AssistantTimelineItemType.NOTICE -> Unit
 
             AssistantTimelineItemType.LEGACY_ORDER -> Unit
         }
