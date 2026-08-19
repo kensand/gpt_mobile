@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -27,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,6 +49,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
@@ -73,6 +77,16 @@ fun LocalModelsScreen(
     ) {
         pendingDownload?.let(viewModel::onDownloadClick)
         pendingDownload = null
+    }
+    val authLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.onAuthActivityResult(result.data)
+    }
+    val licenseTabLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.onLicenseTabClosed()
     }
 
     fun requestDownload(entry: CatalogEntry) {
@@ -136,6 +150,7 @@ fun LocalModelsScreen(
                     uiState.items.forEach { item ->
                         LocalModelItem(
                             item = item,
+                            isCheckingAccess = uiState.checkingAccessEntryId == item.entry.id,
                             onDownload = { requestDownload(item.entry) },
                             onCancel = { viewModel.cancelDownload(item.entry) },
                             onDelete = { viewModel.onDeleteClick(item.entry) }
@@ -174,6 +189,57 @@ fun LocalModelsScreen(
                 text = stringResource(R.string.local_model_delete_confirmation),
                 confirmLabel = stringResource(R.string.delete),
                 onConfirm = viewModel::confirmDelete,
+                onDismiss = viewModel::dismissDialog
+            )
+        }
+
+        is LocalModelsDialog.SignIn -> {
+            HuggingFaceSignInSheet(
+                sessionExpired = dialog.sessionExpired,
+                onSignIn = {
+                    val intent = viewModel.startHuggingFaceSignIn()
+                    if (intent != null) {
+                        authLauncher.launch(intent)
+                    }
+                },
+                onDismiss = viewModel::dismissDialog
+            )
+        }
+
+        is LocalModelsDialog.License -> {
+            HuggingFaceLicenseSheet(
+                onOpenAgreement = {
+                    runCatching {
+                        val customTabsIntent = CustomTabsIntent.Builder().build()
+                        customTabsIntent.intent.data = dialog.modelPageUrl.toUri()
+                        licenseTabLauncher.launch(customTabsIntent.intent)
+                    }
+                },
+                onRetry = viewModel::retryAfterLicense,
+                onDismiss = viewModel::dismissDialog
+            )
+        }
+
+        LocalModelsDialog.OAuthNotConfigured -> {
+            MessageDialog(
+                title = stringResource(R.string.local_model_oauth_not_configured_title),
+                text = stringResource(R.string.local_model_oauth_not_configured_message),
+                onDismiss = viewModel::dismissDialog
+            )
+        }
+
+        LocalModelsDialog.ProbeError -> {
+            MessageDialog(
+                title = stringResource(R.string.local_model_probe_error_title),
+                text = stringResource(R.string.local_model_probe_error_message),
+                onDismiss = viewModel::dismissDialog
+            )
+        }
+
+        LocalModelsDialog.SignInFailed -> {
+            MessageDialog(
+                title = stringResource(R.string.local_model_sign_in_title),
+                text = stringResource(R.string.local_model_sign_in_failed),
                 onDismiss = viewModel::dismissDialog
             )
         }
@@ -217,6 +283,7 @@ private fun LocalModelsTopBar(
 @Composable
 private fun LocalModelItem(
     item: LocalModelListItem,
+    isCheckingAccess: Boolean,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit
@@ -254,8 +321,22 @@ private fun LocalModelItem(
                 }
             }
         }
-        when (item.status) {
-            LocalModelItemStatus.NOT_DOWNLOADED -> {
+        when {
+            isCheckingAccess -> {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                )
+                Text(
+                    text = stringResource(R.string.local_model_checking_access),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            item.status == LocalModelItemStatus.NOT_DOWNLOADED -> {
                 if (entry.isGated) {
                     Text(
                         text = stringResource(R.string.local_model_gated_hint),
@@ -269,7 +350,7 @@ private fun LocalModelItem(
                 }
             }
 
-            LocalModelItemStatus.DOWNLOADING -> {
+            item.status == LocalModelItemStatus.DOWNLOADING -> {
                 val percent = if (item.diskBytes > 0L) {
                     ((item.receivedBytes * 100) / item.diskBytes).toInt().coerceIn(0, 100)
                 } else {
@@ -300,7 +381,7 @@ private fun LocalModelItem(
                 }
             }
 
-            LocalModelItemStatus.DOWNLOADED -> {
+            item.status == LocalModelItemStatus.DOWNLOADED -> {
                 Text(
                     text = stringResource(
                         R.string.local_model_on_disk,
@@ -315,7 +396,7 @@ private fun LocalModelItem(
                 }
             }
 
-            LocalModelItemStatus.FAILED -> {
+            item.status == LocalModelItemStatus.FAILED -> {
                 Text(
                     text = item.errorMessage ?: stringResource(R.string.local_model_failed),
                     style = MaterialTheme.typography.labelLarge,
@@ -362,6 +443,102 @@ private fun formatEta(remainingMs: Long): String? {
         minutes > 0 -> stringResource(R.string.local_model_eta_minutes_seconds, minutes, seconds)
         else -> stringResource(R.string.local_model_eta_seconds, seconds)
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HuggingFaceSignInSheet(
+    sessionExpired: Boolean,
+    onSignIn: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.local_model_sign_in_title),
+                style = MaterialTheme.typography.titleLarge
+            )
+            Text(
+                text = stringResource(
+                    if (sessionExpired) {
+                        R.string.local_model_session_expired
+                    } else {
+                        R.string.local_model_sign_in_message
+                    }
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+            Button(
+                onClick = onSignIn,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.local_model_sign_in_action))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HuggingFaceLicenseSheet(
+    onOpenAgreement: () -> Unit,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.local_model_license_title),
+                style = MaterialTheme.typography.titleLarge
+            )
+            Text(
+                text = stringResource(R.string.local_model_license_message),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+            Button(
+                onClick = onOpenAgreement,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.local_model_open_license))
+            }
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.local_model_license_retry))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageDialog(
+    title: String,
+    text: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        title = { Text(title) },
+        text = { Text(text) },
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close))
+            }
+        }
+    )
 }
 
 @Composable

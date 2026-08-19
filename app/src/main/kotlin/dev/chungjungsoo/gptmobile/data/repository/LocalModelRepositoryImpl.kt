@@ -59,6 +59,7 @@ class LocalModelRepositoryImpl(
                 .putString(LocalModelDownloadWorker.KEY_COMMIT_HASH, commitHash)
                 .putString(LocalModelDownloadWorker.KEY_FILE_NAME, fileName)
                 .putLong(LocalModelDownloadWorker.KEY_TOTAL_BYTES, entry.sizeInBytes)
+                .putBoolean(LocalModelDownloadWorker.KEY_REQUIRES_HF_AUTH, entry.isGated)
                 .build()
 
             val request = OneTimeWorkRequestBuilder<LocalModelDownloadWorker>()

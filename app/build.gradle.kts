@@ -30,6 +30,21 @@ extensions.configure<ApplicationExtension> {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Hugging Face OAuth. Replace these after registering an HF OAuth app;
+        // the gallery credentials cannot be reused.
+        manifestPlaceholders["appAuthRedirectScheme"] =
+            "REPLACE_WITH_YOUR_REDIRECT_SCHEME_IN_HUGGINGFACE_APP"
+        buildConfigField(
+            "String",
+            "HF_OAUTH_CLIENT_ID",
+            "\"REPLACE_WITH_YOUR_CLIENT_ID_IN_HUGGINGFACE_APP\""
+        )
+        buildConfigField(
+            "String",
+            "HF_OAUTH_REDIRECT_URI",
+            "\"REPLACE_WITH_YOUR_REDIRECT_URI_IN_HUGGINGFACE_APP\""
+        )
     }
 
     androidResources {
@@ -118,6 +133,7 @@ dependencies {
 
     // OAuth browser flow
     implementation(libs.androidx.browser)
+    implementation(libs.openid.appauth)
 
     // License page UI
     implementation(libs.auto.license.core)

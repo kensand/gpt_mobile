@@ -2,14 +2,22 @@ package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.chungjungsoo.gptmobile.BuildConfig
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.database.entity.LocalModel
+import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceAuthOutcome
+import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceOAuthConfig
+import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceOAuthRequests
+import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
+import dev.chungjungsoo.gptmobile.data.localmodel.GatedDownloadCoordinator
+import dev.chungjungsoo.gptmobile.data.localmodel.GatedDownloadStep
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
@@ -21,13 +29,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import net.openid.appauth.AuthorizationService
 
 @HiltViewModel
 class LocalModelsViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val modelCatalogRepository: ModelCatalogRepository,
-    private val localModelRepository: LocalModelRepository
+    private val localModelRepository: LocalModelRepository,
+    private val gatedDownloadCoordinator: GatedDownloadCoordinator,
+    private val huggingFaceTokenStore: HuggingFaceTokenStore
 ) : ViewModel() {
+
+    private var authService: AuthorizationService? = null
+    private var pendingGatedEntry: CatalogEntry? = null
 
     private val _uiState = MutableStateFlow(LocalModelsUiState())
     val uiState: StateFlow<LocalModelsUiState> = _uiState.asStateFlow()
@@ -66,10 +80,11 @@ class LocalModelsViewModel @Inject constructor(
     }
 
     fun onDownloadClick(entry: CatalogEntry) {
+        if (_uiState.value.checkingAccessEntryId != null) return
         when {
             belowRamRequirement(entry) -> _uiState.update { it.copy(dialog = LocalModelsDialog.RamWarning(entry)) }
             isMeteredConnection() -> _uiState.update { it.copy(dialog = LocalModelsDialog.MeteredConfirm(entry)) }
-            else -> startDownload(entry)
+            else -> beginDownload(entry)
         }
     }
 
@@ -79,14 +94,14 @@ class LocalModelsViewModel @Inject constructor(
         if (isMeteredConnection()) {
             _uiState.update { it.copy(dialog = LocalModelsDialog.MeteredConfirm(entry)) }
         } else {
-            startDownload(entry)
+            beginDownload(entry)
         }
     }
 
     fun confirmMeteredDownload() {
         val entry = (_uiState.value.dialog as? LocalModelsDialog.MeteredConfirm)?.entry ?: return
         dismissDialog()
-        startDownload(entry)
+        beginDownload(entry)
     }
 
     fun onDeleteClick(entry: CatalogEntry) {
@@ -104,12 +119,115 @@ class LocalModelsViewModel @Inject constructor(
     }
 
     fun dismissDialog() {
+        pendingGatedEntry = null
         _uiState.update { it.copy(dialog = LocalModelsDialog.Hidden) }
     }
 
-    private fun startDownload(entry: CatalogEntry) {
-        viewModelScope.launch { localModelRepository.startDownload(entry) }
+    fun startHuggingFaceSignIn(): Intent? {
+        val intent = authorizationIntent()
+        if (intent == null) {
+            pendingGatedEntry = null
+            _uiState.update { it.copy(dialog = LocalModelsDialog.OAuthNotConfigured) }
+        }
+        return intent
     }
+
+    fun onAuthActivityResult(data: Intent?) {
+        val entry = pendingGatedEntry
+            ?: (_uiState.value.dialog as? LocalModelsDialog.SignIn)?.entry
+            ?: return
+        viewModelScope.launch {
+            when (val outcome = HuggingFaceOAuthRequests.parseResult(data)) {
+                HuggingFaceAuthOutcome.Cancelled -> dismissDialog()
+
+                HuggingFaceAuthOutcome.Failed -> {
+                    pendingGatedEntry = null
+                    _uiState.update { it.copy(dialog = LocalModelsDialog.SignInFailed) }
+                }
+
+                is HuggingFaceAuthOutcome.Authorized -> {
+                    val token = HuggingFaceOAuthRequests.exchangeAccessToken(authService(), outcome.response)
+                    if (token == null) {
+                        pendingGatedEntry = null
+                        _uiState.update { it.copy(dialog = LocalModelsDialog.SignInFailed) }
+                        return@launch
+                    }
+                    huggingFaceTokenStore.saveAccessToken(token)
+                    pendingGatedEntry = null
+                    _uiState.update { it.copy(dialog = LocalModelsDialog.Hidden) }
+                    beginDownload(entry)
+                }
+            }
+        }
+    }
+
+    fun onLicenseTabClosed() {
+        val entry = pendingGatedEntry
+            ?: (_uiState.value.dialog as? LocalModelsDialog.License)?.entry
+            ?: return
+        pendingGatedEntry = null
+        _uiState.update { it.copy(dialog = LocalModelsDialog.Hidden) }
+        beginDownload(entry)
+    }
+
+    fun retryAfterLicense() {
+        onLicenseTabClosed()
+    }
+
+    private fun authorizationIntent(): Intent? {
+        if (!HuggingFaceOAuthConfig.isConfigured(BuildConfig.HF_OAUTH_CLIENT_ID, BuildConfig.HF_OAUTH_REDIRECT_URI)) {
+            return null
+        }
+        return runCatching {
+            authService().getAuthorizationRequestIntent(
+                HuggingFaceOAuthRequests.authorizationRequest(
+                    BuildConfig.HF_OAUTH_CLIENT_ID,
+                    BuildConfig.HF_OAUTH_REDIRECT_URI
+                )
+            )
+        }.getOrNull()
+    }
+
+    override fun onCleared() {
+        authService?.dispose()
+        super.onCleared()
+    }
+
+    private fun beginDownload(entry: CatalogEntry) {
+        viewModelScope.launch {
+            if (!entry.isGated) {
+                localModelRepository.startDownload(entry)
+                return@launch
+            }
+            _uiState.update { it.copy(checkingAccessEntryId = entry.id) }
+            val step = runCatching { gatedDownloadCoordinator.resolve(entry) }
+                .getOrDefault(GatedDownloadStep.Error)
+            _uiState.update { it.copy(checkingAccessEntryId = null) }
+            when (step) {
+                GatedDownloadStep.Proceed -> localModelRepository.startDownload(entry)
+
+                is GatedDownloadStep.NeedsSignIn -> {
+                    pendingGatedEntry = entry
+                    _uiState.update { it.copy(dialog = LocalModelsDialog.SignIn(entry, step.sessionExpired)) }
+                }
+
+                is GatedDownloadStep.NeedsLicense -> {
+                    pendingGatedEntry = entry
+                    _uiState.update { it.copy(dialog = LocalModelsDialog.License(entry, step.modelPageUrl)) }
+                }
+
+                GatedDownloadStep.OAuthNotConfigured -> _uiState.update {
+                    it.copy(dialog = LocalModelsDialog.OAuthNotConfigured)
+                }
+
+                GatedDownloadStep.Error -> _uiState.update {
+                    it.copy(dialog = LocalModelsDialog.ProbeError)
+                }
+            }
+        }
+    }
+
+    private fun authService(): AuthorizationService = authService ?: AuthorizationService(context).also { authService = it }
 
     private fun belowRamRequirement(entry: CatalogEntry): Boolean {
         if (entry.minRamGb <= 0) return false
@@ -175,6 +293,7 @@ data class LocalModelsUiState(
     val items: List<LocalModelListItem> = emptyList(),
     val isLoading: Boolean = true,
     val totalStorageBytes: Long = 0L,
+    val checkingAccessEntryId: String? = null,
     val dialog: LocalModelsDialog = LocalModelsDialog.Hidden
 )
 
@@ -200,4 +319,9 @@ sealed class LocalModelsDialog {
     data class RamWarning(val entry: CatalogEntry) : LocalModelsDialog()
     data class MeteredConfirm(val entry: CatalogEntry) : LocalModelsDialog()
     data class DeleteConfirm(val entry: CatalogEntry) : LocalModelsDialog()
+    data class SignIn(val entry: CatalogEntry, val sessionExpired: Boolean) : LocalModelsDialog()
+    data class License(val entry: CatalogEntry, val modelPageUrl: String) : LocalModelsDialog()
+    data object OAuthNotConfigured : LocalModelsDialog()
+    data object ProbeError : LocalModelsDialog()
+    data object SignInFailed : LocalModelsDialog()
 }

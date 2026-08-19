@@ -17,6 +17,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.dao.LocalModelDao
+import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadPaths
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.presentation.ui.main.MainActivity
@@ -33,7 +34,8 @@ import kotlinx.coroutines.withContext
 class LocalModelDownloadWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
-    private val localModelDao: LocalModelDao
+    private val localModelDao: LocalModelDao,
+    private val huggingFaceTokenStore: HuggingFaceTokenStore
 ) : CoroutineWorker(context, params) {
 
     private val notificationManager = context.getSystemService(NotificationManager::class.java)
@@ -46,7 +48,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         val commitHash = inputData.getString(KEY_COMMIT_HASH)
         val fileName = inputData.getString(KEY_FILE_NAME)
         val totalBytes = inputData.getLong(KEY_TOTAL_BYTES, 0L)
-        val accessToken = inputData.getString(KEY_ACCESS_TOKEN)
+        val accessToken = resolveAccessToken()
 
         if (catalogEntryId.isNullOrBlank() || downloadUrl.isNullOrBlank() || commitHash.isNullOrBlank() || fileName.isNullOrBlank()) {
             return Result.failure()
@@ -105,7 +107,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         val connection = URL(downloadUrl).openConnection() as HttpURLConnection
         try {
             if (accessToken != null) {
-                connection.setRequestProperty("Authorization", "Bearer $accessToken")
+                connection.setRequestProperty("Authorization", HuggingFaceTokenStore.bearerHeader(accessToken))
             }
             LocalModelDownloadPaths.resumeHeaders(partialLength).forEach { (header, value) ->
                 connection.setRequestProperty(header, value)
@@ -113,7 +115,18 @@ class LocalModelDownloadWorker @AssistedInject constructor(
             connection.connect()
 
             val responseCode = connection.responseCode
-            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED || responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
+            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
+                throw IOException(
+                    applicationContext.getString(
+                        if (accessToken != null) {
+                            R.string.local_model_session_expired
+                        } else {
+                            R.string.local_model_auth_required
+                        }
+                    )
+                )
+            }
+            if (responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
                 throw IOException(applicationContext.getString(R.string.local_model_auth_required))
             }
             if (responseCode != HttpURLConnection.HTTP_OK && responseCode != HttpURLConnection.HTTP_PARTIAL) {
@@ -188,6 +201,13 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         }
     }
 
+    private suspend fun resolveAccessToken(): String? {
+        if (inputData.getBoolean(KEY_REQUIRES_HF_AUTH, false)) {
+            return huggingFaceTokenStore.readAccessToken()
+        }
+        return inputData.getString(KEY_ACCESS_TOKEN)
+    }
+
     private suspend fun markStatus(catalogEntryId: String, status: String) {
         localModelDao.updateStatus(catalogEntryId, status, System.currentTimeMillis() / 1000)
     }
@@ -247,6 +267,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         const val KEY_FILE_NAME = "file_name"
         const val KEY_TOTAL_BYTES = "total_bytes"
         const val KEY_ACCESS_TOKEN = "access_token"
+        const val KEY_REQUIRES_HF_AUTH = "requires_hf_auth"
         const val KEY_RECEIVED_BYTES = "received_bytes"
         const val KEY_DOWNLOAD_RATE = "download_rate"
         const val KEY_REMAINING_MS = "remaining_ms"
