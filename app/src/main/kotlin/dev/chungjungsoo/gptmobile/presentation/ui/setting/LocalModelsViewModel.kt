@@ -28,7 +28,7 @@ class LocalModelsViewModel @Inject constructor(
     private val modelCatalogRepository: ModelCatalogRepository,
     private val localModelRepository: LocalModelRepository,
     gatedDownloadCoordinator: GatedDownloadCoordinator,
-    huggingFaceTokenStore: HuggingFaceTokenStore,
+    private val huggingFaceTokenStore: HuggingFaceTokenStore,
     downloadGuards: LocalDownloadGuards,
     huggingFaceAuthClient: HuggingFaceAuthClient
 ) : ViewModel() {
@@ -46,22 +46,28 @@ class LocalModelsViewModel @Inject constructor(
     private val listState = _listState.asStateFlow()
     private val _deleteDialog = MutableStateFlow<LocalModelsDialog>(LocalModelsDialog.Hidden)
     private val deleteDialog = _deleteDialog.asStateFlow()
+    private val hasHuggingFaceToken = MutableStateFlow(false)
 
     val uiState: StateFlow<LocalModelsUiState> = combine(
         _listState,
         downloadActions.uiState,
-        _deleteDialog
-    ) { list, download, delete ->
+        _deleteDialog,
+        hasHuggingFaceToken
+    ) { list, download, delete, hasToken ->
         LocalModelsUiState(
             items = list.items,
             isLoading = list.isLoading,
             totalStorageBytes = list.totalStorageBytes,
             checkingAccessEntryId = download.checkingAccessEntryId,
-            dialog = if (delete !is LocalModelsDialog.Hidden) delete else download.dialog
+            dialog = if (delete !is LocalModelsDialog.Hidden) delete else download.dialog,
+            hasHuggingFaceToken = hasToken
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LocalModelsUiState())
 
     init {
+        viewModelScope.launch {
+            hasHuggingFaceToken.value = huggingFaceTokenStore.readAccessToken() != null
+        }
         viewModelScope.launch {
             runCatching { localModelRepository.reconcile() }
             val catalogEntries = runCatching { modelCatalogRepository.getVisibleEntries() }
@@ -133,6 +139,27 @@ class LocalModelsViewModel @Inject constructor(
 
     fun retryAfterLicense() {
         downloadActions.retryAfterLicense()
+    }
+
+    fun openAccessTokenDialog() {
+        downloadActions.openAccessTokenDialog()
+    }
+
+    fun saveHuggingFaceAccessToken(token: String) {
+        val trimmed = token.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            huggingFaceTokenStore.saveAccessToken(trimmed)
+            hasHuggingFaceToken.value = true
+            downloadActions.retryAfterAccessToken()
+        }
+    }
+
+    fun removeHuggingFaceAccessToken() {
+        viewModelScope.launch {
+            huggingFaceTokenStore.clear()
+            hasHuggingFaceToken.value = false
+        }
     }
 
     override fun onCleared() {
