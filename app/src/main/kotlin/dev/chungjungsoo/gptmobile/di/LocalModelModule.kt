@@ -20,6 +20,7 @@ import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClie
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuards
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuardsImpl
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -44,7 +45,8 @@ object LocalModelModule {
                 BuildConfig.HF_OAUTH_CLIENT_ID,
                 BuildConfig.HF_OAUTH_REDIRECT_URI
             )
-        }
+        },
+        ioDispatcher = Dispatchers.IO
     )
 
     @Provides

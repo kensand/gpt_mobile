@@ -19,6 +19,7 @@ import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClie
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceSignInResult
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuards
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.AddPlatformViewModel
+import kotlinx.coroutines.Dispatchers
 
 internal fun wizardCatalogEntry(
     id: String,
@@ -122,7 +123,8 @@ internal fun wizardGatedCoordinator(
 ) = GatedDownloadCoordinator(
     tokenStore = tokenStore,
     prober = RecordingProber(statusCode),
-    isOAuthConfigured = { oauthConfigured }
+    isOAuthConfigured = { oauthConfigured },
+    ioDispatcher = Dispatchers.Unconfined
 )
 
 internal fun defaultWizardCatalog() = FakeModelCatalogRepository(

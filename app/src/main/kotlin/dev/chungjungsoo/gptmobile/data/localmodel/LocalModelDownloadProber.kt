@@ -5,6 +5,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 
 fun interface LocalModelDownloadProber {
     fun probe(downloadUrl: String, accessToken: String?): Int
@@ -34,6 +35,8 @@ class LocalModelDownloadProberImpl @Inject constructor() : LocalModelDownloadPro
         } finally {
             connection.disconnect()
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (_: Exception) {
         NETWORK_ERROR
     }

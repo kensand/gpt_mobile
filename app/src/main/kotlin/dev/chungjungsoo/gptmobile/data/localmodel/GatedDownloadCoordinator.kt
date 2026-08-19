@@ -3,6 +3,9 @@ package dev.chungjungsoo.gptmobile.data.localmodel
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceUrls
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 sealed class GatedDownloadStep {
     data object Proceed : GatedDownloadStep()
@@ -15,13 +18,16 @@ sealed class GatedDownloadStep {
 class GatedDownloadCoordinator(
     private val tokenStore: HuggingFaceTokenStore,
     private val prober: LocalModelDownloadProber,
-    private val isOAuthConfigured: () -> Boolean
+    private val isOAuthConfigured: () -> Boolean,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
     suspend fun resolve(entry: CatalogEntry): GatedDownloadStep {
         if (!entry.isGated) return GatedDownloadStep.Proceed
 
         val token = tokenStore.readAccessToken()
-        val statusCode = prober.probe(entry.downloadUrl, token)
+        val statusCode = withContext(ioDispatcher) {
+            prober.probe(entry.downloadUrl, token)
+        }
         val decision = GatedDownloadAuth.decide(
             statusCode = statusCode,
             hasToken = token != null,

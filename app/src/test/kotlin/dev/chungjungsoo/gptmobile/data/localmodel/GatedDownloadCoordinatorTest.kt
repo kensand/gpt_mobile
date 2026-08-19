@@ -3,6 +3,9 @@ package dev.chungjungsoo.gptmobile.data.localmodel
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
 import dev.chungjungsoo.gptmobile.data.security.SecretVault
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -116,14 +119,41 @@ class GatedDownloadCoordinatorTest {
         assertEquals(listOf("hf_ok"), prober.tokens)
     }
 
+    @Test
+    fun `probe executes on the injected dispatcher`() = runTest {
+        val onInjectedDispatcher = ThreadLocal<Boolean>()
+        val recordingDispatcher = object : CoroutineDispatcher() {
+            override fun dispatch(context: CoroutineContext, block: Runnable) {
+                onInjectedDispatcher.set(true)
+                try {
+                    block.run()
+                } finally {
+                    onInjectedDispatcher.remove()
+                }
+            }
+        }
+        var probedOnInjectedDispatcher = false
+        val prober = LocalModelDownloadProber { _, _ ->
+            probedOnInjectedDispatcher = onInjectedDispatcher.get() == true
+            200
+        }
+
+        val step = coordinator(prober = prober, ioDispatcher = recordingDispatcher).resolve(gatedEntry())
+
+        assertEquals(GatedDownloadStep.Proceed, step)
+        assertTrue(probedOnInjectedDispatcher)
+    }
+
     private fun coordinator(
         tokenStore: HuggingFaceTokenStore = HuggingFaceTokenStore(MapSecretVault()),
         prober: LocalModelDownloadProber = RecordingProber(),
-        oauthConfigured: Boolean = true
+        oauthConfigured: Boolean = true,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.Unconfined
     ): GatedDownloadCoordinator = GatedDownloadCoordinator(
         tokenStore = tokenStore,
         prober = prober,
-        isOAuthConfigured = { oauthConfigured }
+        isOAuthConfigured = { oauthConfigured },
+        ioDispatcher = ioDispatcher
     )
 
     private fun gatedEntry(): CatalogEntry = entry(isGated = true)
