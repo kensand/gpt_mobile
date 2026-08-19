@@ -1,10 +1,16 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,25 +19,33 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
@@ -52,6 +66,25 @@ fun LocalModelsScreen(
         canScroll = { scrollState.canScrollForward || scrollState.canScrollBackward }
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var pendingDownload by remember { mutableStateOf<CatalogEntry?>(null) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        pendingDownload?.let(viewModel::onDownloadClick)
+        pendingDownload = null
+    }
+
+    fun requestDownload(entry: CatalogEntry) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingDownload = entry
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.onDownloadClick(entry)
+        }
+    }
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -74,7 +107,7 @@ fun LocalModelsScreen(
                 }
             }
 
-            uiState.entries.isEmpty() -> {
+            uiState.items.isEmpty() -> {
                 Text(
                     text = stringResource(R.string.local_models_empty),
                     style = MaterialTheme.typography.bodyMedium,
@@ -91,12 +124,61 @@ fun LocalModelsScreen(
                         .padding(innerPadding)
                         .verticalScroll(scrollState)
                 ) {
-                    uiState.entries.forEach { entry ->
-                        LocalModelItem(entry = entry)
+                    Text(
+                        text = stringResource(
+                            R.string.local_model_storage_used,
+                            ModelCatalogParser.formatDownloadSize(uiState.totalStorageBytes)
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
+                    )
+                    uiState.items.forEach { item ->
+                        LocalModelItem(
+                            item = item,
+                            onDownload = { requestDownload(item.entry) },
+                            onCancel = { viewModel.cancelDownload(item.entry) },
+                            onDelete = { viewModel.onDeleteClick(item.entry) }
+                        )
                     }
                 }
             }
         }
+    }
+
+    when (val dialog = uiState.dialog) {
+        is LocalModelsDialog.RamWarning -> {
+            ConfirmDialog(
+                title = stringResource(R.string.local_model_ram_warning_title),
+                text = stringResource(R.string.local_model_ram_warning_message, dialog.entry.minRamGb),
+                onConfirm = viewModel::confirmRamWarning,
+                onDismiss = viewModel::dismissDialog
+            )
+        }
+
+        is LocalModelsDialog.MeteredConfirm -> {
+            ConfirmDialog(
+                title = stringResource(R.string.local_model_metered_title),
+                text = stringResource(
+                    R.string.local_model_metered_message,
+                    ModelCatalogParser.formatDownloadSize(dialog.entry.sizeInBytes)
+                ),
+                onConfirm = viewModel::confirmMeteredDownload,
+                onDismiss = viewModel::dismissDialog
+            )
+        }
+
+        is LocalModelsDialog.DeleteConfirm -> {
+            ConfirmDialog(
+                title = stringResource(R.string.local_model_delete),
+                text = stringResource(R.string.local_model_delete_confirmation),
+                confirmLabel = stringResource(R.string.delete),
+                onConfirm = viewModel::confirmDelete,
+                onDismiss = viewModel::dismissDialog
+            )
+        }
+
+        LocalModelsDialog.Hidden -> Unit
     }
 }
 
@@ -133,7 +215,13 @@ private fun LocalModelsTopBar(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LocalModelItem(entry: CatalogEntry) {
+private fun LocalModelItem(
+    item: LocalModelListItem,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val entry = item.entry
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -166,13 +254,139 @@ private fun LocalModelItem(entry: CatalogEntry) {
                 }
             }
         }
-        Text(
-            text = stringResource(R.string.local_model_not_downloaded),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp)
-        )
+        when (item.status) {
+            LocalModelItemStatus.NOT_DOWNLOADED -> {
+                if (entry.isGated) {
+                    Text(
+                        text = stringResource(R.string.local_model_gated_hint),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+                TextButton(onClick = onDownload) {
+                    Text(stringResource(R.string.download))
+                }
+            }
+
+            LocalModelItemStatus.DOWNLOADING -> {
+                val percent = if (item.diskBytes > 0L) {
+                    ((item.receivedBytes * 100) / item.diskBytes).toInt().coerceIn(0, 100)
+                } else {
+                    0
+                }
+                if (item.receivedBytes <= 0L) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { percent / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                    )
+                }
+                Text(
+                    text = downloadProgressText(item, percent),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                TextButton(onClick = onCancel) {
+                    Text(stringResource(R.string.local_model_cancel_download))
+                }
+            }
+
+            LocalModelItemStatus.DOWNLOADED -> {
+                Text(
+                    text = stringResource(
+                        R.string.local_model_on_disk,
+                        ModelCatalogParser.formatDownloadSize(item.diskBytes)
+                    ),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                TextButton(onClick = onDelete) {
+                    Text(stringResource(R.string.delete))
+                }
+            }
+
+            LocalModelItemStatus.FAILED -> {
+                Text(
+                    text = item.errorMessage ?: stringResource(R.string.local_model_failed),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                Row {
+                    TextButton(onClick = onDownload) {
+                        Text(stringResource(R.string.retry))
+                    }
+                    TextButton(onClick = onDelete) {
+                        Text(stringResource(R.string.delete))
+                    }
+                }
+            }
+        }
     }
+}
+
+@Composable
+private fun downloadProgressText(item: LocalModelListItem, percent: Int): String {
+    val rate = if (item.bytesPerSecond > 0L) {
+        stringResource(R.string.local_model_download_rate, ModelCatalogParser.formatDownloadSize(item.bytesPerSecond))
+    } else {
+        null
+    }
+    val eta = formatEta(item.remainingMs)
+    return when {
+        rate != null && eta != null -> stringResource(R.string.local_model_download_progress, percent, rate, eta)
+        rate != null -> stringResource(R.string.local_model_download_progress_rate, percent, rate)
+        else -> stringResource(R.string.local_model_download_percent, percent)
+    }
+}
+
+@Composable
+private fun formatEta(remainingMs: Long): String? {
+    if (remainingMs <= 0L) return null
+    val totalSeconds = remainingMs / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return when {
+        hours > 0 -> stringResource(R.string.local_model_eta_hours_minutes, hours, minutes)
+        minutes > 0 -> stringResource(R.string.local_model_eta_minutes_seconds, minutes, seconds)
+        else -> stringResource(R.string.local_model_eta_seconds, seconds)
+    }
+}
+
+@Composable
+private fun ConfirmDialog(
+    title: String,
+    text: String,
+    confirmLabel: String = stringResource(R.string.confirm),
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        title = { Text(title) },
+        text = { Text(text) },
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
 }
 
 @Composable

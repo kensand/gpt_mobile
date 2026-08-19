@@ -341,6 +341,28 @@ object ChatDatabaseV2Migrations {
         }
     }
 
+    val LOCAL_MODEL_TABLE_MIGRATIONS = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS `local_models` (
+            `catalog_entry_id` TEXT NOT NULL,
+            `commit_hash` TEXT NOT NULL,
+            `file_name` TEXT NOT NULL,
+            `relative_directory` TEXT NOT NULL,
+            `total_bytes` INTEGER NOT NULL,
+            `status` TEXT NOT NULL,
+            `created_at` INTEGER NOT NULL,
+            `updated_at` INTEGER NOT NULL,
+            PRIMARY KEY(`catalog_entry_id`)
+        )
+        """.trimIndent()
+    )
+
+    val MIGRATION_8_9 = object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            LOCAL_MODEL_TABLE_MIGRATIONS.forEach(db::execSQL)
+        }
+    }
+
     val MIGRATION_7_8 = object : Migration(7, 8) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE `messages_v2` ADD COLUMN `timeline` TEXT NOT NULL DEFAULT '[]'")

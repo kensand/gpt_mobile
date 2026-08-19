@@ -4,12 +4,15 @@ import android.app.Application
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.backup.SanitizedChatBackup
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentPersistenceDao
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentRunDao
+import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import javax.inject.Inject
@@ -21,11 +24,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @HiltAndroidApp
-class GPTMobileApp : Application() {
+class GPTMobileApp :
+    Application(),
+    Configuration.Provider {
     // TODO Delete when https://github.com/google/dagger/issues/3601 is resolved.
     @Inject
     @ApplicationContext
     lateinit var context: Context
+
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
 
     @Inject
     lateinit var agentRunDao: AgentRunDao
@@ -35,6 +43,9 @@ class GPTMobileApp : Application() {
 
     @Inject
     lateinit var settingRepository: SettingRepository
+
+    @Inject
+    lateinit var localModelRepository: LocalModelRepository
 
     @Volatile
     var secretMigrationErrors: List<SecretMigrationError> = emptyList()
@@ -68,8 +79,14 @@ class GPTMobileApp : Application() {
                     Log.e(TAG, "Unable to show credential migration warning.", error)
                 }
             }
+            localModelRepository.reconcile()
         }
     }
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
 
     private companion object {
         const val TAG = "GPTMobileApp"

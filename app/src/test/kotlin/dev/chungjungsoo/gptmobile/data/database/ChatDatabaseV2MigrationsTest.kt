@@ -155,4 +155,26 @@ class ChatDatabaseV2MigrationsTest {
         assertEquals("https://generativelanguage.googleapis.com/custom/", ChatDatabaseV2Migrations.normalizeLegacyProviderApiUrl("GOOGLE", "https://generativelanguage.googleapis.com/custom/"))
         assertEquals("https://anthropic-proxy.example/api/", ChatDatabaseV2Migrations.normalizeLegacyProviderApiUrl("ANTHROPIC", "https://anthropic-proxy.example/api/"))
     }
+
+    @Test
+    fun `version nine migration creates local models table`() {
+        assertEquals(
+            listOf(
+                """
+                CREATE TABLE IF NOT EXISTS `local_models` (
+                    `catalog_entry_id` TEXT NOT NULL,
+                    `commit_hash` TEXT NOT NULL,
+                    `file_name` TEXT NOT NULL,
+                    `relative_directory` TEXT NOT NULL,
+                    `total_bytes` INTEGER NOT NULL,
+                    `status` TEXT NOT NULL,
+                    `created_at` INTEGER NOT NULL,
+                    `updated_at` INTEGER NOT NULL,
+                    PRIMARY KEY(`catalog_entry_id`)
+                )
+                """.trimIndent()
+            ),
+            ChatDatabaseV2Migrations.LOCAL_MODEL_TABLE_MIGRATIONS
+        )
+    }
 }
