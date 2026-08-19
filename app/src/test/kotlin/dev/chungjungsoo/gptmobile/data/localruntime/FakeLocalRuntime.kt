@@ -1,5 +1,6 @@
 package dev.chungjungsoo.gptmobile.data.localruntime
 
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -28,10 +29,17 @@ class FakeLocalRuntime : LocalRuntime {
     private var scriptIndex = 0
     private var conversationOpen = false
     private var activeToolExecutor: LocalToolExecutor? = null
+    private var loadedSpec: LocalEngineSpec? = null
+
+    @Volatile
+    private var generationCancelled = false
 
     override suspend fun loadEngine(spec: LocalEngineSpec) {
         loadEngineCalls += spec
+        loadedSpec = spec
     }
+
+    override fun isEngineLoaded(spec: LocalEngineSpec): Boolean = loadedSpec == spec
 
     override suspend fun createConversation(config: LocalConversationConfig) {
         createConversationCalls += config
@@ -40,6 +48,7 @@ class FakeLocalRuntime : LocalRuntime {
     }
 
     override fun sendMessage(text: String, images: List<ByteArray>): Flow<LocalRuntimeEvent> = flow {
+        generationCancelled = false
         sendMessageCalls += text
         sendMessageImages += images
         if (emitDelayMillis > 0L) {
@@ -51,10 +60,16 @@ class FakeLocalRuntime : LocalRuntime {
         }
         val invocations = scriptedToolInvocations.getOrElse(index) { emptyList() }
         events.forEachIndexed { eventIndex, event ->
+            if (generationCancelled) {
+                throw CancellationException("Local generation cancelled")
+            }
             emit(event)
             yield()
             if (eventIndex == 0) {
                 pauseAfterFirst?.await()
+            }
+            if (generationCancelled) {
+                throw CancellationException("Local generation cancelled")
             }
             invocations.filter { it.afterEventIndex == eventIndex }.forEach { invocation ->
                 invokeTool(invocation)
@@ -70,6 +85,8 @@ class FakeLocalRuntime : LocalRuntime {
 
     override fun cancelActive() {
         cancelActiveCalls += 1
+        generationCancelled = true
+        pauseAfterFirst?.complete(Unit)
     }
 
     override suspend fun closeConversation() {
@@ -80,6 +97,7 @@ class FakeLocalRuntime : LocalRuntime {
     override suspend fun unloadEngine() {
         unloadEngineCalls += 1
         conversationOpen = false
+        loadedSpec = null
     }
 
     override fun hasOpenConversation(): Boolean = conversationOpen

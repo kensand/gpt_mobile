@@ -1,6 +1,7 @@
 package dev.chungjungsoo.gptmobile.data.repository
 
 import android.content.ContextWrapper
+import dev.chungjungsoo.gptmobile.data.agent.provider.LiteRtLmAdapter
 import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpClientManager
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClient
@@ -174,6 +175,7 @@ class ChatRepositoryImplTest {
         assertEquals(
             listOf(
                 ApiState.Loading,
+                ApiState.Notice(LiteRtLmAdapter.DEFAULT_LOADING_MODEL),
                 ApiState.Thinking("plan"),
                 ApiState.Success("hello"),
                 ApiState.Done
@@ -220,6 +222,7 @@ class ChatRepositoryImplTest {
         assertEquals(
             listOf(
                 ApiState.Loading,
+                ApiState.Notice(LiteRtLmAdapter.DEFAULT_LOADING_MODEL),
                 ApiState.Success("before"),
                 ApiState.ToolCall(toolSequence = 0),
                 ApiState.Success("after"),

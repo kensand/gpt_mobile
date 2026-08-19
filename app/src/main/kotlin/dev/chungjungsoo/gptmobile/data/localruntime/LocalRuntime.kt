@@ -75,6 +75,8 @@ interface LocalRuntime {
     suspend fun closeConversation()
     suspend fun unloadEngine()
 
+    fun isEngineLoaded(spec: LocalEngineSpec): Boolean = false
+
     fun hasOpenConversation(): Boolean = false
 
     suspend fun <T> runExclusive(block: suspend LocalRuntime.() -> T): T = block(this)

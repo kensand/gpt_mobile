@@ -40,6 +40,7 @@ class LiteRtLmAdapter(
     private val modelNotDownloadedError: String,
     private val waitingForEngineNotice: String = DEFAULT_WAITING_FOR_ENGINE,
     private val tooManyImagesNotice: String = DEFAULT_TOO_MANY_IMAGES,
+    private val loadingModelNotice: String = DEFAULT_LOADING_MODEL,
     private val modelCatalogRepository: ModelCatalogRepository? = null,
     private val loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { null }
 ) {
@@ -54,8 +55,8 @@ class LiteRtLmAdapter(
 
     private var openConversation: OpenConversation? = null
     private var conversationDirty = false
-    private var toolEventSink: (suspend (ProviderEvent) -> Unit)? = null
-    private var boundToolsByName: Map<String, AgentTool> = emptyMap()
+    private var exclusiveToolsByName: Map<String, AgentTool> = emptyMap()
+    private var exclusiveToolEventSink: (suspend (ProviderEvent) -> Unit)? = null
 
     suspend fun openSession(
         turns: List<ConversationTurn>,
@@ -71,172 +72,183 @@ class LiteRtLmAdapter(
                 exchanges: List<AgentToolExchange>
             ): Flow<ProviderEvent> = channelFlow {
                 val catalogEntry = modelCatalogRepository
-                    ?.getVisibleEntries()
+                    ?.getCachedVisibleEntries()
                     ?.firstOrNull { entry -> entry.id == platform.model }
                 val visionCapable = catalogEntry?.capabilities?.vision == true
                 val toolsCapable = catalogEntry?.capabilities?.tools == true
                 val registeredTools = if (toolsCapable) boundTools else emptyList()
                 val descriptors = registeredTools.map { tool -> tool.definition.toLocalDescriptor() }
                 val toolsKey = toolsFingerprint(descriptors)
-                boundToolsByName = registeredTools.associateBy { it.definition.name }
-                toolEventSink = { event -> send(event) }
+                val runToolsByName = registeredTools.associateBy { it.definition.name }
+                val runToolEventSink: suspend (ProviderEvent) -> Unit = { event -> send(event) }
+                val latestAttachments = turns.lastOrNull()?.userMessage?.attachments.orEmpty()
+                attachmentNotices(visionCapable, turns, latestAttachments).forEach { notice ->
+                    send(notice)
+                }
+
+                val modelPath = localModelRepository.resolveDownloadedPath(platform.model)
+                if (modelPath == null) {
+                    send(ProviderEvent.Failed(modelNotDownloadedError))
+                    return@channelFlow
+                }
+
+                val latestUserText = turns.lastOrNull()?.userMessage?.effectiveContent().orEmpty()
+                val latestImageIds = visionImageIds(latestAttachments, visionCapable)
+                val latestImages = if (visionCapable) {
+                    latestAttachments
+                        .filter { attachment -> attachment.isImageAttachment() }
+                        .take(MAX_IMAGES_PER_MESSAGE)
+                        .mapNotNull { attachment -> loadImageBytes(attachment) }
+                } else {
+                    emptyList()
+                }
+                val history = historyMessages(
+                    priorTurns = turns.dropLast(1),
+                    visionCapable = visionCapable,
+                    includeImageBytes = false
+                )
+                val spec = LocalEngineSpec(
+                    modelPath = modelPath,
+                    accelerator = LocalAccelerators.normalize(platform.accelerator),
+                    maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
+                    enableVision = visionCapable
+                )
+                val sampler = LocalSamplerConfig(
+                    topK = platform.topK ?: DEFAULT_TOP_K,
+                    topP = platform.topP ?: DEFAULT_TOP_P,
+                    temperature = platform.temperature ?: DEFAULT_TEMPERATURE
+                )
+                val incomingPrior = conversationFingerprint(history)
+
                 try {
-                    val latestAttachments = turns.lastOrNull()?.userMessage?.attachments.orEmpty()
-                    attachmentNotices(visionCapable, turns, latestAttachments).forEach { notice ->
-                        send(notice)
-                    }
+                    var failed = false
+                    val assistantReply = StringBuilder()
+                    localRuntime.runExclusiveFlow(
+                        onContended = { send(ProviderEvent.Notice(waitingForEngineNotice)) }
+                    ) {
+                        exclusiveToolsByName = runToolsByName
+                        exclusiveToolEventSink = runToolEventSink
+                        if (!isEngineLoaded(spec) && loadingModelNotice.isNotBlank()) {
+                            send(ProviderEvent.Notice(loadingModelNotice))
+                        }
+                        loadEngine(spec)
+                        val snapshot = openConversation
+                        val canReuse = !conversationDirty &&
+                            hasOpenConversation() &&
+                            snapshot != null &&
+                            snapshot.profileUid == platform.uid &&
+                            snapshot.engineSpec == spec &&
+                            snapshot.sampler == sampler &&
+                            snapshot.systemPrompt == platform.systemPrompt &&
+                            snapshot.toolsKey == toolsKey &&
+                            incomingHistoryExtendsConsumed(snapshot.consumed, incomingPrior)
+                        if (!canReuse) {
+                            if (hasOpenConversation()) {
+                                closeConversation()
+                            }
+                            val seedHistory = if (visionCapable) {
+                                historyMessages(
+                                    priorTurns = turns.dropLast(1),
+                                    visionCapable = true,
+                                    includeImageBytes = true
+                                )
+                            } else {
+                                history
+                            }
+                            createConversation(
+                                LocalConversationConfig(
+                                    sampler = sampler,
+                                    systemPrompt = platform.systemPrompt,
+                                    initialMessages = seedHistory,
+                                    tools = descriptors,
+                                    enableConstrainedDecoding = descriptors.isNotEmpty(),
+                                    toolExecutor = if (descriptors.isNotEmpty()) {
+                                        LocalToolExecutor { name, argumentsJson ->
+                                            executeBoundTool(
+                                                name,
+                                                argumentsJson,
+                                                exclusiveToolsByName,
+                                                exclusiveToolEventSink
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    }
+                                )
+                            )
+                            openConversation = OpenConversation(
+                                profileUid = platform.uid,
+                                engineSpec = spec,
+                                sampler = sampler,
+                                systemPrompt = platform.systemPrompt,
+                                toolsKey = toolsKey,
+                                consumed = incomingPrior
+                            )
+                        }
+                        conversationDirty = true
+                        sendMessage(latestUserText, latestImages)
+                    }.collect { event ->
+                        when (event) {
+                            is LocalRuntimeEvent.TextDelta -> {
+                                assistantReply.append(event.text)
+                                send(ProviderEvent.TextDelta(event.text))
+                            }
 
-                    val modelPath = localModelRepository.resolveDownloadedPath(platform.model)
-                    if (modelPath == null) {
-                        send(ProviderEvent.Failed(modelNotDownloadedError))
-                        return@channelFlow
-                    }
+                            is LocalRuntimeEvent.ThinkingDelta -> send(ProviderEvent.ThinkingDelta(event.text))
 
-                    val latestUserText = turns.lastOrNull()?.userMessage?.effectiveContent().orEmpty()
-                    val latestImageIds = visionImageIds(latestAttachments, visionCapable)
-                    val latestImages = if (visionCapable) {
-                        latestAttachments
-                            .filter { attachment -> attachment.isImageAttachment() }
-                            .take(MAX_IMAGES_PER_MESSAGE)
-                            .mapNotNull { attachment -> loadImageBytes(attachment) }
-                    } else {
-                        emptyList()
-                    }
-                    val history = historyMessages(
-                        priorTurns = turns.dropLast(1),
-                        visionCapable = visionCapable,
-                        includeImageBytes = false
-                    )
-                    val spec = LocalEngineSpec(
-                        modelPath = modelPath,
-                        accelerator = LocalAccelerators.normalize(platform.accelerator),
-                        maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
-                        enableVision = visionCapable
-                    )
-                    val sampler = LocalSamplerConfig(
-                        topK = platform.topK ?: DEFAULT_TOP_K,
-                        topP = platform.topP ?: DEFAULT_TOP_P,
-                        temperature = platform.temperature ?: DEFAULT_TEMPERATURE
-                    )
-                    val incomingPrior = conversationFingerprint(history)
+                            is LocalRuntimeEvent.Error -> {
+                                failed = true
+                                conversationDirty = true
+                                send(ProviderEvent.Failed(event.message))
+                            }
 
-                    try {
-                        var failed = false
-                        val assistantReply = StringBuilder()
-                        localRuntime.runExclusiveFlow(
-                            onContended = { send(ProviderEvent.Notice(waitingForEngineNotice)) }
-                        ) {
-                            loadEngine(spec)
-                            val snapshot = openConversation
-                            val canReuse = !conversationDirty &&
-                                hasOpenConversation() &&
-                                snapshot != null &&
-                                snapshot.profileUid == platform.uid &&
-                                snapshot.engineSpec == spec &&
-                                snapshot.sampler == sampler &&
-                                snapshot.systemPrompt == platform.systemPrompt &&
-                                snapshot.toolsKey == toolsKey &&
-                                incomingHistoryExtendsConsumed(snapshot.consumed, incomingPrior)
-                            if (!canReuse) {
-                                if (hasOpenConversation()) {
-                                    closeConversation()
-                                }
-                                val seedHistory = if (visionCapable) {
-                                    historyMessages(
-                                        priorTurns = turns.dropLast(1),
-                                        visionCapable = true,
-                                        includeImageBytes = true
-                                    )
-                                } else {
-                                    history
-                                }
-                                createConversation(
-                                    LocalConversationConfig(
-                                        sampler = sampler,
-                                        systemPrompt = platform.systemPrompt,
-                                        initialMessages = seedHistory,
-                                        tools = descriptors,
-                                        enableConstrainedDecoding = descriptors.isNotEmpty(),
-                                        toolExecutor = if (descriptors.isNotEmpty()) {
-                                            LocalToolExecutor { name, argumentsJson ->
-                                                executeBoundTool(name, argumentsJson)
-                                            }
-                                        } else {
-                                            null
+                            LocalRuntimeEvent.Done -> Unit
+                        }
+                    }
+                    if (!failed) {
+                        send(ProviderEvent.Completed)
+                        val snapshot = openConversation
+                        if (snapshot != null) {
+                            openConversation = snapshot.copy(
+                                consumed = snapshot.consumed.extend(
+                                    listOfNotNull(
+                                        LocalHistoryMessage(
+                                            role = LocalHistoryRole.USER,
+                                            text = latestUserText,
+                                            imageIds = latestImageIds
+                                        ),
+                                        assistantReply.toString().takeIf { it.isNotBlank() }?.let { content ->
+                                            LocalHistoryMessage(LocalHistoryRole.MODEL, content)
                                         }
                                     )
                                 )
-                                openConversation = OpenConversation(
-                                    profileUid = platform.uid,
-                                    engineSpec = spec,
-                                    sampler = sampler,
-                                    systemPrompt = platform.systemPrompt,
-                                    toolsKey = toolsKey,
-                                    consumed = incomingPrior
-                                )
-                            }
-                            conversationDirty = true
-                            sendMessage(latestUserText, latestImages)
-                        }.collect { event ->
-                            when (event) {
-                                is LocalRuntimeEvent.TextDelta -> {
-                                    assistantReply.append(event.text)
-                                    send(ProviderEvent.TextDelta(event.text))
-                                }
-
-                                is LocalRuntimeEvent.ThinkingDelta -> send(ProviderEvent.ThinkingDelta(event.text))
-
-                                is LocalRuntimeEvent.Error -> {
-                                    failed = true
-                                    conversationDirty = true
-                                    send(ProviderEvent.Failed(event.message))
-                                }
-
-                                LocalRuntimeEvent.Done -> Unit
-                            }
+                            )
+                            conversationDirty = false
                         }
-                        if (!failed) {
-                            send(ProviderEvent.Completed)
-                            val snapshot = openConversation
-                            if (snapshot != null) {
-                                openConversation = snapshot.copy(
-                                    consumed = snapshot.consumed.extend(
-                                        listOfNotNull(
-                                            LocalHistoryMessage(
-                                                role = LocalHistoryRole.USER,
-                                                text = latestUserText,
-                                                imageIds = latestImageIds
-                                            ),
-                                            assistantReply.toString().takeIf { it.isNotBlank() }?.let { content ->
-                                                LocalHistoryMessage(LocalHistoryRole.MODEL, content)
-                                            }
-                                        )
-                                    )
-                                )
-                                conversationDirty = false
-                            }
-                        }
-                    } catch (error: CancellationException) {
-                        localRuntime.cancelActive()
-                        conversationDirty = true
-                        throw error
-                    } catch (error: Exception) {
-                        conversationDirty = true
-                        send(ProviderEvent.Failed(error.message ?: "Local inference failed"))
                     }
-                } finally {
-                    toolEventSink = null
+                } catch (error: CancellationException) {
+                    localRuntime.cancelActive()
+                    conversationDirty = true
+                    throw error
+                } catch (error: Exception) {
+                    conversationDirty = true
+                    send(ProviderEvent.Failed(error.message ?: "Local inference failed"))
                 }
             }
         }
     }
 
-    private suspend fun executeBoundTool(toolName: String, argumentsJson: String): String {
+    private suspend fun executeBoundTool(
+        toolName: String,
+        argumentsJson: String,
+        toolsByName: Map<String, AgentTool>,
+        eventSink: (suspend (ProviderEvent) -> Unit)?
+    ): String {
         val arguments = parseArguments(argumentsJson)
         val call = ProviderEvent.ToolCall(UUID.randomUUID().toString(), toolName, arguments)
-        toolEventSink?.invoke(call)
+        eventSink?.invoke(call)
         val result = try {
-            val tool = boundToolsByName[toolName]
+            val tool = toolsByName[toolName]
             if (tool == null) {
                 AgentToolResult(
                     callId = call.callId,
@@ -255,7 +267,7 @@ class LiteRtLmAdapter(
                 isError = true
             )
         }
-        toolEventSink?.invoke(ProviderEvent.ToolResult(call, result))
+        eventSink?.invoke(ProviderEvent.ToolResult(call, result))
         return result.engineText()
     }
 
@@ -356,6 +368,7 @@ class LiteRtLmAdapter(
             "This Local Model is not downloaded. Download it from Settings → Local Models."
         const val DEFAULT_WAITING_FOR_ENGINE = "Waiting for the local engine"
         const val DEFAULT_TOO_MANY_IMAGES = "The local platform accepted only the first 10 images"
+        const val DEFAULT_LOADING_MODEL = "Loading local model…"
         const val MAX_IMAGES_PER_MESSAGE = 10
         const val DEFAULT_TOP_K = 40
         const val DEFAULT_TOP_P = 0.95f

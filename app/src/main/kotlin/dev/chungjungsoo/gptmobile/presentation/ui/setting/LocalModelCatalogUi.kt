@@ -1,8 +1,10 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
 import androidx.work.WorkInfo
+import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.database.entity.LocalModel
+import dev.chungjungsoo.gptmobile.data.localmodel.DownloadFailureKind
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.worker.LocalModelDownloadWorker
 
@@ -26,7 +28,8 @@ data class LocalModelListItem(
     val bytesPerSecond: Long = 0L,
     val remainingMs: Long = 0L,
     val diskBytes: Long = 0L,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val failureKind: DownloadFailureKind = DownloadFailureKind.GENERIC
 )
 
 enum class LocalModelItemStatus {
@@ -72,6 +75,9 @@ fun toLocalModelListItem(
     val bytesPerSecond = workInfo?.progress?.getLong(LocalModelDownloadWorker.KEY_DOWNLOAD_RATE, 0L) ?: 0L
     val remainingMs = workInfo?.progress?.getLong(LocalModelDownloadWorker.KEY_REMAINING_MS, 0L) ?: 0L
     val errorMessage = workInfo?.outputData?.getString(LocalModelDownloadWorker.KEY_ERROR_MESSAGE)
+    val failureKind = DownloadFailureKind.fromWorkOutput(
+        workInfo?.outputData?.getString(LocalModelDownloadWorker.KEY_FAILURE_KIND)
+    )
     val workState = workInfo?.state
     val isWorkActive = workState == WorkInfo.State.RUNNING ||
         workState == WorkInfo.State.ENQUEUED ||
@@ -95,7 +101,8 @@ fun toLocalModelListItem(
         record?.status == LocalModelStatus.FAILED || workState == WorkInfo.State.FAILED -> LocalModelListItem(
             entry = entry,
             status = LocalModelItemStatus.FAILED,
-            errorMessage = errorMessage
+            errorMessage = errorMessage,
+            failureKind = failureKind
         )
 
         else -> LocalModelListItem(
@@ -103,4 +110,11 @@ fun toLocalModelListItem(
             status = LocalModelItemStatus.NOT_DOWNLOADED
         )
     }
+}
+
+fun downloadFailureMessageRes(kind: DownloadFailureKind): Int = when (kind) {
+    DownloadFailureKind.SESSION_EXPIRED -> R.string.local_model_session_expired
+    DownloadFailureKind.AUTH_REQUIRED -> R.string.local_model_auth_required
+    DownloadFailureKind.LICENSE_REQUIRED -> R.string.local_model_license_message
+    DownloadFailureKind.GENERIC -> R.string.local_model_failed
 }

@@ -1,11 +1,14 @@
 package dev.chungjungsoo.gptmobile.data.localruntime
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -96,5 +99,38 @@ class LocalEngineHolderTest {
         assertEquals(listOf("look"), fake.sendMessageCalls)
         assertEquals(1, fake.sendMessageImages.single().size)
         assertTrue(fake.sendMessageImages.single().single().contentEquals(image))
+    }
+
+    @Test
+    fun `trim unload cancels the in-flight generation then unloads`() = runTest {
+        val pause = CompletableDeferred<Unit>()
+        val fake = FakeLocalRuntime().apply {
+            pauseAfterFirst = pause
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("one"), LocalRuntimeEvent.Done)
+            )
+        }
+        val holder = LocalEngineHolder(fake)
+        val spec = LocalEngineSpec("/models/a.litertlm", LocalAccelerators.GPU, 1024)
+        holder.loadEngine(spec)
+
+        val events = mutableListOf<LocalRuntimeEvent>()
+        val send = launch {
+            try {
+                holder.sendMessage("a").collect { events += it }
+            } catch (_: kotlinx.coroutines.CancellationException) {
+            }
+        }
+        while (events.none { it is LocalRuntimeEvent.TextDelta }) {
+            yield()
+        }
+
+        holder.unloadEngine()
+        send.join()
+        advanceUntilIdle()
+
+        assertEquals(1, fake.cancelActiveCalls)
+        assertEquals(1, fake.unloadEngineCalls)
+        assertFalse(fake.isEngineLoaded(spec))
     }
 }

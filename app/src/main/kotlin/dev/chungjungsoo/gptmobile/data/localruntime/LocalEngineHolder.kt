@@ -43,11 +43,16 @@ class LocalEngineHolder(
         delegate.closeConversation()
     }
 
-    override suspend fun unloadEngine() = withGenerationLock {
-        delegate.closeConversation()
-        delegate.unloadEngine()
-        loadedSpec = null
+    override suspend fun unloadEngine() {
+        delegate.cancelActive()
+        withGenerationLock {
+            delegate.closeConversation()
+            delegate.unloadEngine()
+            loadedSpec = null
+        }
     }
+
+    override fun isEngineLoaded(spec: LocalEngineSpec): Boolean = loadedSpec == spec
 
     override fun hasOpenConversation(): Boolean = delegate.hasOpenConversation()
 

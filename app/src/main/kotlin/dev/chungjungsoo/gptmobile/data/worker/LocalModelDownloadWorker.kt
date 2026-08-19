@@ -18,6 +18,7 @@ import dagger.assisted.AssistedInject
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.dao.LocalModelDao
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
+import dev.chungjungsoo.gptmobile.data.localmodel.DownloadFailureKind
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadPaths
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.presentation.ui.main.MainActivity
@@ -73,12 +74,22 @@ class LocalModelDownloadWorker @AssistedInject constructor(
                 Result.success()
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (error: DownloadAuthException) {
+                Log.e(TAG, error.message, error)
+                markStatus(catalogEntryId, LocalModelStatus.FAILED)
+                Result.failure(
+                    Data.Builder()
+                        .putString(KEY_ERROR_MESSAGE, error.message)
+                        .putString(KEY_FAILURE_KIND, error.kind.name)
+                        .build()
+                )
             } catch (error: IOException) {
                 Log.e(TAG, error.message, error)
                 markStatus(catalogEntryId, LocalModelStatus.FAILED)
                 Result.failure(
                     Data.Builder()
                         .putString(KEY_ERROR_MESSAGE, error.message)
+                        .putString(KEY_FAILURE_KIND, DownloadFailureKind.GENERIC.name)
                         .build()
                 )
             }
@@ -115,19 +126,19 @@ class LocalModelDownloadWorker @AssistedInject constructor(
             connection.connect()
 
             val responseCode = connection.responseCode
-            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
-                throw IOException(
-                    applicationContext.getString(
-                        if (accessToken != null) {
-                            R.string.local_model_session_expired
-                        } else {
-                            R.string.local_model_auth_required
-                        }
-                    )
+            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED ||
+                responseCode == HttpURLConnection.HTTP_FORBIDDEN
+            ) {
+                val isGated = inputData.getBoolean(KEY_REQUIRES_HF_AUTH, false)
+                val kind = DownloadFailureKind.fromHttp(
+                    statusCode = responseCode,
+                    hasToken = accessToken != null,
+                    isGated = isGated
                 )
-            }
-            if (responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
-                throw IOException(applicationContext.getString(R.string.local_model_auth_required))
+                throw DownloadAuthException(
+                    kind = kind,
+                    message = applicationContext.getString(messageResFor(kind))
+                )
             }
             if (responseCode != HttpURLConnection.HTTP_OK && responseCode != HttpURLConnection.HTTP_PARTIAL) {
                 throw IOException("HTTP error code: $responseCode")
@@ -272,6 +283,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         const val KEY_DOWNLOAD_RATE = "download_rate"
         const val KEY_REMAINING_MS = "remaining_ms"
         const val KEY_ERROR_MESSAGE = "error_message"
+        const val KEY_FAILURE_KIND = "failure_kind"
         private const val TAG = "LocalModelDownload"
         private const val CHANNEL_ID = "local_model_downloads"
         private const val PROGRESS_INTERVAL_MS = 200L
@@ -281,4 +293,16 @@ class LocalModelDownloadWorker @AssistedInject constructor(
 
         fun catalogEntryIdFromTag(tag: String): String? = tag.takeIf { it.startsWith(ID_TAG_PREFIX) }?.removePrefix(ID_TAG_PREFIX)
     }
+
+    private fun messageResFor(kind: DownloadFailureKind): Int = when (kind) {
+        DownloadFailureKind.SESSION_EXPIRED -> R.string.local_model_session_expired
+        DownloadFailureKind.AUTH_REQUIRED -> R.string.local_model_auth_required
+        DownloadFailureKind.LICENSE_REQUIRED -> R.string.local_model_license_message
+        DownloadFailureKind.GENERIC -> R.string.local_model_failed
+    }
 }
+
+private class DownloadAuthException(
+    val kind: DownloadFailureKind,
+    message: String
+) : IOException(message)

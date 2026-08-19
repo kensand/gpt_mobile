@@ -9,6 +9,7 @@ data class ProviderContextPolicy(
     val preferProviderFileRefs: Boolean = false
 ) {
     companion object {
+        const val UNBOUNDED_TURN_WINDOW = Int.MAX_VALUE
         private const val INLINE_ATTACHMENT_LIMIT_BYTES = 12L * 1024 * 1024
 
         fun forClientType(clientType: ClientType): ProviderContextPolicy = when (clientType) {
@@ -54,8 +55,8 @@ data class ProviderContextPolicy(
 
             ClientType.LITERT_LM -> {
                 ProviderContextPolicy(
-                    recentTurnWindow = 10,
-                    historicalImageTurnWindow = 0
+                    recentTurnWindow = UNBOUNDED_TURN_WINDOW,
+                    historicalImageTurnWindow = UNBOUNDED_TURN_WINDOW
                 )
             }
         }

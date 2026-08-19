@@ -2,9 +2,11 @@ package dev.chungjungsoo.gptmobile.data.context
 
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ContextBuilderTest {
@@ -36,4 +38,56 @@ class ContextBuilderTest {
         )
         assertNull(turns.first().assistantMessage)
     }
+
+    @Test
+    fun `litert lm keeps the full persisted history beyond ten turns`() {
+        val platform = localPlatform()
+        val userMessages = (0 until 12).map { index ->
+            MessageV2(content = "user-$index", platformType = null)
+        }
+        val assistantMessages = (0 until 12).map { index ->
+            listOf(MessageV2(content = "reply-$index", platformType = platform.uid))
+        }
+
+        val turns = ContextBuilder().build(userMessages, assistantMessages, platform)
+
+        assertEquals(12, turns.size)
+        assertEquals("user-0", turns.first().userMessage.content)
+        assertEquals("user-11", turns.last().userMessage.content)
+    }
+
+    @Test
+    fun `litert lm keeps historical image attachments for rebuild`() {
+        val platform = localPlatform()
+        val photo = ChatAttachment(
+            localFilePath = "/tmp/photo.png",
+            preparedFilePath = "/tmp/photo.png",
+            displayName = "photo.png",
+            mimeType = "image/png",
+            sizeBytes = 12
+        )
+
+        val turns = ContextBuilder().build(
+            userMessages = listOf(
+                MessageV2(content = "look", platformType = null, attachments = listOf(photo)),
+                MessageV2(content = "follow up", platformType = null)
+            ),
+            assistantMessages = listOf(
+                listOf(MessageV2(content = "a cat", platformType = platform.uid)),
+                emptyList()
+            ),
+            platform = platform
+        )
+
+        assertEquals(1, turns.first().userMessage.attachments.size)
+        assertTrue(turns.last().userMessage.attachments.isEmpty())
+    }
+
+    private fun localPlatform() = PlatformV2(
+        uid = "local",
+        name = "Local",
+        compatibleType = ClientType.LITERT_LM,
+        apiUrl = "",
+        model = "gemma3-1b-it"
+    )
 }

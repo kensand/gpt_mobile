@@ -16,4 +16,4 @@ fun conversationFingerprint(messages: List<LocalHistoryMessage>): ConversationFi
 fun incomingHistoryExtendsConsumed(
     consumed: ConversationFingerprint,
     incomingPrior: ConversationFingerprint
-): Boolean = consumed == incomingPrior
+): Boolean = consumed.isPrefixOf(incomingPrior)

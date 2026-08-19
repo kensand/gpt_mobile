@@ -86,7 +86,7 @@ class ConversationFingerprintTest {
         assertFalse(extended.isPrefixOf(consumed))
         assertFalse(consumed.isPrefixOf(diverged))
         assertTrue(incomingHistoryExtendsConsumed(consumed = consumed, incomingPrior = consumed))
-        assertFalse(incomingHistoryExtendsConsumed(consumed = consumed, incomingPrior = extended))
+        assertTrue(incomingHistoryExtendsConsumed(consumed = consumed, incomingPrior = extended))
         assertFalse(incomingHistoryExtendsConsumed(consumed = consumed, incomingPrior = diverged))
     }
 

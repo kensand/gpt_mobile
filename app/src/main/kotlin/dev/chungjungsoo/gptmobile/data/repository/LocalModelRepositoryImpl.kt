@@ -94,7 +94,23 @@ class LocalModelRepositoryImpl(
     }
 
     override suspend fun cancelDownload(catalogEntryId: String) {
-        deleteModel(catalogEntryId)
+        withContext(Dispatchers.IO) {
+            workManager.cancelUniqueWork(LocalModelDownloadPaths.uniqueWorkName(catalogEntryId))
+            val row = localModelDao.getById(catalogEntryId) ?: return@withContext
+            val plan = LocalModelReconciler.planUserCancel()
+            if (plan.deleteFiles) {
+                File(storageRoot(), row.relativeDirectory).deleteRecursively()
+            }
+            if (plan.deleteRow) {
+                localModelDao.deleteById(catalogEntryId)
+            } else if (row.status == LocalModelStatus.DOWNLOADING) {
+                localModelDao.updateStatus(
+                    catalogEntryId = catalogEntryId,
+                    status = plan.newStatus,
+                    updatedAt = System.currentTimeMillis() / 1000
+                )
+            }
+        }
     }
 
     override suspend fun deleteModel(catalogEntryId: String) {

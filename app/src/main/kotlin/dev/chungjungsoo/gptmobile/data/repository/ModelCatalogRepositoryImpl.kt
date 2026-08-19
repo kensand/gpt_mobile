@@ -14,25 +14,33 @@ class ModelCatalogRepositoryImpl(
     private val appVersionName: String
 ) : ModelCatalogRepository {
     override suspend fun getVisibleEntries(): List<CatalogEntry> = withContext(Dispatchers.IO) {
-        val remoteCatalog = fetchParsableCatalog(
-            source = { fetchRemoteJson() },
-            onParsed = writeCacheJson
+        visibleEntries(
+            remote = {
+                fetchParsableCatalog(
+                    source = { fetchRemoteJson() },
+                    onParsed = writeCacheJson
+                )
+            },
+            cached = { fetchParsableCatalog(source = { readCacheJson() }) },
+            bundled = { fetchParsableCatalog(source = { readBundledJson() }) }
         )
-        if (remoteCatalog != null) {
-            return@withContext ModelCatalogParser.visibleEntries(remoteCatalog, appVersionName)
-        }
+    }
 
-        val cachedCatalog = fetchParsableCatalog(source = { readCacheJson() })
-        if (cachedCatalog != null) {
-            return@withContext ModelCatalogParser.visibleEntries(cachedCatalog, appVersionName)
-        }
+    override suspend fun getCachedVisibleEntries(): List<CatalogEntry> = withContext(Dispatchers.IO) {
+        visibleEntries(
+            remote = { null },
+            cached = { fetchParsableCatalog(source = { readCacheJson() }) },
+            bundled = { fetchParsableCatalog(source = { readBundledJson() }) }
+        )
+    }
 
-        val bundledCatalog = fetchParsableCatalog(source = { readBundledJson() })
-        if (bundledCatalog != null) {
-            return@withContext ModelCatalogParser.visibleEntries(bundledCatalog, appVersionName)
-        }
-
-        emptyList()
+    private suspend fun visibleEntries(
+        remote: suspend () -> ModelCatalog?,
+        cached: suspend () -> ModelCatalog?,
+        bundled: suspend () -> ModelCatalog?
+    ): List<CatalogEntry> {
+        val catalog = remote() ?: cached() ?: bundled() ?: return emptyList()
+        return ModelCatalogParser.visibleEntries(catalog, appVersionName)
     }
 
     private suspend fun fetchParsableCatalog(

@@ -114,6 +114,31 @@ class LiteRtLmAdapterTest {
     }
 
     @Test
+    fun `twelve sequential turns reuse one conversation and only send the new message`() = runBlocking {
+        val turnCount = 12
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = List(turnCount) { index ->
+                listOf(LocalRuntimeEvent.TextDelta("reply-$index"), LocalRuntimeEvent.Done)
+            }
+        }
+        val adapter = adapter(runtime)
+        val platform = localPlatform()
+
+        repeat(turnCount) { index ->
+            val history = (0 until index).map { prior ->
+                completedTurn("user-$prior", "reply-$prior")
+            }
+            adapter.openSession(history + pendingTurn("user-$index"), platform)
+                .streamRound(emptyList(), emptyList())
+                .toList()
+        }
+
+        assertEquals(1, runtime.createConversationCalls.size)
+        assertEquals(0, runtime.closeConversationCalls)
+        assertEquals((0 until turnCount).map { index -> "user-$index" }, runtime.sendMessageCalls)
+    }
+
+    @Test
     fun `edited early history closes and rebuilds the conversation`() = runBlocking {
         val runtime = FakeLocalRuntime().apply {
             scriptedEvents = listOf(
@@ -771,6 +796,160 @@ class LiteRtLmAdapterTest {
     }
 
     @Test
+    fun `adapter resolves capabilities through the cache-first catalog path`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val catalog = FakeModelCatalogRepository(
+            listOf(CatalogEntry(id = "gemma-3n-e2b-it", capabilities = CatalogCapabilities(vision = true)))
+        )
+        val adapter = adapter(runtime, catalog = catalog)
+
+        adapter.openSession(
+            listOf(pendingTurn("describe this", listOf(imageAttachment()))),
+            visionPlatform()
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(0, catalog.visibleEntriesCalls)
+        assertEquals(1, catalog.cachedVisibleEntriesCalls)
+        assertEquals(true, runtime.loadEngineCalls.single().enableVision)
+        assertImageBytes(listOf("/tmp/photo.png".toByteArray()), runtime.sendMessageImages.single())
+    }
+
+    @Test
+    fun `queued runs keep their own tools and event streams`() = runBlocking {
+        val pause = CompletableDeferred<Unit>()
+        val runtime = FakeLocalRuntime().apply {
+            pauseAfterFirst = pause
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("one"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("two"), LocalRuntimeEvent.Done)
+            )
+            scriptedToolInvocations = listOf(
+                listOf(ScriptedToolInvocation("lookup", """{"query":"a"}""", afterEventIndex = 0)),
+                listOf(ScriptedToolInvocation("echo", """{"query":"b"}""", afterEventIndex = 0))
+            )
+        }
+        val adapter = adapter(runtime, catalog = toolsCatalog())
+        val firstEvents = mutableListOf<ProviderEvent>()
+        val secondEvents = mutableListOf<ProviderEvent>()
+        val firstToolCalls = mutableListOf<String>()
+        val secondToolCalls = mutableListOf<String>()
+
+        val first = launch {
+            adapter.openSession(
+                turns("a"),
+                localPlatform(),
+                listOf(
+                    lookupTool { callId, _ ->
+                        firstToolCalls += "lookup"
+                        AgentToolResult(callId, ToolResultContent.Text("first-ok"), isError = false)
+                    }
+                )
+            ).streamRound(emptyList(), emptyList()).collect { firstEvents += it }
+        }
+        while (firstEvents.none { it is ProviderEvent.TextDelta }) {
+            yield()
+        }
+
+        val second = launch {
+            adapter.openSession(
+                turns("b"),
+                localPlatform(uid = "other"),
+                listOf(
+                    lookupTool(name = "echo") { callId, _ ->
+                        secondToolCalls += "echo"
+                        AgentToolResult(callId, ToolResultContent.Text("second-ok"), isError = false)
+                    }
+                )
+            ).streamRound(emptyList(), emptyList()).collect { secondEvents += it }
+        }
+        while (secondEvents.none { it is ProviderEvent.Notice }) {
+            yield()
+        }
+
+        pause.complete(Unit)
+        first.join()
+        second.join()
+
+        assertEquals(listOf("lookup"), firstToolCalls)
+        assertEquals(listOf("echo"), secondToolCalls)
+        assertEquals(listOf("lookup"), firstEvents.filterIsInstance<ProviderEvent.ToolCall>().map { it.name })
+        assertEquals(listOf("echo"), secondEvents.filterIsInstance<ProviderEvent.ToolCall>().map { it.name })
+        assertTrue(firstEvents.none { it is ProviderEvent.ToolCall && it.name == "echo" })
+        assertTrue(secondEvents.none { it is ProviderEvent.ToolCall && it.name == "lookup" })
+    }
+
+    @Test
+    fun `cold engine emits a loading notice and a warm engine does not`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("one"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("two"), LocalRuntimeEvent.Done)
+            )
+        }
+        val adapter = adapter(runtime, loadingModelNotice = LiteRtLmAdapter.DEFAULT_LOADING_MODEL)
+        val platform = localPlatform()
+
+        val coldEvents = adapter.openSession(turns("first"), platform).streamRound(emptyList(), emptyList()).toList()
+        val warmEvents = adapter.openSession(
+            listOf(completedTurn("first", "one"), pendingTurn("second")),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(
+            listOf(
+                ProviderEvent.Notice(LiteRtLmAdapter.DEFAULT_LOADING_MODEL),
+                ProviderEvent.TextDelta("one"),
+                ProviderEvent.Completed
+            ),
+            coldEvents
+        )
+        assertEquals(
+            listOf(ProviderEvent.TextDelta("two"), ProviderEvent.Completed),
+            warmEvents
+        )
+    }
+
+    @Test
+    fun `trim during generation cancels unloads and the next turn reloads and rebuilds`() = runBlocking {
+        val pause = CompletableDeferred<Unit>()
+        val runtime = FakeLocalRuntime().apply {
+            pauseAfterFirst = pause
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("hel"), LocalRuntimeEvent.TextDelta("lo"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("rebuilt"), LocalRuntimeEvent.Done)
+            )
+        }
+        val holder = LocalEngineHolder(runtime)
+        val adapter = adapter(holder)
+        val platform = localPlatform()
+        val firstEvents = mutableListOf<ProviderEvent>()
+
+        val first = launch {
+            try {
+                adapter.openSession(turns("hello"), platform).streamRound(emptyList(), emptyList()).collect {
+                    firstEvents += it
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) {
+            }
+        }
+        while (firstEvents.none { it is ProviderEvent.TextDelta }) {
+            yield()
+        }
+
+        holder.unloadEngine()
+        first.join()
+
+        adapter.openSession(turns("hello"), platform).streamRound(emptyList(), emptyList()).toList()
+
+        assertTrue(runtime.cancelActiveCalls >= 1)
+        assertEquals(1, runtime.unloadEngineCalls)
+        assertEquals(2, runtime.loadEngineCalls.size)
+        assertEquals(2, runtime.createConversationCalls.size)
+    }
+
+    @Test
     fun `changed tool set rebuilds the conversation and re-registers`() = runBlocking {
         val runtime = FakeLocalRuntime().apply {
             scriptedEvents = listOf(
@@ -869,6 +1048,7 @@ class LiteRtLmAdapterTest {
             )
         ),
         catalog: ModelCatalogRepository = FakeModelCatalogRepository(),
+        loadingModelNotice: String = "",
         loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { attachment ->
             attachment.preparedFilePath.ifBlank { attachment.localFilePath }.toByteArray()
         }
@@ -878,6 +1058,7 @@ class LiteRtLmAdapterTest {
         ignoredAttachmentsNotice = LiteRtLmAdapter.DEFAULT_IGNORED_ATTACHMENTS,
         modelNotDownloadedError = LiteRtLmAdapter.DEFAULT_MODEL_NOT_DOWNLOADED,
         tooManyImagesNotice = LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES,
+        loadingModelNotice = loadingModelNotice,
         modelCatalogRepository = catalog,
         loadImageBytes = loadImageBytes
     )

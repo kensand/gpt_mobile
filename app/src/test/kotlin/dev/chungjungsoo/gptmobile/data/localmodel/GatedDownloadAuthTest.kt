@@ -71,6 +71,35 @@ class GatedDownloadAuthTest {
     }
 
     @Test
+    fun `http status maps to a distinct download failure kind`() {
+        assertEquals(
+            DownloadFailureKind.SESSION_EXPIRED,
+            DownloadFailureKind.fromHttp(401, hasToken = true, isGated = true)
+        )
+        assertEquals(
+            DownloadFailureKind.AUTH_REQUIRED,
+            DownloadFailureKind.fromHttp(401, hasToken = false, isGated = true)
+        )
+        assertEquals(
+            DownloadFailureKind.LICENSE_REQUIRED,
+            DownloadFailureKind.fromHttp(403, hasToken = true, isGated = true)
+        )
+        assertEquals(
+            DownloadFailureKind.AUTH_REQUIRED,
+            DownloadFailureKind.fromHttp(403, hasToken = false, isGated = true)
+        )
+        assertEquals(
+            DownloadFailureKind.GENERIC,
+            DownloadFailureKind.fromHttp(500, hasToken = true, isGated = true)
+        )
+        assertEquals(
+            DownloadFailureKind.SESSION_EXPIRED,
+            DownloadFailureKind.fromWorkOutput("SESSION_EXPIRED")
+        )
+        assertEquals(DownloadFailureKind.GENERIC, DownloadFailureKind.fromWorkOutput(null))
+    }
+
+    @Test
     fun `unexpected status codes are errors`() {
         assertEquals(GatedDownloadAction.ERROR, GatedDownloadAuth.decide(404, hasToken = true, isGated = true).action)
         assertEquals(GatedDownloadAction.ERROR, GatedDownloadAuth.decide(500, hasToken = false, isGated = false).action)

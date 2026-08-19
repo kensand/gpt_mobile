@@ -1,6 +1,7 @@
 package dev.chungjungsoo.gptmobile.data.localmodel
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,7 +32,7 @@ class LocalModelReconcilerTest {
     }
 
     @Test
-    fun `leftover partial for a non-active download is deleted`() {
+    fun `leftover partial for a failed download is kept so restart can resume`() {
         val row = failedRow()
         val partial = partialPath(row)
         val actions = LocalModelReconciler.reconcile(
@@ -40,7 +41,7 @@ class LocalModelReconcilerTest {
             activeDownloadIds = emptySet()
         )
 
-        assertEquals(listOf(ReconcileAction.DeleteFile(partial)), actions)
+        assertTrue(actions.isEmpty())
     }
 
     @Test
@@ -56,7 +57,7 @@ class LocalModelReconcilerTest {
     }
 
     @Test
-    fun `downloading row that is no longer active is marked failed and its partial is cleaned`() {
+    fun `downloading row that is no longer active is marked failed and its partial is kept`() {
         val row = downloadingRow()
         val partial = partialPath(row)
         val actions = LocalModelReconciler.reconcile(
@@ -65,13 +66,16 @@ class LocalModelReconcilerTest {
             activeDownloadIds = emptySet()
         )
 
-        assertEquals(
-            listOf(
-                ReconcileAction.MarkFailed(row.catalogEntryId),
-                ReconcileAction.DeleteFile(partial)
-            ),
-            actions
-        )
+        assertEquals(listOf(ReconcileAction.MarkFailed(row.catalogEntryId)), actions)
+    }
+
+    @Test
+    fun `user cancel keeps the row and partial file with a failed status`() {
+        val plan = LocalModelReconciler.planUserCancel()
+
+        assertEquals(LocalModelStatus.FAILED, plan.newStatus)
+        assertFalse(plan.deleteRow)
+        assertFalse(plan.deleteFiles)
     }
 
     @Test

@@ -201,7 +201,7 @@ class ChatViewModel @Inject constructor(
         observeToolEvents()
         observeAgentNotices()
         viewModelScope.launch {
-            catalogEntries.value = modelCatalogRepository.getVisibleEntries()
+            catalogEntries.value = modelCatalogRepository.getCachedVisibleEntries()
         }
     }
 

@@ -20,8 +20,10 @@ import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogCapabilities
 import dev.chungjungsoo.gptmobile.data.catalog.ModelCatalogParser
+import dev.chungjungsoo.gptmobile.data.localmodel.DownloadFailureKind
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelItemStatus
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelListItem
+import dev.chungjungsoo.gptmobile.presentation.ui.setting.downloadFailureMessageRes
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -149,7 +151,11 @@ fun LocalModelDownloadStatus(
 
             item.status == LocalModelItemStatus.FAILED -> {
                 Text(
-                    text = item.errorMessage ?: stringResource(R.string.local_model_failed),
+                    text = if (item.failureKind != DownloadFailureKind.GENERIC) {
+                        stringResource(downloadFailureMessageRes(item.failureKind))
+                    } else {
+                        item.errorMessage ?: stringResource(R.string.local_model_failed)
+                    },
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 8.dp)

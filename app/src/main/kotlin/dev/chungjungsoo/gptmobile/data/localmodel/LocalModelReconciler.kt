@@ -20,7 +20,15 @@ sealed class ReconcileAction {
     data class DeleteFile(val relativePath: String) : ReconcileAction()
 }
 
+data class UserCancelPlan(
+    val newStatus: String = LocalModelStatus.FAILED,
+    val deleteRow: Boolean = false,
+    val deleteFiles: Boolean = false
+)
+
 object LocalModelReconciler {
+    fun planUserCancel(): UserCancelPlan = UserCancelPlan()
+
     fun reconcile(
         rows: List<LocalModelRecord>,
         diskFiles: Set<String>,
@@ -43,16 +51,14 @@ object LocalModelReconciler {
                 LocalModelStatus.DOWNLOADING -> {
                     if (!isActive) {
                         actions += ReconcileAction.MarkFailed(row.catalogEntryId)
-                        if (partialPath in diskFiles) {
-                            actions += ReconcileAction.DeleteFile(partialPath)
-                            handledPartials += partialPath
-                        }
+                    }
+                    if (partialPath in diskFiles) {
+                        handledPartials += partialPath
                     }
                 }
 
                 LocalModelStatus.FAILED -> {
-                    if (!isActive && partialPath in diskFiles) {
-                        actions += ReconcileAction.DeleteFile(partialPath)
+                    if (partialPath in diskFiles) {
                         handledPartials += partialPath
                     }
                 }

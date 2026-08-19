@@ -116,6 +116,46 @@ class ModelCatalogRepositoryTest {
     }
 
     @Test
+    fun `cache-first read uses cache and never touches the network`() = runBlocking {
+        var remoteCalls = 0
+        val repository = ModelCatalogRepositoryImpl(
+            fetchRemoteJson = {
+                remoteCalls += 1
+                error("network should not be called")
+            },
+            readCacheJson = { remoteCatalog("cached-model", "0.1.0") },
+            writeCacheJson = { error("cache should not be written") },
+            readBundledJson = { remoteCatalog("bundled-model", "0.1.0") },
+            appVersionName = "0.8.0"
+        )
+
+        val entries = repository.getCachedVisibleEntries()
+
+        assertEquals(listOf("cached-model"), entries.map { it.id })
+        assertEquals(0, remoteCalls)
+    }
+
+    @Test
+    fun `cache-first read falls back to bundled snapshot without a network call`() = runBlocking {
+        var remoteCalls = 0
+        val repository = ModelCatalogRepositoryImpl(
+            fetchRemoteJson = {
+                remoteCalls += 1
+                error("network should not be called")
+            },
+            readCacheJson = { null },
+            writeCacheJson = { error("cache should not be written") },
+            readBundledJson = { remoteCatalog("bundled-model", "0.1.0") },
+            appVersionName = "0.8.0"
+        )
+
+        val entries = repository.getCachedVisibleEntries()
+
+        assertEquals(listOf("bundled-model"), entries.map { it.id })
+        assertEquals(0, remoteCalls)
+    }
+
+    @Test
     fun `entries above the running app version are hidden`() = runBlocking {
         val repository = ModelCatalogRepositoryImpl(
             fetchRemoteJson = { remoteCatalog("future-model", "9.0.0") },

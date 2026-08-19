@@ -32,6 +32,7 @@ class LiteRtLocalRuntime(
     private var engine: Engine? = null
     private var conversation: Conversation? = null
     private var loadedAccelerator: String = LocalAccelerators.CPU
+    private var loadedSpec: LocalEngineSpec? = null
 
     override suspend fun loadEngine(spec: LocalEngineSpec) {
         withContext(Dispatchers.IO) {
@@ -47,6 +48,7 @@ class LiteRtLocalRuntime(
             val nextEngine = Engine(engineConfig)
             nextEngine.initialize()
             engine = nextEngine
+            loadedSpec = spec
         }
     }
 
@@ -143,6 +145,8 @@ class LiteRtLocalRuntime(
 
     override fun hasOpenConversation(): Boolean = conversation != null
 
+    override fun isEngineLoaded(spec: LocalEngineSpec): Boolean = engine != null && loadedSpec == spec
+
     override suspend fun closeConversation() {
         withContext(Dispatchers.IO) {
             runCatching { conversation?.close() }
@@ -156,6 +160,7 @@ class LiteRtLocalRuntime(
             conversation = null
             runCatching { engine?.close() }
             engine = null
+            loadedSpec = null
             loadedAccelerator = LocalAccelerators.CPU
         }
     }

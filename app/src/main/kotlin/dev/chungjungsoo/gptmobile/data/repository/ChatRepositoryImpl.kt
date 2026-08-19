@@ -103,6 +103,10 @@ class ChatRepositoryImpl @Inject constructor(
             R.string.local_platform_too_many_images,
             LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES
         ),
+        loadingModelNotice = contextString(
+            R.string.local_platform_loading_model,
+            LiteRtLmAdapter.DEFAULT_LOADING_MODEL
+        ),
         modelCatalogRepository = modelCatalogRepository,
         loadImageBytes = { attachment ->
             val filePath = attachment.preparedFilePath.ifBlank { attachment.localFilePath }
