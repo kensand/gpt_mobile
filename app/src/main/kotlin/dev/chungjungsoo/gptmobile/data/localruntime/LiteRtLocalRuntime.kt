@@ -8,15 +8,23 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
+import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.tool
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 class LiteRtLocalRuntime(
     private val context: Context
@@ -40,28 +48,39 @@ class LiteRtLocalRuntime(
         }
     }
 
+    @OptIn(ExperimentalApi::class)
     override suspend fun createConversation(config: LocalConversationConfig) {
         withContext(Dispatchers.IO) {
             val currentEngine = engine ?: error("LiteRT-LM engine is not loaded")
             conversation?.close()
-            conversation = currentEngine.createConversation(
-                ConversationConfig(
-                    systemInstruction = config.systemPrompt?.takeIf { it.isNotBlank() }?.let { Contents.of(it) },
-                    // LiteRT-LM 0.11.0 Message.user/model(Contents) accept Content.ImageBytes,
-                    // so rebuilds re-seed prior image turns instead of dropping them to text-only.
-                    initialMessages = config.initialMessages.map { message ->
-                        when (message.role) {
-                            LocalHistoryRole.USER -> Message.user(contentsOf(message.text, message.images))
-                            LocalHistoryRole.MODEL -> Message.model(contentsOf(message.text, message.images))
-                        }
-                    },
-                    samplerConfig = SamplerConfig(
-                        topK = config.sampler.topK,
-                        topP = config.sampler.topP.toDouble(),
-                        temperature = config.sampler.temperature.toDouble()
+            val toolProviders = config.tools.map { descriptor ->
+                tool(BridgedOpenApiTool(descriptor, config.toolExecutor))
+            }
+            val previousConstrainedDecoding = ExperimentalFlags.enableConversationConstrainedDecoding
+            ExperimentalFlags.enableConversationConstrainedDecoding = config.enableConstrainedDecoding
+            try {
+                conversation = currentEngine.createConversation(
+                    ConversationConfig(
+                        systemInstruction = config.systemPrompt?.takeIf { it.isNotBlank() }?.let { Contents.of(it) },
+                        // LiteRT-LM 0.11.0 Message.user/model(Contents) accept Content.ImageBytes,
+                        // so rebuilds re-seed prior image turns instead of dropping them to text-only.
+                        initialMessages = config.initialMessages.map { message ->
+                            when (message.role) {
+                                LocalHistoryRole.USER -> Message.user(contentsOf(message.text, message.images))
+                                LocalHistoryRole.MODEL -> Message.model(contentsOf(message.text, message.images))
+                            }
+                        },
+                        tools = toolProviders,
+                        samplerConfig = SamplerConfig(
+                            topK = config.sampler.topK,
+                            topP = config.sampler.topP.toDouble(),
+                            temperature = config.sampler.temperature.toDouble()
+                        )
                     )
                 )
-            )
+            } finally {
+                ExperimentalFlags.enableConversationConstrainedDecoding = previousConstrainedDecoding
+            }
         }
     }
 
@@ -168,5 +187,21 @@ class LiteRtLocalRuntime(
     private companion object {
         const val THOUGHT_CHANNEL = "thought"
         const val MAX_IMAGES_PER_MESSAGE = 10
+    }
+}
+
+private class BridgedOpenApiTool(
+    private val descriptor: LocalToolDescriptor,
+    private val executor: LocalToolExecutor?
+) : OpenApiTool {
+    override fun getToolDescriptionJsonString(): String = buildJsonObject {
+        put("name", descriptor.name)
+        put("description", descriptor.description)
+        put("parameters", Json.parseToJsonElement(descriptor.inputSchemaJson))
+    }.toString()
+
+    override fun execute(paramsJsonString: String): String = runBlocking {
+        executor?.execute(descriptor.name, paramsJsonString)
+            ?: error("LiteRT-LM tool executor is not registered")
     }
 }

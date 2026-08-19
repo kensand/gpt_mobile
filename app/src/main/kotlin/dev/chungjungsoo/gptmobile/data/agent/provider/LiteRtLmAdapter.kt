@@ -1,9 +1,12 @@
 package dev.chungjungsoo.gptmobile.data.agent.provider
 
 import dev.chungjungsoo.gptmobile.data.agent.AgentProviderSession
+import dev.chungjungsoo.gptmobile.data.agent.AgentTool
 import dev.chungjungsoo.gptmobile.data.agent.AgentToolDefinition
 import dev.chungjungsoo.gptmobile.data.agent.AgentToolExchange
+import dev.chungjungsoo.gptmobile.data.agent.AgentToolResult
 import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
+import dev.chungjungsoo.gptmobile.data.agent.ToolResultContent
 import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
@@ -16,14 +19,19 @@ import dev.chungjungsoo.gptmobile.data.localruntime.LocalHistoryRole
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntimeEvent
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalSamplerConfig
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalToolDescriptor
+import dev.chungjungsoo.gptmobile.data.localruntime.LocalToolExecutor
 import dev.chungjungsoo.gptmobile.data.localruntime.conversationFingerprint
 import dev.chungjungsoo.gptmobile.data.localruntime.incomingHistoryExtendsConsumed
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 class LiteRtLmAdapter(
     private val localRuntime: LocalRuntime,
@@ -40,157 +48,215 @@ class LiteRtLmAdapter(
         val engineSpec: LocalEngineSpec,
         val sampler: LocalSamplerConfig,
         val systemPrompt: String?,
+        val toolsKey: String,
         val consumed: ConversationFingerprint
     )
 
     private var openConversation: OpenConversation? = null
     private var conversationDirty = false
+    private var toolEventSink: (suspend (ProviderEvent) -> Unit)? = null
+    private var boundToolsByName: Map<String, AgentTool> = emptyMap()
 
-    suspend fun openSession(turns: List<ConversationTurn>, platform: PlatformV2): AgentProviderSession {
+    suspend fun openSession(
+        turns: List<ConversationTurn>,
+        platform: PlatformV2,
+        tools: List<AgentTool> = emptyList()
+    ): AgentProviderSession {
+        val boundTools = tools
         return object : AgentProviderSession {
+            override val handlesToolsInternally: Boolean = true
+
             override fun streamRound(
                 tools: List<AgentToolDefinition>,
                 exchanges: List<AgentToolExchange>
             ): Flow<ProviderEvent> = channelFlow {
-                val visionCapable = modelCatalogRepository
+                val catalogEntry = modelCatalogRepository
                     ?.getVisibleEntries()
                     ?.firstOrNull { entry -> entry.id == platform.model }
-                    ?.capabilities
-                    ?.vision == true
-                val latestAttachments = turns.lastOrNull()?.userMessage?.attachments.orEmpty()
-                attachmentNotices(visionCapable, turns, latestAttachments).forEach { notice ->
-                    send(notice)
-                }
-
-                val modelPath = localModelRepository.resolveDownloadedPath(platform.model)
-                if (modelPath == null) {
-                    send(ProviderEvent.Failed(modelNotDownloadedError))
-                    return@channelFlow
-                }
-
-                val latestUserText = turns.lastOrNull()?.userMessage?.effectiveContent().orEmpty()
-                val latestImageIds = visionImageIds(latestAttachments, visionCapable)
-                val latestImages = if (visionCapable) {
-                    latestAttachments
-                        .filter { attachment -> attachment.isImageAttachment() }
-                        .take(MAX_IMAGES_PER_MESSAGE)
-                        .mapNotNull { attachment -> loadImageBytes(attachment) }
-                } else {
-                    emptyList()
-                }
-                val history = historyMessages(
-                    priorTurns = turns.dropLast(1),
-                    visionCapable = visionCapable,
-                    includeImageBytes = false
-                )
-                val spec = LocalEngineSpec(
-                    modelPath = modelPath,
-                    accelerator = LocalAccelerators.normalize(platform.accelerator),
-                    maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
-                    enableVision = visionCapable
-                )
-                val sampler = LocalSamplerConfig(
-                    topK = platform.topK ?: DEFAULT_TOP_K,
-                    topP = platform.topP ?: DEFAULT_TOP_P,
-                    temperature = platform.temperature ?: DEFAULT_TEMPERATURE
-                )
-                val incomingPrior = conversationFingerprint(history)
-
+                val visionCapable = catalogEntry?.capabilities?.vision == true
+                val toolsCapable = catalogEntry?.capabilities?.tools == true
+                val registeredTools = if (toolsCapable) boundTools else emptyList()
+                val descriptors = registeredTools.map { tool -> tool.definition.toLocalDescriptor() }
+                val toolsKey = toolsFingerprint(descriptors)
+                boundToolsByName = registeredTools.associateBy { it.definition.name }
+                toolEventSink = { event -> send(event) }
                 try {
-                    var failed = false
-                    val assistantReply = StringBuilder()
-                    localRuntime.runExclusiveFlow(
-                        onContended = { send(ProviderEvent.Notice(waitingForEngineNotice)) }
-                    ) {
-                        loadEngine(spec)
-                        val snapshot = openConversation
-                        val canReuse = !conversationDirty &&
-                            hasOpenConversation() &&
-                            snapshot != null &&
-                            snapshot.profileUid == platform.uid &&
-                            snapshot.engineSpec == spec &&
-                            snapshot.sampler == sampler &&
-                            snapshot.systemPrompt == platform.systemPrompt &&
-                            incomingHistoryExtendsConsumed(snapshot.consumed, incomingPrior)
-                        if (!canReuse) {
-                            if (hasOpenConversation()) {
-                                closeConversation()
-                            }
-                            val seedHistory = if (visionCapable) {
-                                historyMessages(
-                                    priorTurns = turns.dropLast(1),
-                                    visionCapable = true,
-                                    includeImageBytes = true
-                                )
-                            } else {
-                                history
-                            }
-                            createConversation(
-                                LocalConversationConfig(
-                                    sampler = sampler,
-                                    systemPrompt = platform.systemPrompt,
-                                    initialMessages = seedHistory
-                                )
-                            )
-                            openConversation = OpenConversation(
-                                profileUid = platform.uid,
-                                engineSpec = spec,
-                                sampler = sampler,
-                                systemPrompt = platform.systemPrompt,
-                                consumed = incomingPrior
-                            )
-                        }
-                        conversationDirty = true
-                        sendMessage(latestUserText, latestImages)
-                    }.collect { event ->
-                        when (event) {
-                            is LocalRuntimeEvent.TextDelta -> {
-                                assistantReply.append(event.text)
-                                send(ProviderEvent.TextDelta(event.text))
-                            }
-
-                            is LocalRuntimeEvent.ThinkingDelta -> send(ProviderEvent.ThinkingDelta(event.text))
-
-                            is LocalRuntimeEvent.Error -> {
-                                failed = true
-                                conversationDirty = true
-                                send(ProviderEvent.Failed(event.message))
-                            }
-
-                            LocalRuntimeEvent.Done -> Unit
-                        }
+                    val latestAttachments = turns.lastOrNull()?.userMessage?.attachments.orEmpty()
+                    attachmentNotices(visionCapable, turns, latestAttachments).forEach { notice ->
+                        send(notice)
                     }
-                    if (!failed) {
-                        send(ProviderEvent.Completed)
-                        val snapshot = openConversation
-                        if (snapshot != null) {
-                            openConversation = snapshot.copy(
-                                consumed = snapshot.consumed.extend(
-                                    listOfNotNull(
-                                        LocalHistoryMessage(
-                                            role = LocalHistoryRole.USER,
-                                            text = latestUserText,
-                                            imageIds = latestImageIds
-                                        ),
-                                        assistantReply.toString().takeIf { it.isNotBlank() }?.let { content ->
-                                            LocalHistoryMessage(LocalHistoryRole.MODEL, content)
+
+                    val modelPath = localModelRepository.resolveDownloadedPath(platform.model)
+                    if (modelPath == null) {
+                        send(ProviderEvent.Failed(modelNotDownloadedError))
+                        return@channelFlow
+                    }
+
+                    val latestUserText = turns.lastOrNull()?.userMessage?.effectiveContent().orEmpty()
+                    val latestImageIds = visionImageIds(latestAttachments, visionCapable)
+                    val latestImages = if (visionCapable) {
+                        latestAttachments
+                            .filter { attachment -> attachment.isImageAttachment() }
+                            .take(MAX_IMAGES_PER_MESSAGE)
+                            .mapNotNull { attachment -> loadImageBytes(attachment) }
+                    } else {
+                        emptyList()
+                    }
+                    val history = historyMessages(
+                        priorTurns = turns.dropLast(1),
+                        visionCapable = visionCapable,
+                        includeImageBytes = false
+                    )
+                    val spec = LocalEngineSpec(
+                        modelPath = modelPath,
+                        accelerator = LocalAccelerators.normalize(platform.accelerator),
+                        maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
+                        enableVision = visionCapable
+                    )
+                    val sampler = LocalSamplerConfig(
+                        topK = platform.topK ?: DEFAULT_TOP_K,
+                        topP = platform.topP ?: DEFAULT_TOP_P,
+                        temperature = platform.temperature ?: DEFAULT_TEMPERATURE
+                    )
+                    val incomingPrior = conversationFingerprint(history)
+
+                    try {
+                        var failed = false
+                        val assistantReply = StringBuilder()
+                        localRuntime.runExclusiveFlow(
+                            onContended = { send(ProviderEvent.Notice(waitingForEngineNotice)) }
+                        ) {
+                            loadEngine(spec)
+                            val snapshot = openConversation
+                            val canReuse = !conversationDirty &&
+                                hasOpenConversation() &&
+                                snapshot != null &&
+                                snapshot.profileUid == platform.uid &&
+                                snapshot.engineSpec == spec &&
+                                snapshot.sampler == sampler &&
+                                snapshot.systemPrompt == platform.systemPrompt &&
+                                snapshot.toolsKey == toolsKey &&
+                                incomingHistoryExtendsConsumed(snapshot.consumed, incomingPrior)
+                            if (!canReuse) {
+                                if (hasOpenConversation()) {
+                                    closeConversation()
+                                }
+                                val seedHistory = if (visionCapable) {
+                                    historyMessages(
+                                        priorTurns = turns.dropLast(1),
+                                        visionCapable = true,
+                                        includeImageBytes = true
+                                    )
+                                } else {
+                                    history
+                                }
+                                createConversation(
+                                    LocalConversationConfig(
+                                        sampler = sampler,
+                                        systemPrompt = platform.systemPrompt,
+                                        initialMessages = seedHistory,
+                                        tools = descriptors,
+                                        enableConstrainedDecoding = descriptors.isNotEmpty(),
+                                        toolExecutor = if (descriptors.isNotEmpty()) {
+                                            LocalToolExecutor { name, argumentsJson ->
+                                                executeBoundTool(name, argumentsJson)
+                                            }
+                                        } else {
+                                            null
                                         }
                                     )
                                 )
-                            )
-                            conversationDirty = false
+                                openConversation = OpenConversation(
+                                    profileUid = platform.uid,
+                                    engineSpec = spec,
+                                    sampler = sampler,
+                                    systemPrompt = platform.systemPrompt,
+                                    toolsKey = toolsKey,
+                                    consumed = incomingPrior
+                                )
+                            }
+                            conversationDirty = true
+                            sendMessage(latestUserText, latestImages)
+                        }.collect { event ->
+                            when (event) {
+                                is LocalRuntimeEvent.TextDelta -> {
+                                    assistantReply.append(event.text)
+                                    send(ProviderEvent.TextDelta(event.text))
+                                }
+
+                                is LocalRuntimeEvent.ThinkingDelta -> send(ProviderEvent.ThinkingDelta(event.text))
+
+                                is LocalRuntimeEvent.Error -> {
+                                    failed = true
+                                    conversationDirty = true
+                                    send(ProviderEvent.Failed(event.message))
+                                }
+
+                                LocalRuntimeEvent.Done -> Unit
+                            }
                         }
+                        if (!failed) {
+                            send(ProviderEvent.Completed)
+                            val snapshot = openConversation
+                            if (snapshot != null) {
+                                openConversation = snapshot.copy(
+                                    consumed = snapshot.consumed.extend(
+                                        listOfNotNull(
+                                            LocalHistoryMessage(
+                                                role = LocalHistoryRole.USER,
+                                                text = latestUserText,
+                                                imageIds = latestImageIds
+                                            ),
+                                            assistantReply.toString().takeIf { it.isNotBlank() }?.let { content ->
+                                                LocalHistoryMessage(LocalHistoryRole.MODEL, content)
+                                            }
+                                        )
+                                    )
+                                )
+                                conversationDirty = false
+                            }
+                        }
+                    } catch (error: CancellationException) {
+                        localRuntime.cancelActive()
+                        conversationDirty = true
+                        throw error
+                    } catch (error: Exception) {
+                        conversationDirty = true
+                        send(ProviderEvent.Failed(error.message ?: "Local inference failed"))
                     }
-                } catch (error: CancellationException) {
-                    localRuntime.cancelActive()
-                    conversationDirty = true
-                    throw error
-                } catch (error: Exception) {
-                    conversationDirty = true
-                    send(ProviderEvent.Failed(error.message ?: "Local inference failed"))
+                } finally {
+                    toolEventSink = null
                 }
             }
         }
+    }
+
+    private suspend fun executeBoundTool(toolName: String, argumentsJson: String): String {
+        val arguments = parseArguments(argumentsJson)
+        val call = ProviderEvent.ToolCall(UUID.randomUUID().toString(), toolName, arguments)
+        toolEventSink?.invoke(call)
+        val result = try {
+            val tool = boundToolsByName[toolName]
+            if (tool == null) {
+                AgentToolResult(
+                    callId = call.callId,
+                    content = ToolResultContent.Text("Tool '$toolName' is not assigned to this profile."),
+                    isError = true
+                )
+            } else {
+                tool.execute(call.callId, arguments)
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            AgentToolResult(
+                callId = call.callId,
+                content = ToolResultContent.Text(error.message ?: "Tool '$toolName' failed."),
+                isError = true
+            )
+        }
+        toolEventSink?.invoke(ProviderEvent.ToolResult(call, result))
+        return result.engineText()
     }
 
     private fun attachmentNotices(
@@ -262,6 +328,27 @@ class LiteRtLmAdapter(
     private fun ChatAttachment.isImageAttachment(): Boolean = mimeType.startsWith("image/")
 
     private fun ChatAttachment.identity(): String = "${preparedFilePath.ifBlank { localFilePath }}|$mimeType|$sizeBytes"
+
+    private fun AgentToolDefinition.toLocalDescriptor() = LocalToolDescriptor(
+        name = name,
+        description = description,
+        inputSchemaJson = inputSchema.toString()
+    )
+
+    private fun toolsFingerprint(descriptors: List<LocalToolDescriptor>): String = descriptors.sortedBy { it.name }.joinToString("\u001e") { descriptor ->
+        "${descriptor.name}\u001f${descriptor.description}\u001f${descriptor.inputSchemaJson}"
+    }
+
+    private fun parseArguments(argumentsJson: String): JsonObject {
+        val element = runCatching { Json.parseToJsonElement(argumentsJson) }.getOrNull()
+        return element as? JsonObject ?: JsonObject(emptyMap())
+    }
+
+    private fun AgentToolResult.engineText(): String = when (val value = content) {
+        is ToolResultContent.Text -> value.text
+        is ToolResultContent.Json -> value.value.toString()
+        is ToolResultContent.ResourceLinks -> value.links.joinToString("\n") { link -> link.uri }
+    }
 
     companion object {
         const val DEFAULT_IGNORED_ATTACHMENTS = "The local platform ignored attachments"

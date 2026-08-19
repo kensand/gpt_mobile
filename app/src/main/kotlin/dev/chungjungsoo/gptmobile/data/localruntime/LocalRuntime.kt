@@ -41,10 +41,23 @@ data class LocalHistoryMessage(
     }
 }
 
+data class LocalToolDescriptor(
+    val name: String,
+    val description: String,
+    val inputSchemaJson: String
+)
+
+fun interface LocalToolExecutor {
+    suspend fun execute(toolName: String, argumentsJson: String): String
+}
+
 data class LocalConversationConfig(
     val sampler: LocalSamplerConfig,
     val systemPrompt: String?,
-    val initialMessages: List<LocalHistoryMessage>
+    val initialMessages: List<LocalHistoryMessage>,
+    val tools: List<LocalToolDescriptor> = emptyList(),
+    val enableConstrainedDecoding: Boolean = false,
+    val toolExecutor: LocalToolExecutor? = null
 )
 
 sealed interface LocalRuntimeEvent {

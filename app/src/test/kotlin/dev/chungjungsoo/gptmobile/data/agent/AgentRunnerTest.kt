@@ -359,6 +359,49 @@ class AgentRunnerTest {
     }
 
     @Test
+    fun `engine owned session forwards tool timeline events without another round`() = runBlocking {
+        val providerCalls = AtomicInteger()
+        val session = object : AgentProviderSession {
+            override val handlesToolsInternally: Boolean = true
+
+            override fun streamRound(
+                tools: List<AgentToolDefinition>,
+                exchanges: List<AgentToolExchange>
+            ): Flow<ProviderEvent> {
+                providerCalls.incrementAndGet()
+                assertTrue(exchanges.isEmpty())
+                return flow {
+                    emit(toolCall("engine_call"))
+                    emit(
+                        ProviderEvent.ToolResult(
+                            toolCall("engine_call"),
+                            AgentToolResult("engine_call", ToolResultContent.Text("from-engine"), isError = false)
+                        )
+                    )
+                    emit(ProviderEvent.TextDelta("final"))
+                    emit(ProviderEvent.Completed)
+                }
+            }
+        }
+
+        val events = AgentRunner().run(session, listOf(tool())).toList()
+
+        assertEquals(1, providerCalls.get())
+        assertEquals(
+            listOf(
+                AgentRunEvent.Provider(toolCall("engine_call")),
+                AgentRunEvent.ToolFinished(
+                    toolCall("engine_call"),
+                    AgentToolResult("engine_call", ToolResultContent.Text("from-engine"), isError = false)
+                ),
+                AgentRunEvent.Provider(ProviderEvent.TextDelta("final")),
+                AgentRunEvent.Provider(ProviderEvent.Completed)
+            ),
+            events
+        )
+    }
+
+    @Test
     fun `external cancellation during a tool is not converted to a tool error`() = runBlocking {
         val toolStarted = CompletableDeferred<Unit>()
         val events = mutableListOf<AgentRunEvent>()

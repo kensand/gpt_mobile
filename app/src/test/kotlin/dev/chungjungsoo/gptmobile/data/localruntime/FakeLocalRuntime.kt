@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.yield
 
 class FakeLocalRuntime : LocalRuntime {
     val loadEngineCalls = mutableListOf<LocalEngineSpec>()
@@ -17,12 +18,16 @@ class FakeLocalRuntime : LocalRuntime {
     var unloadEngineCalls = 0
 
     var scriptedEvents: List<List<LocalRuntimeEvent>> = emptyList()
+    var scriptedToolInvocations: List<List<ScriptedToolInvocation>> = emptyList()
     var emitDelayMillis: Long = 0L
     var pauseAfterFirst: CompletableDeferred<Unit>? = null
     val generationMutex = Mutex()
+    val toolExecutorCalls = mutableListOf<Pair<String, String>>()
+    val toolExecutorResults = mutableListOf<String>()
 
     private var scriptIndex = 0
     private var conversationOpen = false
+    private var activeToolExecutor: LocalToolExecutor? = null
 
     override suspend fun loadEngine(spec: LocalEngineSpec) {
         loadEngineCalls += spec
@@ -30,6 +35,7 @@ class FakeLocalRuntime : LocalRuntime {
 
     override suspend fun createConversation(config: LocalConversationConfig) {
         createConversationCalls += config
+        activeToolExecutor = config.toolExecutor
         conversationOpen = true
     }
 
@@ -39,15 +45,27 @@ class FakeLocalRuntime : LocalRuntime {
         if (emitDelayMillis > 0L) {
             delay(emitDelayMillis)
         }
-        val events = scriptedEvents.getOrElse(scriptIndex++) {
+        val index = scriptIndex++
+        val events = scriptedEvents.getOrElse(index) {
             listOf(LocalRuntimeEvent.Done)
         }
-        events.forEachIndexed { index, event ->
+        val invocations = scriptedToolInvocations.getOrElse(index) { emptyList() }
+        events.forEachIndexed { eventIndex, event ->
             emit(event)
-            if (index == 0) {
+            yield()
+            if (eventIndex == 0) {
                 pauseAfterFirst?.await()
             }
+            invocations.filter { it.afterEventIndex == eventIndex }.forEach { invocation ->
+                invokeTool(invocation)
+            }
         }
+    }
+
+    private suspend fun invokeTool(invocation: ScriptedToolInvocation) {
+        val executor = activeToolExecutor ?: return
+        toolExecutorCalls += invocation.name to invocation.argumentsJson
+        toolExecutorResults += executor.execute(invocation.name, invocation.argumentsJson)
     }
 
     override fun cancelActive() {
@@ -83,3 +101,9 @@ class FakeLocalRuntime : LocalRuntime {
         }
     }
 }
+
+data class ScriptedToolInvocation(
+    val name: String,
+    val argumentsJson: String,
+    val afterEventIndex: Int = 0
+)

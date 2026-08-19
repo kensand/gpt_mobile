@@ -55,9 +55,13 @@ class AgentRunner(
                         .collect { event ->
                             when (event) {
                                 is ProviderEvent.ToolCall -> {
-                                    calls += event
+                                    if (!session.handlesToolsInternally) {
+                                        calls += event
+                                    }
                                     emit(AgentRunEvent.Provider(event))
                                 }
+
+                                is ProviderEvent.ToolResult -> emit(AgentRunEvent.ToolFinished(event.call, event.result))
 
                                 is ProviderEvent.Failed -> {
                                     failed = true

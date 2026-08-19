@@ -5,6 +5,8 @@ import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpClientManager
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthClient
 import dev.chungjungsoo.gptmobile.data.agent.tool.McpOAuthCoordinator
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogCapabilities
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.context.ContextBuilder
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
@@ -38,6 +40,7 @@ import dev.chungjungsoo.gptmobile.data.dto.openai.response.ResponsesStreamEvent
 import dev.chungjungsoo.gptmobile.data.localruntime.FakeLocalRuntime
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntimeEvent
+import dev.chungjungsoo.gptmobile.data.localruntime.ScriptedToolInvocation
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
@@ -179,6 +182,59 @@ class ChatRepositoryImplTest {
         )
         assertEquals(listOf("Hi"), runtime.sendMessageCalls)
         assertEquals(1, runtime.loadEngineCalls.size)
+    }
+
+    @Test
+    fun `litert lm tool capable run records engine owned tool calls on the timeline`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(
+                    LocalRuntimeEvent.TextDelta("before"),
+                    LocalRuntimeEvent.TextDelta("after"),
+                    LocalRuntimeEvent.Done
+                )
+            )
+            scriptedToolInvocations = listOf(
+                listOf(ScriptedToolInvocation("current_date", "{}"))
+            )
+        }
+        val traceDao = RecordingToolEventDao()
+        val repository = createRepository(
+            localRuntime = runtime,
+            localModelRepository = FakeLocalModelRepository(
+                downloadedPaths = mapOf("gemma3-1b-it" to "/models/gemma.litertlm")
+            ),
+            modelCatalogRepository = FakeModelCatalogRepository(
+                listOf(CatalogEntry(id = "gemma3-1b-it", capabilities = CatalogCapabilities(tools = true)))
+            ),
+            toolEventRecorder = ToolEventRecorder(traceDao.asDao())
+        )
+
+        val states = repository.completeChat(
+            userMessages = listOf(MessageV2(content = "Hi", platformType = null)),
+            assistantMessages = emptyList(),
+            platform = localPlatform(),
+            runId = "run-local-tool"
+        ).toList()
+
+        assertEquals(
+            listOf(
+                ApiState.Loading,
+                ApiState.Success("before"),
+                ApiState.ToolCall(toolSequence = 0),
+                ApiState.Success("after"),
+                ApiState.Done
+            ),
+            states
+        )
+        assertEquals(1, runtime.sendMessageCalls.size)
+        assertEquals(listOf("current_date"), runtime.createConversationCalls.single().tools.map { it.name })
+        assertTrue(runtime.createConversationCalls.single().enableConstrainedDecoding)
+        val event = traceDao.events.single()
+        assertEquals("run-local-tool", event.runId)
+        assertEquals("current_date", event.toolName)
+        assertEquals(ToolEventStatus.COMPLETED, event.status)
+        assertFalse(event.isError)
     }
 
     @Test

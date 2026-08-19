@@ -1,6 +1,10 @@
 package dev.chungjungsoo.gptmobile.data.agent.provider
 
+import dev.chungjungsoo.gptmobile.data.agent.AgentTool
+import dev.chungjungsoo.gptmobile.data.agent.AgentToolDefinition
+import dev.chungjungsoo.gptmobile.data.agent.AgentToolResult
 import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
+import dev.chungjungsoo.gptmobile.data.agent.ToolResultContent
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogCapabilities
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
@@ -12,6 +16,7 @@ import dev.chungjungsoo.gptmobile.data.localruntime.LocalHistoryMessage
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalHistoryRole
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntimeEvent
+import dev.chungjungsoo.gptmobile.data.localruntime.ScriptedToolInvocation
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.repository.FakeLocalModelRepository
@@ -23,7 +28,11 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -636,6 +645,191 @@ class LiteRtLmAdapterTest {
     }
 
     @Test
+    fun `tool capable model registers bound tools with constrained decoding`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(runtime, catalog = toolsCatalog())
+        val session = adapter.openSession(turns("hello"), localPlatform(), listOf(lookupTool()))
+
+        assertTrue(session.handlesToolsInternally)
+        session.streamRound(emptyList(), emptyList()).toList()
+
+        val config = runtime.createConversationCalls.single()
+        assertEquals(listOf("lookup"), config.tools.map { it.name })
+        assertEquals("Look things up", config.tools.single().description)
+        assertTrue(config.tools.single().inputSchemaJson.contains("query"))
+        assertTrue(config.enableConstrainedDecoding)
+        assertTrue(config.toolExecutor != null)
+    }
+
+    @Test
+    fun `scripted engine tool invocation executes the tool emits timeline events and continues`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(
+                    LocalRuntimeEvent.TextDelta("before"),
+                    LocalRuntimeEvent.TextDelta("after"),
+                    LocalRuntimeEvent.Done
+                )
+            )
+            scriptedToolInvocations = listOf(
+                listOf(ScriptedToolInvocation("lookup", """{"query":"weather"}""", afterEventIndex = 0))
+            )
+        }
+        val executedArgs = mutableListOf<JsonObject>()
+        val adapter = adapter(runtime, catalog = toolsCatalog())
+
+        val events = adapter.openSession(
+            turns("hello"),
+            localPlatform(),
+            listOf(
+                lookupTool { callId, arguments ->
+                    executedArgs += arguments
+                    AgentToolResult(callId, ToolResultContent.Text("result-ok"), isError = false)
+                }
+            )
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(listOf("lookup" to """{"query":"weather"}"""), runtime.toolExecutorCalls)
+        assertEquals(listOf("result-ok"), runtime.toolExecutorResults)
+        assertEquals(1, executedArgs.size)
+        assertEquals("weather", executedArgs.single()["query"]?.toString()?.trim('"'))
+        val toolCall = events.filterIsInstance<ProviderEvent.ToolCall>().single()
+        val toolResult = events.filterIsInstance<ProviderEvent.ToolResult>().single()
+        assertEquals("lookup", toolCall.name)
+        assertEquals("weather", toolCall.arguments["query"]?.toString()?.trim('"'))
+        assertEquals(toolCall, toolResult.call)
+        assertEquals(false, toolResult.result.isError)
+        assertEquals(ToolResultContent.Text("result-ok"), toolResult.result.content)
+        assertEquals(
+            listOf("before", "after"),
+            events.filterIsInstance<ProviderEvent.TextDelta>().map { it.text }
+        )
+        assertTrue(events.last() is ProviderEvent.Completed)
+        assertTrue(events.indexOf(toolCall) > events.indexOfFirst { it is ProviderEvent.TextDelta })
+        assertTrue(events.indexOf(toolResult) > events.indexOf(toolCall))
+        assertTrue(events.indexOfLast { it is ProviderEvent.TextDelta } > events.indexOf(toolResult))
+    }
+
+    @Test
+    fun `non capable model does not register tools`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(runtime)
+
+        adapter.openSession(turns("hello"), localPlatform(), listOf(lookupTool()))
+            .streamRound(emptyList(), emptyList())
+            .toList()
+
+        val config = runtime.createConversationCalls.single()
+        assertTrue(config.tools.isEmpty())
+        assertFalse(config.enableConstrainedDecoding)
+        assertEquals(null, config.toolExecutor)
+    }
+
+    @Test
+    fun `tool capable model without bound tools does not register tools`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(runtime, catalog = toolsCatalog())
+
+        adapter.openSession(turns("hello"), localPlatform())
+            .streamRound(emptyList(), emptyList())
+            .toList()
+
+        val config = runtime.createConversationCalls.single()
+        assertTrue(config.tools.isEmpty())
+        assertFalse(config.enableConstrainedDecoding)
+        assertEquals(null, config.toolExecutor)
+    }
+
+    @Test
+    fun `same tools reuse the warm conversation without re-registering`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("one"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("two"), LocalRuntimeEvent.Done)
+            )
+        }
+        val adapter = adapter(runtime, catalog = toolsCatalog())
+        val platform = localPlatform()
+        val tools = listOf(lookupTool())
+
+        adapter.openSession(turns("first"), platform, tools).streamRound(emptyList(), emptyList()).toList()
+        adapter.openSession(
+            listOf(completedTurn("first", "one"), pendingTurn("second")),
+            platform,
+            tools
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(1, runtime.createConversationCalls.size)
+        assertEquals(0, runtime.closeConversationCalls)
+        assertEquals(listOf("lookup"), runtime.createConversationCalls.single().tools.map { it.name })
+    }
+
+    @Test
+    fun `changed tool set rebuilds the conversation and re-registers`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("one"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("two"), LocalRuntimeEvent.Done)
+            )
+        }
+        val adapter = adapter(runtime, catalog = toolsCatalog())
+        val platform = localPlatform()
+
+        adapter.openSession(turns("first"), platform, listOf(lookupTool()))
+            .streamRound(emptyList(), emptyList())
+            .toList()
+        adapter.openSession(
+            listOf(completedTurn("first", "one"), pendingTurn("second")),
+            platform,
+            listOf(lookupTool(name = "echo"))
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(2, runtime.createConversationCalls.size)
+        assertEquals(1, runtime.closeConversationCalls)
+        assertEquals(listOf("lookup"), runtime.createConversationCalls[0].tools.map { it.name })
+        assertEquals(listOf("echo"), runtime.createConversationCalls[1].tools.map { it.name })
+        assertTrue(runtime.createConversationCalls[1].enableConstrainedDecoding)
+    }
+
+    @Test
+    fun `throwing tool is recorded as a timeline failure and generation continues`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(
+                    LocalRuntimeEvent.TextDelta("before"),
+                    LocalRuntimeEvent.TextDelta("after"),
+                    LocalRuntimeEvent.Done
+                )
+            )
+            scriptedToolInvocations = listOf(
+                listOf(ScriptedToolInvocation("lookup", """{"query":"x"}""", afterEventIndex = 0))
+            )
+        }
+        val adapter = adapter(runtime, catalog = toolsCatalog())
+        val failingTool = lookupTool { _, _ -> error("boom") }
+
+        val events = adapter.openSession(turns("hello"), localPlatform(), listOf(failingTool))
+            .streamRound(emptyList(), emptyList())
+            .toList()
+
+        val toolResult = events.filterIsInstance<ProviderEvent.ToolResult>().single()
+        assertEquals(true, toolResult.result.isError)
+        assertEquals(ToolResultContent.Text("boom"), toolResult.result.content)
+        assertFalse(events.any { it is ProviderEvent.Failed })
+        assertEquals(
+            listOf("before", "after"),
+            events.filterIsInstance<ProviderEvent.TextDelta>().map { it.text }
+        )
+        assertTrue(events.last() is ProviderEvent.Completed)
+    }
+
+    @Test
     fun `holding the fake mutex emits waiting notice before the run`() = runBlocking {
         val runtime = FakeLocalRuntime().apply {
             scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
@@ -728,6 +922,33 @@ class LiteRtLmAdapterTest {
     private fun visionCatalog() = FakeModelCatalogRepository(
         listOf(CatalogEntry(id = "gemma-3n-e2b-it", capabilities = CatalogCapabilities(vision = true)))
     )
+
+    private fun toolsCatalog() = FakeModelCatalogRepository(
+        listOf(CatalogEntry(id = "gemma3-1b-it", capabilities = CatalogCapabilities(tools = true)))
+    )
+
+    private fun lookupTool(
+        name: String = "lookup",
+        execute: suspend (String, JsonObject) -> AgentToolResult = { callId, _ ->
+            AgentToolResult(callId, ToolResultContent.Text("result-ok"), isError = false)
+        }
+    ): AgentTool = object : AgentTool {
+        override val definition = AgentToolDefinition(
+            name = name,
+            description = "Look things up",
+            inputSchema = buildJsonObject {
+                put("type", "object")
+                put(
+                    "properties",
+                    buildJsonObject {
+                        put("query", buildJsonObject { put("type", "string") })
+                    }
+                )
+            }
+        )
+
+        override suspend fun execute(callId: String, arguments: JsonObject): AgentToolResult = execute(callId, arguments)
+    }
 
     private fun visionPlatform() = localPlatform(model = "gemma-3n-e2b-it")
 

@@ -124,6 +124,7 @@ class ChatRepositoryImpl @Inject constructor(
                     validateInlineBudgetIfNeeded(turns, platform)
                 }
             }
+            val resolvedTools = agentToolResolver.resolve(platform.uid)
             val session = when (platform.compatibleType) {
                 ClientType.OPENAI -> openAIResponsesAdapter.openSession(contextTurns, platform)
 
@@ -134,16 +135,20 @@ class ChatRepositoryImpl @Inject constructor(
 
                 ClientType.GOOGLE -> geminiAdapter.openSession(contextTurns, platform)
 
-                ClientType.LITERT_LM -> liteRtLmAdapter.openSession(contextTurns, platform)
+                ClientType.LITERT_LM -> liteRtLmAdapter.openSession(
+                    contextTurns,
+                    platform,
+                    resolvedTools.map { it.tool }
+                )
             }
-            val resolvedTools = if (platform.compatibleType == ClientType.LITERT_LM) {
+            val runnerTools = if (session.handlesToolsInternally) {
                 emptyList()
             } else {
-                agentToolResolver.resolve(platform.uid)
+                resolvedTools.map { it.tool }
             }
             val trace = ToolTraceSession(runId, resolvedTools, toolEventRecorder)
 
-            agentRunner.run(session, resolvedTools.map { it.tool }).collect { runEvent ->
+            agentRunner.run(session, runnerTools).collect { runEvent ->
                 when (runEvent) {
                     is AgentRunEvent.Provider -> when (val providerEvent = runEvent.event) {
                         is ProviderEvent.ThinkingDelta -> emit(ApiState.Thinking(providerEvent.text))
@@ -158,6 +163,8 @@ class ChatRepositoryImpl @Inject constructor(
                             val toolEvent = trace.start(providerEvent)
                             emit(ApiState.ToolCall(toolEvent.sequence))
                         }
+
+                        is ProviderEvent.ToolResult -> Unit
 
                         ProviderEvent.Completed -> Unit
                     }
