@@ -47,9 +47,16 @@ interface LocalRuntime {
     suspend fun closeConversation()
     suspend fun unloadEngine()
 
+    fun hasOpenConversation(): Boolean = false
+
     suspend fun <T> runExclusive(block: suspend LocalRuntime.() -> T): T = block(this)
 
-    fun <T> runExclusiveFlow(block: suspend LocalRuntime.() -> Flow<T>): Flow<T> = flow {
+    fun <T> runExclusiveFlow(block: suspend LocalRuntime.() -> Flow<T>): Flow<T> = runExclusiveFlow(onContended = {}, block = block)
+
+    fun <T> runExclusiveFlow(
+        onContended: suspend () -> Unit,
+        block: suspend LocalRuntime.() -> Flow<T>
+    ): Flow<T> = flow {
         block(this@LocalRuntime).collect { emit(it) }
     }
 }

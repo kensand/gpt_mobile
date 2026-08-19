@@ -265,6 +265,7 @@
     <string name="local_platform_go_to_local_models">Go to Settings → Local Models</string>
     <string name="local_platform_ignored_attachments">The local platform ignored attachments</string>
     <string name="local_platform_model_not_downloaded">This Local Model is not downloaded. Download it from Settings → Local Models.</string>
+    <string name="local_platform_waiting_for_engine">Waiting for the local engine</string>
     <string name="local_platform_basics_description">Give this Local Platform a name. It will run a Local Model on-device.</string>
     <string name="api_url_hint">https://api.example.com</string>
     <string name="api_key_hint">sk-…</string>

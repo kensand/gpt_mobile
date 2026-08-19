@@ -49,13 +49,32 @@ class LocalEngineHolder(
         loadedSpec = null
     }
 
+    override fun hasOpenConversation(): Boolean = delegate.hasOpenConversation()
+
     override suspend fun <T> runExclusive(block: suspend LocalRuntime.() -> T): T = withGenerationLock {
         block(this)
     }
 
-    override fun <T> runExclusiveFlow(block: suspend LocalRuntime.() -> Flow<T>): Flow<T> = channelFlow {
-        withGenerationLock {
+    override fun <T> runExclusiveFlow(
+        onContended: suspend () -> Unit,
+        block: suspend LocalRuntime.() -> Flow<T>
+    ): Flow<T> = channelFlow {
+        if (coroutineContext[GenerationLock] != null) {
             block(this@LocalEngineHolder).collect { send(it) }
+            return@channelFlow
+        }
+        var locked = mutex.tryLock()
+        if (!locked) {
+            onContended()
+            mutex.lock()
+            locked = true
+        }
+        try {
+            withContext(GenerationLock()) {
+                block(this@LocalEngineHolder).collect { send(it) }
+            }
+        } finally {
+            if (locked) mutex.unlock()
         }
     }
 

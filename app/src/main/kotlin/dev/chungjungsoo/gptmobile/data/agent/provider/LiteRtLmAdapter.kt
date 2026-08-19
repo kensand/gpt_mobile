@@ -7,6 +7,7 @@ import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
 import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
+import dev.chungjungsoo.gptmobile.data.localruntime.ConversationFingerprint
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalConversationConfig
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalEngineSpec
@@ -15,35 +16,49 @@ import dev.chungjungsoo.gptmobile.data.localruntime.LocalHistoryRole
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntimeEvent
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalSamplerConfig
+import dev.chungjungsoo.gptmobile.data.localruntime.conversationFingerprint
+import dev.chungjungsoo.gptmobile.data.localruntime.incomingHistoryExtendsConsumed
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
 
 class LiteRtLmAdapter(
     private val localRuntime: LocalRuntime,
     private val localModelRepository: LocalModelRepository,
     private val ignoredAttachmentsNotice: String,
-    private val modelNotDownloadedError: String
+    private val modelNotDownloadedError: String,
+    private val waitingForEngineNotice: String = DEFAULT_WAITING_FOR_ENGINE
 ) {
+    private data class OpenConversation(
+        val profileUid: String,
+        val engineSpec: LocalEngineSpec,
+        val sampler: LocalSamplerConfig,
+        val systemPrompt: String?,
+        val consumed: ConversationFingerprint
+    )
+
+    private var openConversation: OpenConversation? = null
+    private var conversationDirty = false
+
     suspend fun openSession(turns: List<ConversationTurn>, platform: PlatformV2): AgentProviderSession {
         return object : AgentProviderSession {
             override fun streamRound(
                 tools: List<AgentToolDefinition>,
                 exchanges: List<AgentToolExchange>
-            ): Flow<ProviderEvent> = flow {
+            ): Flow<ProviderEvent> = channelFlow {
                 val hasAttachments = turns.any { turn ->
                     turn.userMessage.attachments.isNotEmpty() ||
                         turn.assistantMessage?.attachments?.isNotEmpty() == true
                 }
                 if (hasAttachments) {
-                    emit(ProviderEvent.Notice(ignoredAttachmentsNotice))
+                    send(ProviderEvent.Notice(ignoredAttachmentsNotice))
                 }
 
                 val modelPath = localModelRepository.resolveDownloadedPath(platform.model)
                 if (modelPath == null) {
-                    emit(ProviderEvent.Failed(modelNotDownloadedError))
-                    return@flow
+                    send(ProviderEvent.Failed(modelNotDownloadedError))
+                    return@channelFlow
                 }
 
                 val latestUserText = turns.lastOrNull()?.userMessage?.effectiveContent().orEmpty()
@@ -55,52 +70,97 @@ class LiteRtLmAdapter(
                         }
                     }
                 }
+                val spec = LocalEngineSpec(
+                    modelPath = modelPath,
+                    accelerator = LocalAccelerators.normalize(platform.accelerator),
+                    maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS
+                )
+                val sampler = LocalSamplerConfig(
+                    topK = platform.topK ?: DEFAULT_TOP_K,
+                    topP = platform.topP ?: DEFAULT_TOP_P,
+                    temperature = platform.temperature ?: DEFAULT_TEMPERATURE
+                )
+                val incomingPrior = conversationFingerprint(history)
 
                 try {
                     var failed = false
-                    localRuntime.runExclusiveFlow {
-                        loadEngine(
-                            LocalEngineSpec(
-                                modelPath = modelPath,
-                                accelerator = LocalAccelerators.normalize(platform.accelerator),
-                                maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS
+                    val assistantReply = StringBuilder()
+                    localRuntime.runExclusiveFlow(
+                        onContended = { send(ProviderEvent.Notice(waitingForEngineNotice)) }
+                    ) {
+                        loadEngine(spec)
+                        val snapshot = openConversation
+                        val canReuse = !conversationDirty &&
+                            hasOpenConversation() &&
+                            snapshot != null &&
+                            snapshot.profileUid == platform.uid &&
+                            snapshot.engineSpec == spec &&
+                            snapshot.sampler == sampler &&
+                            snapshot.systemPrompt == platform.systemPrompt &&
+                            incomingHistoryExtendsConsumed(snapshot.consumed, incomingPrior)
+                        if (!canReuse) {
+                            if (hasOpenConversation()) {
+                                closeConversation()
+                            }
+                            createConversation(
+                                LocalConversationConfig(
+                                    sampler = sampler,
+                                    systemPrompt = platform.systemPrompt,
+                                    initialMessages = history
+                                )
                             )
-                        )
-                        // Interim rebuild-every-turn. ADR-0002's warm conversation cache is ticket #318.
-                        createConversation(
-                            LocalConversationConfig(
-                                sampler = LocalSamplerConfig(
-                                    topK = platform.topK ?: DEFAULT_TOP_K,
-                                    topP = platform.topP ?: DEFAULT_TOP_P,
-                                    temperature = platform.temperature ?: DEFAULT_TEMPERATURE
-                                ),
+                            openConversation = OpenConversation(
+                                profileUid = platform.uid,
+                                engineSpec = spec,
+                                sampler = sampler,
                                 systemPrompt = platform.systemPrompt,
-                                initialMessages = history
+                                consumed = incomingPrior
                             )
-                        )
+                        }
+                        conversationDirty = true
                         sendMessage(latestUserText)
                     }.collect { event ->
                         when (event) {
-                            is LocalRuntimeEvent.TextDelta -> emit(ProviderEvent.TextDelta(event.text))
+                            is LocalRuntimeEvent.TextDelta -> {
+                                assistantReply.append(event.text)
+                                send(ProviderEvent.TextDelta(event.text))
+                            }
 
-                            is LocalRuntimeEvent.ThinkingDelta -> emit(ProviderEvent.ThinkingDelta(event.text))
+                            is LocalRuntimeEvent.ThinkingDelta -> send(ProviderEvent.ThinkingDelta(event.text))
 
                             is LocalRuntimeEvent.Error -> {
                                 failed = true
-                                emit(ProviderEvent.Failed(event.message))
+                                conversationDirty = true
+                                send(ProviderEvent.Failed(event.message))
                             }
 
                             LocalRuntimeEvent.Done -> Unit
                         }
                     }
-                    if (!failed) emit(ProviderEvent.Completed)
+                    if (!failed) {
+                        send(ProviderEvent.Completed)
+                        val snapshot = openConversation
+                        if (snapshot != null) {
+                            openConversation = snapshot.copy(
+                                consumed = snapshot.consumed.extend(
+                                    listOfNotNull(
+                                        LocalHistoryMessage(LocalHistoryRole.USER, latestUserText),
+                                        assistantReply.toString().takeIf { it.isNotBlank() }?.let { content ->
+                                            LocalHistoryMessage(LocalHistoryRole.MODEL, content)
+                                        }
+                                    )
+                                )
+                            )
+                            conversationDirty = false
+                        }
+                    }
                 } catch (error: CancellationException) {
                     localRuntime.cancelActive()
+                    conversationDirty = true
                     throw error
                 } catch (error: Exception) {
-                    emit(ProviderEvent.Failed(error.message ?: "Local inference failed"))
-                } finally {
-                    localRuntime.closeConversation()
+                    conversationDirty = true
+                    send(ProviderEvent.Failed(error.message ?: "Local inference failed"))
                 }
             }
         }
@@ -110,6 +170,7 @@ class LiteRtLmAdapter(
         const val DEFAULT_IGNORED_ATTACHMENTS = "The local platform ignored attachments"
         const val DEFAULT_MODEL_NOT_DOWNLOADED =
             "This Local Model is not downloaded. Download it from Settings → Local Models."
+        const val DEFAULT_WAITING_FOR_ENGINE = "Waiting for the local engine"
         const val DEFAULT_TOP_K = 40
         const val DEFAULT_TOP_P = 0.95f
         const val DEFAULT_TEMPERATURE = 1.0f

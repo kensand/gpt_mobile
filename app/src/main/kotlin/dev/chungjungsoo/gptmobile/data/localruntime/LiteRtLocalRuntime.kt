@@ -113,6 +113,8 @@ class LiteRtLocalRuntime(
         runCatching { conversation?.cancelProcess() }
     }
 
+    override fun hasOpenConversation(): Boolean = conversation != null
+
     override suspend fun closeConversation() {
         withContext(Dispatchers.IO) {
             runCatching { conversation?.close() }

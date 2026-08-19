@@ -92,6 +92,10 @@ class ChatRepositoryImpl @Inject constructor(
         modelNotDownloadedError = contextString(
             R.string.local_platform_model_not_downloaded,
             LiteRtLmAdapter.DEFAULT_MODEL_NOT_DOWNLOADED
+        ),
+        waitingForEngineNotice = contextString(
+            R.string.local_platform_waiting_for_engine,
+            LiteRtLmAdapter.DEFAULT_WAITING_FOR_ENGINE
         )
     )
     private val agentRunner = AgentRunner()
