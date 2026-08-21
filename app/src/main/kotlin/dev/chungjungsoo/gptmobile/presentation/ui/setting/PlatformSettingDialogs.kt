@@ -622,10 +622,11 @@ private fun MaxTokensDialog(
     var textFieldMaxTokens by remember { mutableStateOf(maxTokens?.toString() ?: "") }
     val parsedMaxTokens = textFieldMaxTokens.toIntOrNull()
     val isUnset = textFieldMaxTokens.isBlank()
-    val isValid = isUnset || (
-        parsedMaxTokens != null &&
-            parsedMaxTokens in PlatformSettingViewModel.MIN_MAX_TOKENS..PlatformSettingViewModel.DEFAULT_MAX_TOKENS_CAP
-        )
+    val isValid = isUnset ||
+        (
+            parsedMaxTokens != null &&
+                parsedMaxTokens in PlatformSettingViewModel.MIN_MAX_TOKENS..PlatformSettingViewModel.DEFAULT_MAX_TOKENS_CAP
+            )
 
     AlertDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),

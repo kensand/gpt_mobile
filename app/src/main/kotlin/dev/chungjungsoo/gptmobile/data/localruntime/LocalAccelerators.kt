@@ -50,9 +50,8 @@ object LocalAccelerators {
     ): List<String> {
         val normalized = supported.map { it.lowercase() }.toSet()
         return listOf(CPU, GPU, NPU).filter { accelerator ->
-            accelerator in normalized && (
-                accelerator != NPU || isNpuEligible(supported, socToModelFiles, deviceSocModel)
-                )
+            accelerator in normalized &&
+                (accelerator != NPU || isNpuEligible(supported, socToModelFiles, deviceSocModel))
         }
     }
 
