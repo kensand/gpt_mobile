@@ -79,7 +79,7 @@
     <string name="close">关闭</string>
     <string name="delete">删除</string>
     <string name="chats_selected">选择 %d 个</string>
-    <string name="deleted_chats">已删除 %d 个</string>
+    <string name="deleted_chats">已删除 %d 个聊天。</string>
     <string name="delete_selected_chats">确定要删除选择的会话吗？</string>
     <string name="this_operation_can_t_be_undone">此操作是不可逆的</string>
     <string name="system_prompt">系统提示词</string>
@@ -237,4 +237,13 @@
     <string name="gemini_safety_block_only_high">仅屏蔽高风险</string>
     <string name="gemini_safety_block_medium_and_above">屏蔽中等及以上</string>
     <string name="gemini_safety_block_low_and_above">屏蔽低及以上</string>
+    <string name="copy_code">复制代码</string>
+    <string name="code">代码</string>
+    <string name="timeout">超时</string>
+    <string name="clear_api_key">清除API密钥</string>
+    <string name="tool_trace_status">状态</string>
+    <string name="tool_trace_expand">展开</string>
+    <string name="tool_trace_collapse">折叠</string>
+    <string name="tool_trace_status_canceled">已取消</string>
+    <string name="tool_trace_status_completed">已完成</string>
 </resources>
