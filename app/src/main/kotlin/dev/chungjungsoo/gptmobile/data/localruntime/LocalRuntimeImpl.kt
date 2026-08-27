@@ -17,11 +17,15 @@ import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.tool
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -138,7 +142,7 @@ class LocalRuntimeImpl(
         awaitClose {
             runCatching { activeConversation.cancelProcess() }
         }
-    }
+    }.buffer(Channel.UNLIMITED)
 
     override fun cancelActive() {
         runCatching { conversation?.cancelProcess() }
@@ -191,12 +195,9 @@ class LocalRuntimeImpl(
         )
     }
 
-    private fun Message.visibleText(): String {
-        val fromContents = contents.contents
-            .filterIsInstance<Content.Text>()
-            .joinToString("") { it.text }
-        return fromContents.ifEmpty { toString() }
-    }
+    private fun Message.visibleText(): String = contents.contents
+        .filterIsInstance<Content.Text>()
+        .joinToString("") { it.text }
 
     private companion object {
         const val THOUGHT_CHANNEL = "thought"
@@ -215,7 +216,19 @@ private class BridgedOpenApiTool(
     }.toString()
 
     override fun execute(paramsJsonString: String): String = runBlocking {
-        executor?.execute(descriptor.name, paramsJsonString)
-            ?: error("LiteRT-LM tool executor is not registered")
+        val current = executor ?: error("LiteRT-LM tool executor is not registered")
+        try {
+            withTimeout(TOOL_EXECUTE_TIMEOUT_MS) {
+                current.execute(descriptor.name, paramsJsonString)
+            }
+        } catch (error: TimeoutCancellationException) {
+            "Tool '${descriptor.name}' failed: ${error.message ?: "timed out"}"
+        } catch (error: Exception) {
+            "Tool '${descriptor.name}' failed: ${error.message ?: "unknown error"}"
+        }
+    }
+
+    private companion object {
+        const val TOOL_EXECUTE_TIMEOUT_MS = 60_000L
     }
 }

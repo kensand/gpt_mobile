@@ -116,6 +116,44 @@ class LiteRtLmAdapterTest {
     }
 
     @Test
+    fun `mixed-platform history with an unconsumed user turn rebuilds the conversation`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("answer"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("next"), LocalRuntimeEvent.Done)
+            )
+        }
+        val adapter = adapter(runtime)
+        val platform = localPlatform()
+
+        adapter.openSession(turns("first"), platform).streamRound(emptyList(), emptyList()).toList()
+        adapter.openSession(
+            listOf(
+                completedTurn("first", "answer"),
+                ConversationTurn(
+                    userMessage = MessageV2(content = "other-platform-turn", platformType = null),
+                    assistantMessage = null,
+                    isCurrentTurn = false
+                ),
+                pendingTurn("newest")
+            ),
+            platform
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(2, runtime.createConversationCalls.size)
+        assertEquals(1, runtime.closeConversationCalls)
+        assertEquals(
+            listOf(
+                LocalHistoryMessage(LocalHistoryRole.USER, "first"),
+                LocalHistoryMessage(LocalHistoryRole.MODEL, "answer"),
+                LocalHistoryMessage(LocalHistoryRole.USER, "other-platform-turn")
+            ),
+            runtime.createConversationCalls[1].initialMessages
+        )
+        assertEquals(listOf("first", "newest"), runtime.sendMessageCalls)
+    }
+
+    @Test
     fun `twelve sequential turns reuse one conversation and only send the new message`() = runBlocking {
         val turnCount = 12
         val runtime = FakeLocalRuntime().apply {
@@ -1044,6 +1082,38 @@ class LiteRtLmAdapterTest {
         )
         assertEquals(listOf(LocalAccelerators.CPU), runtime.loadEngineCalls.drop(2).map { it.accelerator })
         assertFalse(second.any { it is ProviderEvent.Notice && it.message == LiteRtLmAdapter.DEFAULT_GPU_UNAVAILABLE })
+    }
+
+    @Test
+    fun `gpu fallback does not force a later npu selection onto cpu`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            failLoadEngineIf = { spec ->
+                if (spec.accelerator == LocalAccelerators.GPU || spec.accelerator == LocalAccelerators.NPU) {
+                    IllegalStateException("accelerator unavailable")
+                } else {
+                    null
+                }
+            }
+            scriptedEvents = listOf(
+                listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done),
+                listOf(LocalRuntimeEvent.TextDelta("npu"), LocalRuntimeEvent.Done)
+            )
+        }
+        val adapter = adapter(runtime)
+
+        val gpuEvents = adapter.openSession(turns("hello"), localPlatform()).streamRound(emptyList(), emptyList()).toList()
+        val npuEvents = adapter.openSession(
+            listOf(completedTurn("hello", "ok"), pendingTurn("again")),
+            localPlatform(uid = "local-npu").copy(accelerator = LocalAccelerators.NPU)
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertTrue(gpuEvents.any { it is ProviderEvent.Notice && it.message == LiteRtLmAdapter.DEFAULT_GPU_UNAVAILABLE })
+        assertTrue(npuEvents.any { it is ProviderEvent.Notice && it.message == LiteRtLmAdapter.DEFAULT_NPU_UNAVAILABLE })
+        assertFalse(npuEvents.any { it is ProviderEvent.Notice && it.message == LiteRtLmAdapter.DEFAULT_GPU_UNAVAILABLE })
+        assertEquals(
+            listOf(LocalAccelerators.GPU, LocalAccelerators.CPU, LocalAccelerators.NPU, LocalAccelerators.CPU),
+            runtime.loadEngineCalls.map { it.accelerator }
+        )
     }
 
     @Test

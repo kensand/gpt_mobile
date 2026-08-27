@@ -23,7 +23,6 @@ import dev.chungjungsoo.gptmobile.data.localruntime.LocalSamplerConfig
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalToolDescriptor
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalToolExecutor
 import dev.chungjungsoo.gptmobile.data.localruntime.conversationFingerprint
-import dev.chungjungsoo.gptmobile.data.localruntime.incomingHistoryExtendsConsumed
 import dev.chungjungsoo.gptmobile.data.localruntime.resolvedEngineMaxTokens
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
@@ -44,6 +43,7 @@ class LiteRtLmAdapter(
     private val tooManyImagesNotice: String = DEFAULT_TOO_MANY_IMAGES,
     private val loadingModelNotice: String = DEFAULT_LOADING_MODEL,
     private val gpuUnavailableNotice: String = DEFAULT_GPU_UNAVAILABLE,
+    private val npuUnavailableNotice: String = DEFAULT_NPU_UNAVAILABLE,
     private val engineLoadFailedError: String = DEFAULT_ENGINE_LOAD_FAILED,
     private val modelCatalogRepository: ModelCatalogRepository? = null,
     private val deviceSocModel: String = "",
@@ -60,7 +60,7 @@ class LiteRtLmAdapter(
 
     private var openConversation: OpenConversation? = null
     private var isConversationDirty = false
-    private val cpuFallbackByModelPath = mutableMapOf<String, Boolean>()
+    private val cpuFallbackByModelAccelerator = mutableSetOf<Pair<String, String>>()
     private var exclusiveToolsByName: Map<String, AgentTool> = emptyMap()
     private var exclusiveToolEventSink: (suspend (ProviderEvent) -> Unit)? = null
 
@@ -152,7 +152,7 @@ class LiteRtLmAdapter(
                             snapshot.sampler == sampler &&
                             snapshot.systemPrompt == platform.systemPrompt &&
                             snapshot.toolsKey == toolsKey &&
-                            incomingHistoryExtendsConsumed(snapshot.consumed, incomingPrior)
+                            snapshot.consumed == incomingPrior
                         if (!canReuse) {
                             if (hasOpenConversation()) {
                                 closeConversation()
@@ -322,7 +322,7 @@ class LiteRtLmAdapter(
             maxTokens = maxTokens,
             isVisionEnabled = isVisionEnabled
         )
-        return if (cpuFallbackByModelPath[modelPath] == true) {
+        return if (cpuFallbackKey(modelPath, accelerator) in cpuFallbackByModelAccelerator) {
             requested.copy(accelerator = LocalAccelerators.CPU)
         } else {
             requested
@@ -352,12 +352,21 @@ class LiteRtLmAdapter(
                 logEngineFailure(cpuSpec, cpuError)
                 throw LocalEngineLoadException(engineLoadFailedError)
             }
-            cpuFallbackByModelPath[requested.modelPath] = true
-            if (gpuUnavailableNotice.isNotBlank()) {
-                send(ProviderEvent.Notice(gpuUnavailableNotice, persistent = true))
+            cpuFallbackByModelAccelerator += cpuFallbackKey(requested.modelPath, requested.accelerator)
+            val notice = acceleratorUnavailableNotice(requested.accelerator)
+            if (notice.isNotBlank()) {
+                send(ProviderEvent.Notice(notice, persistent = true))
             }
             return cpuSpec
         }
+    }
+
+    private fun cpuFallbackKey(modelPath: String, accelerator: String): Pair<String, String> = modelPath to LocalAccelerators.normalize(accelerator)
+
+    private fun acceleratorUnavailableNotice(accelerator: String): String = if (LocalAccelerators.normalize(accelerator) == LocalAccelerators.NPU) {
+        npuUnavailableNotice
+    } else {
+        gpuUnavailableNotice
     }
 
     private fun logEngineFailure(spec: LocalEngineSpec, error: Throwable) {
@@ -444,6 +453,7 @@ class LiteRtLmAdapter(
         const val DEFAULT_TOO_MANY_IMAGES = "The local platform accepted only the first 10 images"
         const val DEFAULT_LOADING_MODEL = "Loading local model…"
         const val DEFAULT_GPU_UNAVAILABLE = "GPU unavailable on this device — running on CPU"
+        const val DEFAULT_NPU_UNAVAILABLE = "NPU unavailable on this device — running on CPU"
         const val DEFAULT_ENGINE_LOAD_FAILED = "Couldn't load the local model on this device"
         const val MAX_IMAGES_PER_MESSAGE = 10
         private const val TAG = "LiteRtLmAdapter"

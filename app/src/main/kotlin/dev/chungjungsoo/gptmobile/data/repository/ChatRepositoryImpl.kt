@@ -113,6 +113,10 @@ class ChatRepositoryImpl @Inject constructor(
             R.string.local_platform_gpu_unavailable_cpu,
             LiteRtLmAdapter.DEFAULT_GPU_UNAVAILABLE
         ),
+        npuUnavailableNotice = contextString(
+            R.string.local_platform_npu_unavailable_cpu,
+            LiteRtLmAdapter.DEFAULT_NPU_UNAVAILABLE
+        ),
         engineLoadFailedError = contextString(
             R.string.local_platform_engine_load_failed,
             LiteRtLmAdapter.DEFAULT_ENGINE_LOAD_FAILED
