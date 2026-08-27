@@ -87,22 +87,11 @@ class ModelCatalogRepositoryTest {
     }
 
     @Test
-    fun `unknown remote schema is cached but hidden`() = runBlocking {
-        var cached: String? = null
-        val unknownSchema = """
-            {
-              "schemaVersion": 2,
-              "models": [
-                {
-                  "id": "future-model",
-                  "displayName": "Future",
-                  "minAppVersion": "0.1.0"
-                }
-              ]
-            }
-        """.trimIndent()
+    fun `unknown remote schema falls back to cache without poisoning it`() = runBlocking {
+        val cachedJson = remoteCatalog("cached-model", "0.1.0")
+        var cached: String? = cachedJson
         val repository = ModelCatalogRepositoryImpl(
-            fetchRemoteJson = { unknownSchema },
+            fetchRemoteJson = { unknownSchemaCatalog() },
             readCacheJson = { cached },
             writeCacheJson = { cached = it },
             readBundledJson = { remoteCatalog("bundled-model", "0.1.0") },
@@ -111,9 +100,37 @@ class ModelCatalogRepositoryTest {
 
         val entries = repository.getVisibleEntries()
 
-        assertTrue(entries.isEmpty())
-        assertEquals(unknownSchema, cached)
+        assertEquals(listOf("cached-model"), entries.map { it.id })
+        assertEquals(cachedJson, cached)
     }
+
+    @Test
+    fun `unknown schema in cache falls through to bundled snapshot`() = runBlocking {
+        val repository = ModelCatalogRepositoryImpl(
+            fetchRemoteJson = { error("offline") },
+            readCacheJson = { unknownSchemaCatalog() },
+            writeCacheJson = { error("cache should not be written") },
+            readBundledJson = { remoteCatalog("bundled-model", "0.1.0") },
+            appVersionName = "0.8.0"
+        )
+
+        val entries = repository.getVisibleEntries()
+
+        assertEquals(listOf("bundled-model"), entries.map { it.id })
+    }
+
+    private fun unknownSchemaCatalog(): String = """
+        {
+          "schemaVersion": 2,
+          "models": [
+            {
+              "id": "future-model",
+              "displayName": "Future",
+              "minAppVersion": "0.1.0"
+            }
+          ]
+        }
+    """.trimIndent()
 
     @Test
     fun `cache-first read uses cache and never touches the network`() = runBlocking {

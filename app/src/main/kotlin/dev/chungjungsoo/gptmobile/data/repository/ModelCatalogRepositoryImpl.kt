@@ -83,6 +83,11 @@ class ModelCatalogRepositoryImpl(
     ): ModelCatalog? = runCatching {
         val rawJson = source() ?: return null
         val catalog = ModelCatalogParser.parse(rawJson)
+        if (catalog.schemaVersion != ModelCatalogParser.SUPPORTED_SCHEMA_VERSION) {
+            // An unsupported schema is not a usable source: fall through to the next
+            // fallback instead of surfacing an empty catalog, and never cache it.
+            return null
+        }
         onParsed(rawJson)
         catalog
     }.getOrNull()
