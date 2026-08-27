@@ -602,7 +602,8 @@ class ChatRepositoryImplTest {
         toolEventRecorder = toolEventRecorder,
         localRuntime = localRuntime,
         localModelRepository = localModelRepository,
-        modelCatalogRepository = modelCatalogRepository
+        modelCatalogRepository = modelCatalogRepository,
+        deviceSocModel = ""
     )
 
     private fun emptyToolResolver(): AgentToolResolver {

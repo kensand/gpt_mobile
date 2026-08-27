@@ -43,7 +43,8 @@ class AddPlatformViewModel @Inject constructor(
         huggingFaceTokenStore = huggingFaceTokenStore,
         downloadGuards = downloadGuards,
         huggingFaceAuthClient = huggingFaceAuthClient,
-        scope = viewModelScope
+        scope = viewModelScope,
+        deviceSocModel = deviceSocModel
     )
 
     val selectedCatalogEntryId: StateFlow<String> = _selectedCatalogEntryId.asStateFlow()
@@ -57,7 +58,8 @@ class AddPlatformViewModel @Inject constructor(
             catalog,
             models,
             workInfos,
-            models.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) }
+            models.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) },
+            deviceSocModel = deviceSocModel
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 

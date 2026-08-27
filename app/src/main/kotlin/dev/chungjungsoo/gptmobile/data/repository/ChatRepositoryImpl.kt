@@ -46,6 +46,7 @@ import dev.chungjungsoo.gptmobile.data.network.AnthropicAPI
 import dev.chungjungsoo.gptmobile.data.network.GoogleAPI
 import dev.chungjungsoo.gptmobile.data.network.GroqAPI
 import dev.chungjungsoo.gptmobile.data.network.OpenAIAPI
+import dev.chungjungsoo.gptmobile.di.DeviceSocModel
 import dev.chungjungsoo.gptmobile.util.FileUtils
 import dev.chungjungsoo.gptmobile.util.stripAssistantErrorNote
 import javax.inject.Inject
@@ -77,7 +78,8 @@ class ChatRepositoryImpl @Inject constructor(
     private val toolEventRecorder: ToolEventRecorder,
     private val localRuntime: LocalRuntime,
     private val localModelRepository: LocalModelRepository,
-    private val modelCatalogRepository: ModelCatalogRepository
+    private val modelCatalogRepository: ModelCatalogRepository,
+    @param:DeviceSocModel private val deviceSocModel: String
 ) : ChatRepository {
     private val providerAttachmentEncoder = ProviderAttachmentEncoder(context)
     private val openAIResponsesAdapter = OpenAIResponsesAdapter(openAIAPI, providerAttachmentEncoder)
@@ -116,6 +118,7 @@ class ChatRepositoryImpl @Inject constructor(
             LiteRtLmAdapter.DEFAULT_ENGINE_LOAD_FAILED
         ),
         modelCatalogRepository = modelCatalogRepository,
+        deviceSocModel = deviceSocModel,
         loadImageBytes = { attachment ->
             val filePath = attachment.preparedFilePath.ifBlank { attachment.localFilePath }
             FileUtils.readImageBytesForLocalInference(context, filePath)

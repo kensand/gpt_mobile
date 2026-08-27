@@ -64,6 +64,33 @@ class LocalModelDownloadPathsTest {
     }
 
     @Test
+    fun `rewriteResolveUrl swaps the file name and keeps the pinned commit`() {
+        val rewritten = LocalModelDownloadPaths.rewriteResolveUrl(
+            baseUrl = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/42d538a932e8d5b12e6b3b455f5572560bd60b2c/gemma3-1b-it-int4.litertlm?download=true",
+            fileName = "Gemma3-1B-IT_q4_ekv1280_sm8750.litertlm"
+        )
+
+        assertEquals(
+            "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/42d538a932e8d5b12e6b3b455f5572560bd60b2c/Gemma3-1B-IT_q4_ekv1280_sm8750.litertlm?download=true",
+            rewritten
+        )
+    }
+
+    @Test
+    fun `rewriteResolveUrl can also pin a different commit hash`() {
+        val rewritten = LocalModelDownloadPaths.rewriteResolveUrl(
+            baseUrl = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/42d538a932e8d5b12e6b3b455f5572560bd60b2c/gemma3-1b-it-int4.litertlm?download=true",
+            fileName = "Gemma3-1B-IT_q4_ekv1280_sm8750.litertlm",
+            commitHash = "6d54daa71cfbffba6b2843c08eeb1a27e7430bf0"
+        )
+
+        assertEquals(
+            "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/6d54daa71cfbffba6b2843c08eeb1a27e7430bf0/Gemma3-1B-IT_q4_ekv1280_sm8750.litertlm?download=true",
+            rewritten
+        )
+    }
+
+    @Test
     fun `commit hash and file name are parsed from a huggingface resolve url`() {
         val url = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/19edb84c69a0212f29a6ef17ba0d6f278b6a1614/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm?download=true"
 

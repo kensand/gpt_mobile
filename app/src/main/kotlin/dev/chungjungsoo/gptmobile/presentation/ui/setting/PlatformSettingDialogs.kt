@@ -154,6 +154,7 @@ fun MaxTokensDialog(
     if (dialogState.isMaxTokensDialogOpen) {
         MaxTokensDialog(
             maxTokens = maxTokens,
+            maxTokensCap = settingViewModel.maxTokensCap(),
             onDismissRequest = settingViewModel::closeMaxTokensDialog
         ) { value ->
             settingViewModel.updateMaxTokens(value)
@@ -615,6 +616,7 @@ private fun TopKDialog(
 @Composable
 private fun MaxTokensDialog(
     maxTokens: Int?,
+    maxTokensCap: Int = PlatformSettingViewModel.DEFAULT_MAX_TOKENS_CAP,
     onDismissRequest: () -> Unit,
     onConfirmRequest: (maxTokens: Int?) -> Unit
 ) {
@@ -627,7 +629,7 @@ private fun MaxTokensDialog(
     val isValid = isUnset ||
         (
             parsedMaxTokens != null &&
-                parsedMaxTokens in PlatformSettingViewModel.MIN_MAX_TOKENS..PlatformSettingViewModel.DEFAULT_MAX_TOKENS_CAP
+                parsedMaxTokens in PlatformSettingViewModel.MIN_MAX_TOKENS..maxTokensCap
             )
 
     AlertDialog(
@@ -658,7 +660,7 @@ private fun MaxTokensDialog(
                             Text(
                                 stringResource(
                                     R.string.max_tokens_invalid,
-                                    PlatformSettingViewModel.DEFAULT_MAX_TOKENS_CAP
+                                    maxTokensCap
                                 )
                             )
                         }

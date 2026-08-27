@@ -7,7 +7,8 @@ data class ResolvedModelDownload(
     val fileName: String,
     val downloadUrl: String,
     val commitHash: String,
-    val sizeInBytes: Long
+    val sizeInBytes: Long,
+    val contextSize: Int = 0
 )
 
 object SocVariantResolver {
@@ -19,16 +20,21 @@ object SocVariantResolver {
             sizeInBytes = entry.sizeInBytes
         )
         val variant = matchingVariant(entry.socToModelFiles, deviceSocModel) ?: return default
-        val variantUrl = variant.downloadUrl.ifBlank { default.downloadUrl }
+        val fileName = variant.modelFile.ifBlank {
+            LocalModelDownloadPaths.fileNameFromUrl(variant.downloadUrl).ifBlank { default.fileName }
+        }
+        val commitHash = variant.commitHash.ifBlank {
+            LocalModelDownloadPaths.commitHashFromUrl(variant.downloadUrl).ifBlank { default.commitHash }
+        }
+        val downloadUrl = variant.downloadUrl.ifBlank {
+            LocalModelDownloadPaths.rewriteResolveUrl(default.downloadUrl, fileName, commitHash)
+        }
         return ResolvedModelDownload(
-            fileName = variant.modelFile.ifBlank {
-                LocalModelDownloadPaths.fileNameFromUrl(variantUrl).ifBlank { default.fileName }
-            },
-            downloadUrl = variantUrl,
-            commitHash = variant.commitHash.ifBlank {
-                LocalModelDownloadPaths.commitHashFromUrl(variantUrl).ifBlank { default.commitHash }
-            },
-            sizeInBytes = variant.sizeInBytes.takeIf { it > 0L } ?: default.sizeInBytes
+            fileName = fileName,
+            downloadUrl = downloadUrl,
+            commitHash = commitHash,
+            sizeInBytes = variant.sizeInBytes.takeIf { it > 0L } ?: default.sizeInBytes,
+            contextSize = variant.contextSize
         )
     }
 
@@ -44,6 +50,14 @@ object SocVariantResolver {
 
     private fun matchingVariantKey(socToModelFiles: Map<String, *>, deviceSocModel: String): String? {
         if (deviceSocModel.isBlank() || socToModelFiles.isEmpty()) return null
-        return socToModelFiles.keys.firstOrNull { it.equals(deviceSocModel, ignoreCase = true) }
+        val needle = normalizeSocKey(deviceSocModel)
+        if (needle.isEmpty()) return null
+        return socToModelFiles.keys.firstOrNull { normalizeSocKey(it) == needle }
     }
+
+    internal fun normalizeSocKey(value: String): String = value
+        .trim()
+        .lowercase()
+        .replace('_', ' ')
+        .replace(Regex("\\s+"), " ")
 }

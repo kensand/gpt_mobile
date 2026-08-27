@@ -43,6 +43,8 @@ class ModelCatalogParserTest {
         assertEquals(1, qwen.socToModelFiles.size)
         assertEquals("qwen-sm8650.litertlm", qwen.socToModelFiles.getValue("SM8650").modelFile)
         assertEquals(1597931520L, qwen.socToModelFiles.getValue("SM8650").sizeInBytes)
+        assertEquals(1280, qwen.socToModelFiles.getValue("SM8650").contextSize)
+        assertEquals("q8", qwen.socToModelFiles.getValue("SM8650").quantization)
     }
 
     @Test
@@ -84,6 +86,34 @@ class ModelCatalogParserTest {
         assertEquals(1024, entry.defaultConfig.maxTokens)
         assertEquals("0.0.0", entry.minAppVersion)
         assertTrue(entry.socToModelFiles.isEmpty())
+    }
+
+    @Test
+    fun `parse fills missing SOC variant context and quantization with defaults`() {
+        val catalog = ModelCatalogParser.parse(
+            """
+            {
+              "schemaVersion": 1,
+              "models": [
+                {
+                  "id": "legacy-npu",
+                  "socToModelFiles": {
+                    "SM8650": {
+                      "modelFile": "npu.litertlm",
+                      "sizeInBytes": 100
+                    }
+                  }
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val variant = catalog.models.single().socToModelFiles.getValue("SM8650")
+        assertEquals("npu.litertlm", variant.modelFile)
+        assertEquals(100L, variant.sizeInBytes)
+        assertEquals(0, variant.contextSize)
+        assertEquals("", variant.quantization)
     }
 
     @Test
@@ -227,6 +257,23 @@ class ModelCatalogParserTest {
             assertTrue(entry.supportedAccelerators.isNotEmpty())
             assertTrue(entry.minAppVersion.isNotBlank())
         }
+
+        val gemma3 = visible.single { it.id == "gemma3-1b-it" }
+        assertTrue(gemma3.supportedAccelerators.contains("npu"))
+        assertEquals(8, gemma3.socToModelFiles.size)
+        assertEquals(690143232L, gemma3.socToModelFiles.getValue("SM8550").sizeInBytes)
+        assertEquals(1280, gemma3.socToModelFiles.getValue("SM8550").contextSize)
+        assertEquals("q4", gemma3.socToModelFiles.getValue("SM8550").quantization)
+        assertEquals(1678542365L, gemma3.socToModelFiles.getValue("Tensor G5").sizeInBytes)
+        assertEquals("q8", gemma3.socToModelFiles.getValue("Tensor G5").quantization)
+
+        val gemma4 = visible.single { it.id == "gemma-4-e2b-it" }
+        assertTrue(gemma4.supportedAccelerators.contains("npu"))
+        assertTrue(gemma4.socToModelFiles.containsKey("SM8750"))
+        assertTrue(gemma4.socToModelFiles.containsKey("Tensor G5"))
+        assertEquals(3016294400L, gemma4.socToModelFiles.getValue("SM8750").sizeInBytes)
+        assertEquals(1280, gemma4.socToModelFiles.getValue("SM8750").contextSize)
+        assertEquals(8, gemma4.minRamGb)
     }
 
     companion object {
@@ -280,7 +327,9 @@ class ModelCatalogParserTest {
                       "modelFile": "qwen-sm8650.litertlm",
                       "downloadUrl": "https://huggingface.co/example/qwen/resolve/abc/qwen-sm8650.litertlm?download=true",
                       "commitHash": "abc",
-                      "sizeInBytes": 1597931520
+                      "sizeInBytes": 1597931520,
+                      "contextSize": 1280,
+                      "quantization": "q8"
                     }
                   }
                 }

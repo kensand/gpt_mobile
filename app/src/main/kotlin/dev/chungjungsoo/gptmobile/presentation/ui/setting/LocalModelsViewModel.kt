@@ -10,6 +10,7 @@ import dev.chungjungsoo.gptmobile.data.localmodel.GatedDownloadCoordinator
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
+import dev.chungjungsoo.gptmobile.di.DeviceSocModel
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClient
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuards
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadActions
@@ -30,7 +31,8 @@ class LocalModelsViewModel @Inject constructor(
     gatedDownloadCoordinator: GatedDownloadCoordinator,
     private val huggingFaceTokenStore: HuggingFaceTokenStore,
     downloadGuards: LocalDownloadGuards,
-    huggingFaceAuthClient: HuggingFaceAuthClient
+    huggingFaceAuthClient: HuggingFaceAuthClient,
+    @param:DeviceSocModel private val deviceSocModel: String
 ) : ViewModel() {
 
     private val downloadActions = LocalModelDownloadActions(
@@ -39,7 +41,8 @@ class LocalModelsViewModel @Inject constructor(
         huggingFaceTokenStore = huggingFaceTokenStore,
         downloadGuards = downloadGuards,
         huggingFaceAuthClient = huggingFaceAuthClient,
-        scope = viewModelScope
+        scope = viewModelScope,
+        deviceSocModel = deviceSocModel
     )
 
     private val _listState = MutableStateFlow(LocalModelsListState())
@@ -80,7 +83,8 @@ class LocalModelsViewModel @Inject constructor(
                     catalogEntries,
                     localModels,
                     workInfos,
-                    localModels.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) }
+                    localModels.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) },
+                    deviceSocModel = deviceSocModel
                 )
                 val storage = localModels
                     .filter { it.status == LocalModelStatus.READY }

@@ -24,6 +24,7 @@ import dev.chungjungsoo.gptmobile.data.localruntime.LocalToolDescriptor
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalToolExecutor
 import dev.chungjungsoo.gptmobile.data.localruntime.conversationFingerprint
 import dev.chungjungsoo.gptmobile.data.localruntime.incomingHistoryExtendsConsumed
+import dev.chungjungsoo.gptmobile.data.localruntime.resolvedEngineMaxTokens
 import dev.chungjungsoo.gptmobile.data.model.ChatAttachment
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
@@ -45,6 +46,7 @@ class LiteRtLmAdapter(
     private val gpuUnavailableNotice: String = DEFAULT_GPU_UNAVAILABLE,
     private val engineLoadFailedError: String = DEFAULT_ENGINE_LOAD_FAILED,
     private val modelCatalogRepository: ModelCatalogRepository? = null,
+    private val deviceSocModel: String = "",
     private val loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { null }
 ) {
     private data class OpenConversation(
@@ -114,7 +116,12 @@ class LiteRtLmAdapter(
                 val spec = rememberedEngineSpec(
                     modelPath = modelPath,
                     accelerator = LocalAccelerators.normalize(platform.accelerator),
-                    maxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
+                    maxTokens = resolvedEngineMaxTokens(
+                        requestedMaxTokens = platform.maxTokens ?: DEFAULT_MAX_TOKENS,
+                        accelerator = platform.accelerator.orEmpty(),
+                        entry = catalogEntry,
+                        deviceSocModel = deviceSocModel
+                    ),
                     isVisionEnabled = visionCapable
                 )
                 val sampler = LocalSamplerConfig(

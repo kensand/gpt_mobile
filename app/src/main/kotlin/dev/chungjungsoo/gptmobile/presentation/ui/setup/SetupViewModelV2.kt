@@ -63,7 +63,8 @@ class SetupViewModelV2 @Inject constructor(
         huggingFaceTokenStore = huggingFaceTokenStore,
         downloadGuards = downloadGuards,
         huggingFaceAuthClient = huggingFaceAuthClient,
-        scope = viewModelScope
+        scope = viewModelScope,
+        deviceSocModel = deviceSocModel
     )
 
     private val _platforms = MutableStateFlow<List<PlatformV2>>(emptyList())
@@ -103,7 +104,8 @@ class SetupViewModelV2 @Inject constructor(
             catalog,
             models,
             workInfos,
-            models.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) }
+            models.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) },
+            deviceSocModel = deviceSocModel
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 

@@ -292,6 +292,33 @@ class PlatformSettingViewModelTest {
     }
 
     @Test
+    fun `NPU max-tokens updates are capped to the matching SOC variant context`() = runTest {
+        val settings = FakeSettingRepository(
+            localPlatform(model = "cpu-gpu", accelerator = LocalAccelerators.NPU, maxTokens = 512)
+        )
+        val viewModel = localSettingsViewModel(
+            settings = settings,
+            catalog = FakeModelCatalogRepository(
+                listOf(
+                    catalogEntry(
+                        id = "cpu-gpu",
+                        supportedAccelerators = listOf("cpu", "gpu", "npu"),
+                        socToModelFiles = mapOf(
+                            "SM8750" to SocVariant(modelFile = "npu.litertlm", contextSize = 1280)
+                        )
+                    )
+                )
+            ),
+            deviceSocModel = "SM8750"
+        )
+
+        viewModel.updateMaxTokens(4096)
+
+        assertEquals(1280, viewModel.platformState.value?.maxTokens)
+        assertEquals(1280, settings.updatedPlatforms.single().maxTokens)
+    }
+
+    @Test
     fun `updating accelerator ignores NPU when the device does not qualify`() = runTest {
         val settings = FakeSettingRepository(localPlatform(model = "cpu-gpu", accelerator = LocalAccelerators.GPU))
         val viewModel = localSettingsViewModel(

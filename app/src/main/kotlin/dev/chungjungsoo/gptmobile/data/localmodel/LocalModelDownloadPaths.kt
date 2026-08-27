@@ -40,6 +40,28 @@ object LocalModelDownloadPaths {
         return path.substringAfterLast('/')
     }
 
+    fun rewriteResolveUrl(baseUrl: String, fileName: String, commitHash: String = ""): String {
+        if (baseUrl.isBlank() || fileName.isBlank()) return baseUrl
+        val query = baseUrl.substringAfter('?', missingDelimiterValue = "")
+        val path = baseUrl.substringBefore('?').trimEnd('/')
+        val parts = path.split('/').toMutableList()
+        val resolveIndex = parts.indexOf("resolve")
+        if (resolveIndex >= 0 && resolveIndex + 1 < parts.size) {
+            if (commitHash.isNotBlank() && resolveIndex + 1 < parts.size) {
+                parts[resolveIndex + 1] = commitHash
+            }
+            if (resolveIndex + 2 < parts.size) {
+                parts[parts.lastIndex] = fileName
+            } else {
+                parts += fileName
+            }
+        } else {
+            parts[parts.lastIndex] = fileName
+        }
+        val rewritten = parts.joinToString("/")
+        return if (query.isEmpty()) rewritten else "$rewritten?$query"
+    }
+
     fun rangeHeaderValue(partialLength: Long): String? = if (partialLength > 0L) {
         "bytes=$partialLength-"
     } else {

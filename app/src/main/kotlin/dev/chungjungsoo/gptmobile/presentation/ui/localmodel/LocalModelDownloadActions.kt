@@ -6,6 +6,7 @@ import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
 import dev.chungjungsoo.gptmobile.data.localmodel.GatedDownloadCoordinator
 import dev.chungjungsoo.gptmobile.data.localmodel.GatedDownloadStep
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
+import dev.chungjungsoo.gptmobile.data.localmodel.SocVariantResolver
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelDownloadUiState
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelItemStatus
@@ -23,7 +24,8 @@ class LocalModelDownloadActions(
     private val huggingFaceTokenStore: HuggingFaceTokenStore,
     private val downloadGuards: LocalDownloadGuards,
     private val huggingFaceAuthClient: HuggingFaceAuthClient,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val deviceSocModel: String = ""
 ) {
     private var pendingGatedEntry: CatalogEntry? = null
 
@@ -45,7 +47,7 @@ class LocalModelDownloadActions(
             }
 
             downloadGuards.isMeteredConnection() -> {
-                _uiState.update { it.copy(dialog = LocalModelsDialog.MeteredConfirm(entry)) }
+                _uiState.update { it.copy(dialog = LocalModelsDialog.MeteredConfirm(entryWithResolvedSize(entry))) }
             }
 
             else -> beginDownload(entry)
@@ -56,7 +58,7 @@ class LocalModelDownloadActions(
         val entry = (_uiState.value.dialog as? LocalModelsDialog.RamWarning)?.entry ?: return
         dismissDialog()
         if (downloadGuards.isMeteredConnection()) {
-            _uiState.update { it.copy(dialog = LocalModelsDialog.MeteredConfirm(entry)) }
+            _uiState.update { it.copy(dialog = LocalModelsDialog.MeteredConfirm(entryWithResolvedSize(entry))) }
         } else {
             beginDownload(entry)
         }
@@ -146,6 +148,11 @@ class LocalModelDownloadActions(
 
     fun release() {
         huggingFaceAuthClient.dispose()
+    }
+
+    private fun entryWithResolvedSize(entry: CatalogEntry): CatalogEntry {
+        val resolvedSize = SocVariantResolver.resolve(entry, deviceSocModel).sizeInBytes
+        return if (resolvedSize > 0L) entry.copy(sizeInBytes = resolvedSize) else entry
     }
 
     private fun beginDownload(entry: CatalogEntry) {

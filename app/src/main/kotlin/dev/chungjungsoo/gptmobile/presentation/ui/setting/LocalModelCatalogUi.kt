@@ -7,6 +7,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.LocalModel
 import dev.chungjungsoo.gptmobile.data.localmodel.DownloadFailureKind
 import dev.chungjungsoo.gptmobile.data.localmodel.DownloadProgress
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
+import dev.chungjungsoo.gptmobile.data.localmodel.SocVariantResolver
 import dev.chungjungsoo.gptmobile.data.worker.LocalModelDownloadWorker
 
 data class LocalModelsUiState(
@@ -30,6 +31,7 @@ data class LocalModelListItem(
     val bytesPerSecond: Long = 0L,
     val remainingMs: Long = 0L,
     val diskBytes: Long = 0L,
+    val downloadSizeBytes: Long = 0L,
     val errorMessage: String? = null,
     val failureKind: DownloadFailureKind = DownloadFailureKind.GENERIC
 )
@@ -58,7 +60,8 @@ fun catalogLocalModelItems(
     catalog: List<CatalogEntry>,
     records: List<LocalModel>,
     workInfos: List<WorkInfo>,
-    partialBytesById: Map<String, Long> = emptyMap()
+    partialBytesById: Map<String, Long> = emptyMap(),
+    deviceSocModel: String = ""
 ): List<LocalModelListItem> {
     val workById = workInfos.mapNotNull { info ->
         val id = info.tags.firstNotNullOfOrNull(LocalModelDownloadWorker::catalogEntryIdFromTag)
@@ -70,7 +73,8 @@ fun catalogLocalModelItems(
             entry,
             modelsById[entry.id],
             workById[entry.id],
-            diskPartialBytes = partialBytesById[entry.id] ?: 0L
+            diskPartialBytes = partialBytesById[entry.id] ?: 0L,
+            downloadSizeBytes = SocVariantResolver.resolve(entry, deviceSocModel).sizeInBytes
         )
     }
 }
@@ -79,7 +83,8 @@ fun toLocalModelListItem(
     entry: CatalogEntry,
     record: LocalModel?,
     workInfo: WorkInfo?,
-    diskPartialBytes: Long = 0L
+    diskPartialBytes: Long = 0L,
+    downloadSizeBytes: Long = entry.sizeInBytes
 ): LocalModelListItem {
     val workReceived = workInfo?.progress?.getLong(LocalModelDownloadWorker.KEY_RECEIVED_BYTES, 0L) ?: 0L
     val receivedBytes = DownloadProgress.receivedBytes(workReceived, diskPartialBytes)
@@ -93,11 +98,13 @@ fun toLocalModelListItem(
     val isWorkActive = workState == WorkInfo.State.RUNNING ||
         workState == WorkInfo.State.ENQUEUED ||
         workState == WorkInfo.State.BLOCKED
+    val resolvedDownloadSize = if (downloadSizeBytes > 0L) downloadSizeBytes else entry.sizeInBytes
     return when {
         record?.status == LocalModelStatus.READY -> LocalModelListItem(
             entry = entry,
             status = LocalModelItemStatus.READY,
-            diskBytes = record.totalBytes
+            diskBytes = record.totalBytes,
+            downloadSizeBytes = resolvedDownloadSize
         )
 
         record?.status == LocalModelStatus.DOWNLOADING || isWorkActive -> LocalModelListItem(
@@ -106,19 +113,22 @@ fun toLocalModelListItem(
             receivedBytes = receivedBytes,
             bytesPerSecond = bytesPerSecond,
             remainingMs = remainingMs,
-            diskBytes = entry.sizeInBytes
+            diskBytes = resolvedDownloadSize,
+            downloadSizeBytes = resolvedDownloadSize
         )
 
         record?.status == LocalModelStatus.FAILED || workState == WorkInfo.State.FAILED -> LocalModelListItem(
             entry = entry,
             status = LocalModelItemStatus.FAILED,
+            downloadSizeBytes = resolvedDownloadSize,
             errorMessage = errorMessage,
             failureKind = failureKind
         )
 
         else -> LocalModelListItem(
             entry = entry,
-            status = LocalModelItemStatus.NOT_DOWNLOADED
+            status = LocalModelItemStatus.NOT_DOWNLOADED,
+            downloadSizeBytes = resolvedDownloadSize
         )
     }
 }

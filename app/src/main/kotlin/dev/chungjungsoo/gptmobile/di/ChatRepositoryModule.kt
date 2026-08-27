@@ -54,7 +54,8 @@ object ChatRepositoryModule {
         toolEventRecorder: ToolEventRecorder,
         localRuntime: LocalRuntime,
         localModelRepository: LocalModelRepository,
-        modelCatalogRepository: ModelCatalogRepository
+        modelCatalogRepository: ModelCatalogRepository,
+        @DeviceSocModel deviceSocModel: String
     ): ChatRepository = ChatRepositoryImpl(
         context,
         chatRoomDao,
@@ -75,6 +76,7 @@ object ChatRepositoryModule {
         toolEventRecorder,
         localRuntime,
         localModelRepository,
-        modelCatalogRepository
+        modelCatalogRepository,
+        deviceSocModel
     )
 }

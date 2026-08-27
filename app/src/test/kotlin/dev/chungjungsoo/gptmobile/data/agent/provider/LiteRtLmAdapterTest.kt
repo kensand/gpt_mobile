@@ -7,6 +7,7 @@ import dev.chungjungsoo.gptmobile.data.agent.ProviderEvent
 import dev.chungjungsoo.gptmobile.data.agent.ToolResultContent
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogCapabilities
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
+import dev.chungjungsoo.gptmobile.data.catalog.SocVariant
 import dev.chungjungsoo.gptmobile.data.context.ConversationTurn
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
@@ -1046,6 +1047,36 @@ class LiteRtLmAdapterTest {
     }
 
     @Test
+    fun `NPU engine spec clamps max tokens to the matching SOC variant context`() = runBlocking {
+        val runtime = FakeLocalRuntime().apply {
+            scriptedEvents = listOf(listOf(LocalRuntimeEvent.TextDelta("ok"), LocalRuntimeEvent.Done))
+        }
+        val adapter = adapter(
+            runtime,
+            catalog = FakeModelCatalogRepository(
+                listOf(
+                    CatalogEntry(
+                        id = "gemma3-1b-it",
+                        supportedAccelerators = listOf("gpu", "cpu", "npu"),
+                        socToModelFiles = mapOf(
+                            "SM8750" to SocVariant(modelFile = "npu.litertlm", contextSize = 1280)
+                        )
+                    )
+                )
+            ),
+            deviceSocModel = "SM8750"
+        )
+
+        adapter.openSession(
+            turns("hello"),
+            localPlatform().copy(accelerator = LocalAccelerators.NPU, maxTokens = 4096)
+        ).streamRound(emptyList(), emptyList()).toList()
+
+        assertEquals(1280, runtime.loadEngineCalls.single().maxTokens)
+        assertEquals(LocalAccelerators.NPU, runtime.loadEngineCalls.single().accelerator)
+    }
+
+    @Test
     fun `cpu fallback failure surfaces a clean engine error instead of the native dump`() = runBlocking {
         val runtime = FakeLocalRuntime().apply {
             failLoadEngineIf = {
@@ -1103,6 +1134,7 @@ class LiteRtLmAdapterTest {
         ),
         catalog: ModelCatalogRepository = FakeModelCatalogRepository(),
         loadingModelNotice: String = "",
+        deviceSocModel: String = "",
         loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { attachment ->
             attachment.preparedFilePath.ifBlank { attachment.localFilePath }.toByteArray()
         }
@@ -1114,6 +1146,7 @@ class LiteRtLmAdapterTest {
         tooManyImagesNotice = LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES,
         loadingModelNotice = loadingModelNotice,
         modelCatalogRepository = catalog,
+        deviceSocModel = deviceSocModel,
         loadImageBytes = loadImageBytes
     )
 

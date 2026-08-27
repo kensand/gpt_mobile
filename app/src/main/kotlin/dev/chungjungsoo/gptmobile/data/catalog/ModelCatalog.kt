@@ -43,5 +43,7 @@ data class SocVariant(
     val modelFile: String = "",
     val downloadUrl: String = "",
     val commitHash: String = "",
-    val sizeInBytes: Long = 0L
+    val sizeInBytes: Long = 0L,
+    val contextSize: Int = 0,
+    val quantization: String = ""
 )

@@ -1,5 +1,7 @@
 package dev.chungjungsoo.gptmobile.data.localruntime
 
+import dev.chungjungsoo.gptmobile.data.catalog.ModelCatalogParser
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -173,10 +175,56 @@ class LocalAcceleratorsTest {
     }
 
     @Test
+    fun `hosted Gemma3-1B reports device unsupported on Tensor G4 and enabled on SM8750`() {
+        val gemma3 = hostedEntry("gemma3-1b-it")
+
+        val tensorG4 = LocalAccelerators.choices(
+            supported = gemma3.supportedAccelerators,
+            socToModelFiles = gemma3.socToModelFiles,
+            deviceSocModel = "Tensor G4"
+        ).single { it.accelerator == LocalAccelerators.NPU }
+        assertFalse(tensorG4.enabled)
+        assertEquals(AcceleratorUnavailableReason.DEVICE_NOT_SUPPORTED, tensorG4.unavailableReason)
+
+        val sm8750 = LocalAccelerators.choices(
+            supported = gemma3.supportedAccelerators,
+            socToModelFiles = gemma3.socToModelFiles,
+            deviceSocModel = "SM8750"
+        ).single { it.accelerator == LocalAccelerators.NPU }
+        assertTrue(sm8750.enabled)
+        assertEquals(null, sm8750.unavailableReason)
+    }
+
+    @Test
+    fun `hosted Gemma-3n still reports model has no NPU build`() {
+        val gemma3n = hostedEntry("gemma-3n-e2b-it")
+
+        val npu = LocalAccelerators.choices(
+            supported = gemma3n.supportedAccelerators,
+            socToModelFiles = gemma3n.socToModelFiles,
+            deviceSocModel = "SM8750"
+        ).single { it.accelerator == LocalAccelerators.NPU }
+
+        assertFalse(npu.enabled)
+        assertEquals(AcceleratorUnavailableReason.MODEL_HAS_NO_BUILD, npu.unavailableReason)
+    }
+
+    @Test
     fun `sampler config is skipped on NPU`() {
         assertFalse(LocalAccelerators.shouldApplySampler(LocalAccelerators.NPU))
         assertTrue(LocalAccelerators.shouldApplySampler(LocalAccelerators.CPU))
         assertTrue(LocalAccelerators.shouldApplySampler(LocalAccelerators.GPU))
+    }
+
+    private fun hostedEntry(id: String) = ModelCatalogParser.parse(readCatalogFile()).models.single { it.id == id }
+
+    private fun readCatalogFile(): String {
+        val file = listOf(
+            File("../model_catalog.json"),
+            File("model_catalog.json")
+        ).firstOrNull { it.exists() }
+        checkNotNull(file) { "Missing hosted catalog file" }
+        return file.readText()
     }
 
     private companion object {

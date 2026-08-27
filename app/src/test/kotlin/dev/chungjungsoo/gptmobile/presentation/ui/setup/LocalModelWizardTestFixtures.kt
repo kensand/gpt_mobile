@@ -186,12 +186,14 @@ internal fun localModelsViewModel(
     gatedCoordinator: GatedDownloadCoordinator = wizardGatedCoordinator(),
     tokenStore: HuggingFaceTokenStore = HuggingFaceTokenStore(MapSecretVault()),
     guards: LocalDownloadGuards = FakeLocalDownloadGuards(),
-    authClient: HuggingFaceAuthClient = FakeHuggingFaceAuthClient()
+    authClient: HuggingFaceAuthClient = FakeHuggingFaceAuthClient(),
+    deviceSocModel: String = ""
 ) = LocalModelsViewModel(
     modelCatalogRepository = catalog,
     localModelRepository = localModels,
     gatedDownloadCoordinator = gatedCoordinator,
     huggingFaceTokenStore = tokenStore,
     downloadGuards = guards,
-    huggingFaceAuthClient = authClient
+    huggingFaceAuthClient = authClient,
+    deviceSocModel = deviceSocModel
 )

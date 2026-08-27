@@ -38,7 +38,9 @@ fun LocalModelRequirements(
         Text(
             text = stringResource(
                 R.string.local_model_requirements,
-                ModelCatalogParser.formatDownloadSize(entry.sizeInBytes),
+                ModelCatalogParser.formatDownloadSize(
+                    item.downloadSizeBytes.takeIf { it > 0L } ?: entry.sizeInBytes
+                ),
                 entry.minRamGb
             ),
             style = MaterialTheme.typography.bodyMedium,

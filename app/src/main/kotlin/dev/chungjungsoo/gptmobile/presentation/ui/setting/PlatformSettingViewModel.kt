@@ -13,9 +13,11 @@ import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
+import dev.chungjungsoo.gptmobile.data.localmodel.SocVariantResolver
 import dev.chungjungsoo.gptmobile.data.localruntime.AcceleratorOption
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.localruntime.localSamplingDefaults
+import dev.chungjungsoo.gptmobile.data.localruntime.resolvedEngineMaxTokens
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
 import dev.chungjungsoo.gptmobile.data.repository.LocalModelRepository
@@ -267,10 +269,32 @@ class PlatformSettingViewModel @Inject constructor(
 
     fun updateMaxTokens(maxTokens: Int?) {
         _platformState.value?.let { platform ->
-            updatePlatform(platform.copy(maxTokens = maxTokens?.coerceIn(MIN_MAX_TOKENS, DEFAULT_MAX_TOKENS_CAP)))
+            val capped = maxTokens?.let { requested ->
+                resolvedEngineMaxTokens(
+                    requestedMaxTokens = requested.coerceIn(MIN_MAX_TOKENS, DEFAULT_MAX_TOKENS_CAP),
+                    accelerator = platform.accelerator.orEmpty(),
+                    entry = catalogEntryFor(platform),
+                    deviceSocModel = deviceSocModel
+                )
+            }
+            updatePlatform(platform.copy(maxTokens = capped))
             closeMaxTokensDialog()
         }
     }
+
+    fun maxTokensCap(): Int {
+        val platform = _platformState.value ?: return DEFAULT_MAX_TOKENS_CAP
+        val variantLimit = SocVariantResolver.resolve(
+            catalogEntryFor(platform) ?: return DEFAULT_MAX_TOKENS_CAP,
+            deviceSocModel
+        ).contextSize
+        if (LocalAccelerators.normalize(platform.accelerator) != LocalAccelerators.NPU || variantLimit <= 0) {
+            return DEFAULT_MAX_TOKENS_CAP
+        }
+        return variantLimit
+    }
+
+    private fun catalogEntryFor(platform: PlatformV2): CatalogEntry? = _catalogEntries.value.firstOrNull { it.id == platform.model }
 
     fun updateAccelerator(accelerator: String) {
         val normalized = LocalAccelerators.normalize(accelerator)
