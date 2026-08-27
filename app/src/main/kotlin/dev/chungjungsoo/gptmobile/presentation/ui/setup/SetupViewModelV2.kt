@@ -107,6 +107,24 @@ class SetupViewModelV2 @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val canProceed: StateFlow<Boolean> = combine(
+        _wizardStep,
+        _selectedClientType,
+        _platformName,
+        _apiUrl,
+        _model
+    ) { step, clientType, name, url, modelName ->
+        canProceedFromStep(step, clientType, name, url, modelName)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val isWaitingForDownload: StateFlow<Boolean> = combine(
+        _selectedClientType,
+        _model,
+        catalogLocalModels
+    ) { clientType, modelName, items ->
+        isWaitingForModelDownload(clientType, modelName, items)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val localModelDownloadState: StateFlow<LocalModelDownloadUiState> = downloadActions.uiState
 
     init {
@@ -180,10 +198,7 @@ class SetupViewModelV2 @Inject constructor(
         downloadActions.retryAfterLicense()
     }
 
-    fun isWaitingForModelDownload(): Boolean {
-        if (!isLiteRtLm()) return false
-        return selectedLocalModelStatus()?.let { it != LocalModelItemStatus.READY } == true
-    }
+    fun isWaitingForModelDownload(): Boolean = isWaitingForDownload.value
 
     fun nextWizardStep() {
         if (isLiteRtLm() && _wizardStep.value == WIZARD_STEP_BASICS) {
@@ -273,18 +288,13 @@ class SetupViewModelV2 @Inject constructor(
         }
     }
 
-    fun canProceedFromStep(step: Int): Boolean = when (step) {
-        WIZARD_STEP_BASICS -> {
-            val hasName = _platformName.value.isNotBlank()
-            if (isLiteRtLm()) hasName else hasName && _apiUrl.value.isNotBlank()
-        }
-
-        WIZARD_STEP_API_KEY -> true
-
-        WIZARD_STEP_MODEL -> _model.value.isNotBlank()
-
-        else -> false
-    }
+    fun canProceedFromStep(step: Int): Boolean = canProceedFromStep(
+        step = step,
+        clientType = _selectedClientType.value,
+        platformName = _platformName.value,
+        apiUrl = _apiUrl.value,
+        modelName = _model.value
+    )
 
     fun isSetupComplete(): Boolean = _platforms.value.isNotEmpty()
 
@@ -303,12 +313,42 @@ class SetupViewModelV2 @Inject constructor(
         super.onCleared()
     }
 
-    private fun selectedLocalModelIsDownloaded(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.READY
+    private fun selectedLocalModelIsDownloaded(): Boolean = selectedLocalModelStatus(_model.value, catalogLocalModels.value) == LocalModelItemStatus.READY
 
-    private fun selectedLocalModelStatus(): LocalModelItemStatus? {
-        val catalogEntryId = _model.value
+    private fun canProceedFromStep(
+        step: Int,
+        clientType: ClientType?,
+        platformName: String,
+        apiUrl: String,
+        modelName: String
+    ): Boolean = when (step) {
+        WIZARD_STEP_BASICS -> {
+            val hasName = platformName.isNotBlank()
+            if (clientType == ClientType.LITERT_LM) hasName else hasName && apiUrl.isNotBlank()
+        }
+
+        WIZARD_STEP_API_KEY -> true
+
+        WIZARD_STEP_MODEL -> modelName.isNotBlank()
+
+        else -> false
+    }
+
+    private fun isWaitingForModelDownload(
+        clientType: ClientType?,
+        modelName: String,
+        items: List<LocalModelListItem>
+    ): Boolean {
+        if (clientType != ClientType.LITERT_LM) return false
+        return selectedLocalModelStatus(modelName, items)?.let { it != LocalModelItemStatus.READY } == true
+    }
+
+    private fun selectedLocalModelStatus(
+        catalogEntryId: String,
+        items: List<LocalModelListItem>
+    ): LocalModelItemStatus? {
         if (catalogEntryId.isBlank()) return null
-        return catalogLocalModels.value.firstOrNull { it.entry.id == catalogEntryId }?.status
+        return items.firstOrNull { it.entry.id == catalogEntryId }?.status
     }
 
     private fun catalogDefaultsFor(modelId: String) = _catalogEntries.value

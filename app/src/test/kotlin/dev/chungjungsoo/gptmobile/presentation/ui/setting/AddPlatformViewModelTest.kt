@@ -72,6 +72,36 @@ class AddPlatformViewModelTest {
     }
 
     @Test
+    fun `selecting a READY model enables finish without any other field change`() = runTest {
+        val viewModel = addPlatformViewModel(
+            localModels = FakeLocalModelRepository(listOf(wizardStoredModel("ready-model")))
+        )
+
+        assertFalse(viewModel.canSave.value)
+
+        viewModel.selectLocalModel("ready-model")
+
+        assertTrue(viewModel.canSave.value)
+        assertFalse(viewModel.isWaitingForDownload.value)
+    }
+
+    @Test
+    fun `download becoming READY clears waiting without any other field change`() = runTest {
+        val localModels = FakeLocalModelRepository()
+        val viewModel = addPlatformViewModel(localModels = localModels)
+
+        viewModel.selectLocalModel("pending-model")
+
+        assertTrue(viewModel.canSave.value)
+        assertTrue(viewModel.isWaitingForDownload.value)
+
+        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.READY)))
+
+        assertTrue(viewModel.canSave.value)
+        assertFalse(viewModel.isWaitingForDownload.value)
+    }
+
+    @Test
     fun `save is enabled once a local model is selected even while downloading`() = runTest {
         val localModels = FakeLocalModelRepository()
         val viewModel = addPlatformViewModel(localModels = localModels)

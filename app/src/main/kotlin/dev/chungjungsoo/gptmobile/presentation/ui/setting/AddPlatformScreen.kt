@@ -75,15 +75,16 @@ fun AddPlatformScreen(
     val catalogModels by viewModel.catalogLocalModels.collectAsStateWithLifecycle()
     val downloadState by viewModel.localModelDownloadState.collectAsStateWithLifecycle()
     val selectedLocalModelId by viewModel.selectedCatalogEntryId.collectAsStateWithLifecycle()
+    val canSave by viewModel.canSave.collectAsStateWithLifecycle()
+    val isWaitingForDownload by viewModel.isWaitingForDownload.collectAsStateWithLifecycle()
     val requestDownload = rememberLocalModelDownloader { entry ->
         viewModel.selectLocalModel(entry.id)
     }
     val isLocalPlatform = selectedClientType == ClientType.LITERT_LM
     val title = stringResource(if (step == AddPlatformStep.API_TYPE) R.string.choose_platform_type else R.string.platform_details)
-    val isWaitingForDownload = isLocalPlatform && viewModel.isWaitingForModelDownload()
     val isSaveEnabled = platformName.isNotBlank() &&
         if (isLocalPlatform) {
-            viewModel.canSaveLocalModel()
+            canSave
         } else {
             model.isNotBlank() && apiUrl.isNotBlank()
         }

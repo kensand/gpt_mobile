@@ -31,7 +31,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -60,40 +59,15 @@ fun SetupPlatformWizardScreen(
     onBackAction: () -> Unit,
     onNavigateToLocalModels: () -> Unit = {}
 ) {
-    // Keep State objects for derivedStateOf to properly track dependencies
-    val wizardStepState = setupViewModel.wizardStep.collectAsStateWithLifecycle()
-    val selectedClientTypeState = setupViewModel.selectedClientType.collectAsStateWithLifecycle()
-    val platformNameState = setupViewModel.platformName.collectAsStateWithLifecycle()
-    val apiUrlState = setupViewModel.apiUrl.collectAsStateWithLifecycle()
-    val apiKeyState = setupViewModel.apiKey.collectAsStateWithLifecycle()
-    val modelState = setupViewModel.model.collectAsStateWithLifecycle()
+    val wizardStep by setupViewModel.wizardStep.collectAsStateWithLifecycle()
+    val selectedClientType by setupViewModel.selectedClientType.collectAsStateWithLifecycle()
     val catalogModels by setupViewModel.catalogLocalModels.collectAsStateWithLifecycle()
     val downloadState by setupViewModel.localModelDownloadState.collectAsStateWithLifecycle()
+    val canProceed by setupViewModel.canProceed.collectAsStateWithLifecycle()
+    val isWaitingForDownload by setupViewModel.isWaitingForDownload.collectAsStateWithLifecycle()
     val requestDownload = rememberLocalModelDownloader { entry ->
         setupViewModel.selectLocalModel(entry.id)
     }
-
-    // Extract values for use in composables
-    val wizardStep = wizardStepState.value
-    val selectedClientType = selectedClientTypeState.value
-    platformNameState.value
-    apiUrlState.value
-    apiKeyState.value
-    modelState.value
-
-    // Compute canProceed using derivedStateOf for proper reactivity
-    val canProceed by remember {
-        derivedStateOf {
-            platformNameState.value
-            apiUrlState.value
-            modelState.value
-            selectedClientTypeState.value
-            catalogModels
-            setupViewModel.canProceedFromStep(wizardStepState.value)
-        }
-    }
-    val isWaitingForDownload = selectedClientType == ClientType.LITERT_LM &&
-        setupViewModel.isWaitingForModelDownload()
 
     // Handle back press
     BackHandler {

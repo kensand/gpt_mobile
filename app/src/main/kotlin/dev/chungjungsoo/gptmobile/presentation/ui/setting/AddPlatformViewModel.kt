@@ -61,6 +61,17 @@ class AddPlatformViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val canSave: StateFlow<Boolean> = _selectedCatalogEntryId
+        .combine(catalogLocalModels) { catalogEntryId, _ -> catalogEntryId.isNotBlank() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val isWaitingForDownload: StateFlow<Boolean> = combine(
+        _selectedCatalogEntryId,
+        catalogLocalModels
+    ) { catalogEntryId, items ->
+        isWaitingForModelDownload(catalogEntryId, items)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val localModelDownloadState: StateFlow<LocalModelDownloadUiState> = downloadActions.uiState
 
     init {
@@ -101,9 +112,9 @@ class AddPlatformViewModel @Inject constructor(
         downloadActions.retryAfterLicense()
     }
 
-    fun canSaveLocalModel(): Boolean = _selectedCatalogEntryId.value.isNotBlank()
+    fun canSaveLocalModel(): Boolean = canSave.value
 
-    fun shouldEnableLocalPlatform(): Boolean = selectedLocalModelStatus() == LocalModelItemStatus.READY
+    fun shouldEnableLocalPlatform(): Boolean = selectedLocalModelStatus(_selectedCatalogEntryId.value, catalogLocalModels.value) == LocalModelItemStatus.READY
 
     fun saveHuggingFaceAccessToken(token: String) {
         downloadActions.saveAccessTokenAndRetry(token)
@@ -113,11 +124,7 @@ class AddPlatformViewModel @Inject constructor(
         downloadActions.openAccessTokenDialog()
     }
 
-    fun isWaitingForModelDownload(): Boolean {
-        val catalogEntryId = _selectedCatalogEntryId.value
-        if (catalogEntryId.isBlank()) return false
-        return selectedLocalModelStatus()?.let { it != LocalModelItemStatus.READY } == true
-    }
+    fun isWaitingForModelDownload(): Boolean = isWaitingForDownload.value
 
     fun defaultsFor(catalogEntryId: String): LocalSamplingDefaults? = _catalogEntries.value
         .firstOrNull { it.id == catalogEntryId }
@@ -128,9 +135,19 @@ class AddPlatformViewModel @Inject constructor(
         super.onCleared()
     }
 
-    private fun selectedLocalModelStatus(): LocalModelItemStatus? {
-        val catalogEntryId = _selectedCatalogEntryId.value
+    private fun isWaitingForModelDownload(
+        catalogEntryId: String,
+        items: List<LocalModelListItem>
+    ): Boolean {
+        if (catalogEntryId.isBlank()) return false
+        return selectedLocalModelStatus(catalogEntryId, items)?.let { it != LocalModelItemStatus.READY } == true
+    }
+
+    private fun selectedLocalModelStatus(
+        catalogEntryId: String,
+        items: List<LocalModelListItem>
+    ): LocalModelItemStatus? {
         if (catalogEntryId.isBlank()) return null
-        return catalogLocalModels.value.firstOrNull { it.entry.id == catalogEntryId }?.status
+        return items.firstOrNull { it.entry.id == catalogEntryId }?.status
     }
 }

@@ -76,6 +76,40 @@ class SetupViewModelV2Test {
     }
 
     @Test
+    fun `selecting a READY model enables finish without any other field change`() = runTest {
+        val viewModel = setupViewModel(
+            localModels = FakeLocalModelRepository(listOf(wizardStoredModel("ready-model")))
+        )
+        viewModel.selectClientType(ClientType.LITERT_LM)
+        viewModel.nextWizardStep()
+
+        assertFalse(viewModel.canProceed.value)
+
+        viewModel.selectLocalModel("ready-model")
+
+        assertTrue(viewModel.canProceed.value)
+        assertFalse(viewModel.isWaitingForDownload.value)
+    }
+
+    @Test
+    fun `download becoming READY clears waiting without any other field change`() = runTest {
+        val localModels = FakeLocalModelRepository()
+        val viewModel = setupViewModel(localModels = localModels)
+        viewModel.selectClientType(ClientType.LITERT_LM)
+        viewModel.nextWizardStep()
+
+        viewModel.selectLocalModel("pending-model")
+
+        assertTrue(viewModel.canProceed.value)
+        assertTrue(viewModel.isWaitingForDownload.value)
+
+        localModels.setModels(listOf(wizardStoredModel("pending-model", LocalModelStatus.READY)))
+
+        assertTrue(viewModel.canProceed.value)
+        assertFalse(viewModel.isWaitingForDownload.value)
+    }
+
+    @Test
     fun `finish is enabled once a local model is selected even while downloading`() = runTest {
         val localModels = FakeLocalModelRepository()
         val viewModel = setupViewModel(localModels = localModels)
