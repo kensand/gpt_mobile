@@ -1,6 +1,7 @@
 package dev.chungjungsoo.gptmobile.data.repository
 
 import android.content.Context
+import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
@@ -32,7 +33,8 @@ class LocalModelRepositoryImpl(
     private val deviceSocModel: String,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val diskFiles: (() -> Set<String>)? = null,
-    private val workInfos: (() -> Flow<List<WorkInfo>>)? = null
+    private val workInfos: (() -> Flow<List<WorkInfo>>)? = null,
+    private val externalFilesDir: (() -> File?)? = null
 ) : LocalModelRepository {
 
     private val workManager: WorkManager
@@ -61,6 +63,7 @@ class LocalModelRepositoryImpl(
                 return@withContext
             }
             val resolved = SocVariantResolver.resolve(entry, deviceSocModel)
+            LocalModelDownloadPaths.requireValidPathSegments(entry.id, resolved.commitHash, resolved.fileName)
             val relativeDirectory = LocalModelDownloadPaths.relativeDirectory(entry.id, resolved.commitHash)
             val now = System.currentTimeMillis() / 1000
             localModelDao.upsert(
@@ -128,6 +131,7 @@ class LocalModelRepositoryImpl(
 
     override suspend fun deleteModel(catalogEntryId: String) {
         withContext(ioDispatcher) {
+            LocalModelDownloadPaths.requireValidPathSegments(catalogEntryId)
             workManager.cancelUniqueWork(LocalModelDownloadPaths.uniqueWorkName(catalogEntryId))
             val row = localModelDao.getById(catalogEntryId)
             if (row != null) {
@@ -157,6 +161,10 @@ class LocalModelRepositoryImpl(
 
     override suspend fun reconcile() {
         withContext(ioDispatcher) {
+            if (externalStorageRoot() == null) {
+                runCatching { Log.w(TAG, "Skipping Local Model reconcile: external storage unavailable") }
+                return@withContext
+            }
             val actions = LocalModelReconciler.reconcile(
                 rows = localModelDao.getAll().map { it.toRecord() },
                 diskFiles = diskFilesOrDefault(),
@@ -194,7 +202,13 @@ class LocalModelRepositoryImpl(
         Unit
     }
 
-    private fun storageRoot(): File = context.getExternalFilesDir(null) ?: context.filesDir
+    private fun externalStorageRoot(): File? = if (externalFilesDir != null) {
+        externalFilesDir.invoke()
+    } else {
+        context.getExternalFilesDir(null)
+    }
+
+    private fun storageRoot(): File = externalStorageRoot() ?: context.filesDir
 
     private fun diskFilesOrDefault(): Set<String> = diskFiles?.invoke() ?: listModelFiles()
 
@@ -228,5 +242,6 @@ class LocalModelRepositoryImpl(
 
     private companion object {
         const val JOB_DELIVERY_TIMEOUT_MS = 2_000L
+        private const val TAG = "LocalModelRepository"
     }
 }

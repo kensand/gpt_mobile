@@ -1,8 +1,5 @@
 package dev.chungjungsoo.gptmobile.data.localmodel
 
-import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
-import java.net.HttpURLConnection
-import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
@@ -14,23 +11,17 @@ fun interface LocalModelDownloadProber {
 @Singleton
 class LocalModelDownloadProberImpl @Inject constructor() : LocalModelDownloadProber {
     override fun probe(downloadUrl: String, accessToken: String?): Int = try {
-        val connection = URL(downloadUrl).openConnection() as HttpURLConnection
+        val connection = HuggingFaceDownloadAuth.openConnection(
+            url = downloadUrl,
+            accessToken = accessToken,
+            extraHeaders = mapOf(
+                LocalModelDownloadPaths.RANGE_HEADER to PROBE_RANGE,
+                LocalModelDownloadPaths.ACCEPT_ENCODING_HEADER to LocalModelDownloadPaths.IDENTITY_ENCODING
+            ),
+            connectTimeoutMs = CONNECT_TIMEOUT_MS,
+            readTimeoutMs = READ_TIMEOUT_MS
+        )
         try {
-            connection.instanceFollowRedirects = true
-            connection.connectTimeout = CONNECT_TIMEOUT_MS
-            connection.readTimeout = READ_TIMEOUT_MS
-            connection.setRequestProperty(
-                LocalModelDownloadPaths.RANGE_HEADER,
-                PROBE_RANGE
-            )
-            connection.setRequestProperty(
-                LocalModelDownloadPaths.ACCEPT_ENCODING_HEADER,
-                LocalModelDownloadPaths.IDENTITY_ENCODING
-            )
-            if (!accessToken.isNullOrBlank()) {
-                connection.setRequestProperty("Authorization", HuggingFaceTokenStore.bearerHeader(accessToken))
-            }
-            connection.connect()
             connection.responseCode
         } finally {
             connection.disconnect()

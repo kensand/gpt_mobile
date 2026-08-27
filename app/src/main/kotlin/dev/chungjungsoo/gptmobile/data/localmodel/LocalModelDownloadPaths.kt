@@ -17,9 +17,28 @@ object LocalModelDownloadPaths {
 
     fun isPartialFile(fileName: String): Boolean = fileName.endsWith(PARTIAL_SUFFIX)
 
-    fun relativeDirectory(catalogEntryId: String, commitHash: String): String = listOf(MODELS_DIR, catalogEntryId, commitHash).joinToString("/")
+    fun isValidPathSegment(segment: String): Boolean = segment.isNotEmpty() &&
+        segment != ".." &&
+        '/' !in segment &&
+        '\\' !in segment
 
-    fun relativeFilePath(catalogEntryId: String, commitHash: String, fileName: String): String = listOf(MODELS_DIR, catalogEntryId, commitHash, fileName).joinToString("/")
+    fun requireValidPathSegments(vararg segments: String) {
+        segments.forEach { segment ->
+            require(isValidPathSegment(segment)) { "Invalid Local Model path segment" }
+        }
+    }
+
+    fun isCompleteDownload(tmpLength: Long, totalBytes: Long): Boolean = totalBytes <= 0L || tmpLength == totalBytes
+
+    fun relativeDirectory(catalogEntryId: String, commitHash: String): String {
+        requireValidPathSegments(catalogEntryId, commitHash)
+        return listOf(MODELS_DIR, catalogEntryId, commitHash).joinToString("/")
+    }
+
+    fun relativeFilePath(catalogEntryId: String, commitHash: String, fileName: String): String {
+        requireValidPathSegments(catalogEntryId, commitHash, fileName)
+        return listOf(MODELS_DIR, catalogEntryId, commitHash, fileName).joinToString("/")
+    }
 
     fun relativePartialFilePath(catalogEntryId: String, commitHash: String, fileName: String): String = relativeFilePath(catalogEntryId, commitHash, partialFileName(fileName))
 
@@ -76,7 +95,10 @@ object LocalModelDownloadPaths {
         )
     }
 
-    fun shouldAppendToPartial(partialLength: Long, contentRangeHeader: String?): Boolean = partialLength > 0L && contentRangeHeader != null
+    fun shouldAppendToPartial(partialLength: Long, contentRangeHeader: String?): Boolean {
+        if (partialLength <= 0L || contentRangeHeader == null) return false
+        return contentRangeStart(contentRangeHeader) == partialLength
+    }
 
     fun downloadedBytesAfterConnect(partialLength: Long, contentRangeHeader: String?): Long {
         if (contentRangeHeader == null) return 0L

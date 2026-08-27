@@ -22,14 +22,15 @@ import dev.chungjungsoo.gptmobile.data.localmodel.DownloadAuthException
 import dev.chungjungsoo.gptmobile.data.localmodel.DownloadErrorClassifier
 import dev.chungjungsoo.gptmobile.data.localmodel.DownloadFailureKind
 import dev.chungjungsoo.gptmobile.data.localmodel.DownloadProgress
+import dev.chungjungsoo.gptmobile.data.localmodel.HuggingFaceDownloadAuth
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelDownloadPaths
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
+import dev.chungjungsoo.gptmobile.data.localmodel.PendingLocalPlatformActivator
 import dev.chungjungsoo.gptmobile.presentation.ui.main.MainActivity
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
-import java.net.URL
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -39,7 +40,8 @@ class LocalModelDownloadWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
     private val localModelDao: LocalModelDao,
-    private val huggingFaceTokenStore: HuggingFaceTokenStore
+    private val huggingFaceTokenStore: HuggingFaceTokenStore,
+    private val pendingLocalPlatformActivator: PendingLocalPlatformActivator
 ) : CoroutineWorker(context, params) {
 
     private val notificationManager = context.getSystemService(NotificationManager::class.java)
@@ -80,6 +82,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
                     accessToken = accessToken
                 )
                 markStatus(catalogEntryId, LocalModelStatus.READY)
+                runCatching { pendingLocalPlatformActivator.onModelsBecameReady(setOf(catalogEntryId)) }
                 Result.success()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -131,6 +134,7 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         totalBytes: Long,
         accessToken: String?
     ) {
+        LocalModelDownloadPaths.requireValidPathSegments(catalogEntryId, commitHash, fileName)
         val storageRoot = applicationContext.getExternalFilesDir(null) ?: applicationContext.filesDir
         val outputDir = File(storageRoot, LocalModelDownloadPaths.relativeDirectory(catalogEntryId, commitHash))
         if (!outputDir.exists() && !outputDir.mkdirs()) {
@@ -140,16 +144,14 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         val outputTmpFile = File(outputDir, LocalModelDownloadPaths.partialFileName(fileName))
         val partialLength = outputTmpFile.length()
         publishSeededProgress(partialLength, totalBytes, displayName)
-        val connection = URL(downloadUrl).openConnection() as HttpURLConnection
+        val connection = HuggingFaceDownloadAuth.openConnection(
+            url = downloadUrl,
+            accessToken = accessToken,
+            extraHeaders = LocalModelDownloadPaths.resumeHeaders(partialLength),
+            connectTimeoutMs = CONNECT_TIMEOUT_MS,
+            readTimeoutMs = READ_TIMEOUT_MS
+        )
         try {
-            if (accessToken != null) {
-                connection.setRequestProperty("Authorization", HuggingFaceTokenStore.bearerHeader(accessToken))
-            }
-            LocalModelDownloadPaths.resumeHeaders(partialLength).forEach { (header, value) ->
-                connection.setRequestProperty(header, value)
-            }
-            connection.connect()
-
             val responseCode = connection.responseCode
             if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED ||
                 responseCode == HttpURLConnection.HTTP_FORBIDDEN
@@ -226,6 +228,10 @@ class LocalModelDownloadWorker @AssistedInject constructor(
             }
         } finally {
             connection.disconnect()
+        }
+
+        if (!LocalModelDownloadPaths.isCompleteDownload(outputTmpFile.length(), totalBytes)) {
+            throw IOException("Incomplete Local Model download")
         }
 
         val originalFile = File(outputDir, fileName)
@@ -314,6 +320,8 @@ class LocalModelDownloadWorker @AssistedInject constructor(
         private const val CHANNEL_ID = "local_model_downloads"
         private const val PROGRESS_INTERVAL_MS = 200L
         private const val RATE_WINDOW = 5
+        private const val CONNECT_TIMEOUT_MS = 15_000
+        private const val READ_TIMEOUT_MS = 30_000
 
         fun idTag(catalogEntryId: String): String = "$ID_TAG_PREFIX$catalogEntryId"
 

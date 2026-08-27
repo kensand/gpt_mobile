@@ -21,12 +21,12 @@ class LocalModelDownloadProberTest {
     }
 
     @Test
-    fun `probe attaches a bearer token when present`() {
+    fun `probe does not attach a bearer token to non-huggingface urls`() {
         ProbeServer(statusCode = 200).use { server ->
             val status = LocalModelDownloadProberImpl().probe(server.url, accessToken = "hf_secret")
 
             assertEquals(200, status)
-            assertEquals("Bearer hf_secret", server.authorizationHeader)
+            assertEquals(null, server.authorizationHeader)
         }
     }
 

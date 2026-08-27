@@ -132,6 +132,40 @@ class LocalModelDownloadPathsTest {
                 contentRangeHeader = "bytes 1024-2047/2048"
             )
         )
+        assertFalse(
+            LocalModelDownloadPaths.shouldAppendToPartial(
+                partialLength = 1024L,
+                contentRangeHeader = "bytes 0-2047/2048"
+            )
+        )
+    }
+
+    @Test
+    fun `completed download size must match the known total`() {
+        assertTrue(LocalModelDownloadPaths.isCompleteDownload(tmpLength = 2048L, totalBytes = 2048L))
+        assertTrue(LocalModelDownloadPaths.isCompleteDownload(tmpLength = 100L, totalBytes = 0L))
+        assertFalse(LocalModelDownloadPaths.isCompleteDownload(tmpLength = 1024L, totalBytes = 2048L))
+    }
+
+    @Test
+    fun `path segments reject separators parent traversal and empty values`() {
+        assertTrue(LocalModelDownloadPaths.isValidPathSegment("qwen2.5-1.5b-instruct"))
+        assertTrue(LocalModelDownloadPaths.isValidPathSegment("19edb84c69a0212f29a6ef17ba0d6f278b6a1614"))
+        assertTrue(LocalModelDownloadPaths.isValidPathSegment("model.litertlm"))
+        assertFalse(LocalModelDownloadPaths.isValidPathSegment(""))
+        assertFalse(LocalModelDownloadPaths.isValidPathSegment(".."))
+        assertFalse(LocalModelDownloadPaths.isValidPathSegment("foo/bar"))
+        assertFalse(LocalModelDownloadPaths.isValidPathSegment("foo\\bar"))
+    }
+
+    @Test
+    fun `relative paths reject invalid segments before construction`() {
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            LocalModelDownloadPaths.relativeDirectory("../evil", "abc123")
+        }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            LocalModelDownloadPaths.relativeFilePath("qwen", "abc123", "..")
+        }
     }
 
     @Test

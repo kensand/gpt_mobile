@@ -47,6 +47,22 @@ class DownloadErrorClassifierTest {
     }
 
     @Test
+    fun `http 429 and 408 are transient while other 4xx stay permanent`() {
+        assertEquals(
+            DownloadRetryClass.TRANSIENT,
+            DownloadErrorClassifier.classify(IOException("HTTP error code: 429"), hadProgress = false)
+        )
+        assertEquals(
+            DownloadRetryClass.TRANSIENT,
+            DownloadErrorClassifier.classify(IOException("HTTP error code: 408"), hadProgress = false)
+        )
+        assertEquals(
+            DownloadRetryClass.PERMANENT,
+            DownloadErrorClassifier.classify(IOException("HTTP error code: 400"), hadProgress = false)
+        )
+    }
+
+    @Test
     fun `retries stop after the attempt cap`() {
         assertTrue(DownloadErrorClassifier.shouldRetry(DownloadRetryClass.TRANSIENT, runAttemptCount = 0))
         assertTrue(DownloadErrorClassifier.shouldRetry(DownloadRetryClass.TRANSIENT, runAttemptCount = 3))

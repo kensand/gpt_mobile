@@ -19,6 +19,7 @@ class DownloadAuthException(
 
 object DownloadErrorClassifier {
     const val MAX_ATTEMPTS = 4
+    private const val HTTP_TOO_MANY_REQUESTS = 429
 
     fun classify(error: Throwable, hadProgress: Boolean = true): DownloadRetryClass {
         if (error is DownloadAuthException) return DownloadRetryClass.PERMANENT
@@ -27,6 +28,7 @@ object DownloadErrorClassifier {
             .joinToString(" ")
             .lowercase()
         if (isInsufficientStorage(messages)) return DownloadRetryClass.PERMANENT
+        if (isTransientHttp(messages)) return DownloadRetryClass.TRANSIENT
         if (isPermanentHttp(messages)) return DownloadRetryClass.PERMANENT
         if (isTransientNetwork(error, messages)) return DownloadRetryClass.TRANSIENT
         return if (hadProgress) DownloadRetryClass.TRANSIENT else DownloadRetryClass.PERMANENT
@@ -43,12 +45,17 @@ object DownloadErrorClassifier {
         "insufficient storage" in messages ||
         "not enough space" in messages
 
+    private fun isTransientHttp(messages: String): Boolean {
+        val code = httpStatusCode(messages) ?: return false
+        return code == HTTP_TOO_MANY_REQUESTS || code == HttpURLConnection.HTTP_CLIENT_TIMEOUT
+    }
+
     private fun isPermanentHttp(messages: String): Boolean {
         val code = httpStatusCode(messages) ?: return false
         return code == HttpURLConnection.HTTP_UNAUTHORIZED ||
             code == HttpURLConnection.HTTP_FORBIDDEN ||
             code == HttpURLConnection.HTTP_NOT_FOUND ||
-            (code in 400..499 && code != HttpURLConnection.HTTP_CLIENT_TIMEOUT)
+            (code in 400..499 && !isTransientHttp(messages))
     }
 
     private fun isTransientNetwork(error: Throwable, messages: String): Boolean {
