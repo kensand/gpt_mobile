@@ -1024,11 +1024,7 @@ class LiteRtLmAdapterTest {
                 listOf(LocalRuntimeEvent.TextDelta("next"), LocalRuntimeEvent.Done)
             )
         }
-        val persisted = mutableListOf<Pair<String, String>>()
-        val adapter = adapter(
-            runtime,
-            persistAcceleratorFallback = { uid, accelerator -> persisted += uid to accelerator }
-        )
+        val adapter = adapter(runtime)
         val platform = localPlatform()
 
         val first = adapter.openSession(turns("hello"), platform).streamRound(emptyList(), emptyList()).toList()
@@ -1047,7 +1043,6 @@ class LiteRtLmAdapterTest {
         )
         assertEquals(listOf(LocalAccelerators.CPU), runtime.loadEngineCalls.drop(2).map { it.accelerator })
         assertFalse(second.any { it is ProviderEvent.Notice && it.message == LiteRtLmAdapter.DEFAULT_GPU_UNAVAILABLE })
-        assertEquals(listOf("local" to LocalAccelerators.CPU), persisted)
     }
 
     @Test
@@ -1108,7 +1103,6 @@ class LiteRtLmAdapterTest {
         ),
         catalog: ModelCatalogRepository = FakeModelCatalogRepository(),
         loadingModelNotice: String = "",
-        persistAcceleratorFallback: (suspend (String, String) -> Unit)? = null,
         loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { attachment ->
             attachment.preparedFilePath.ifBlank { attachment.localFilePath }.toByteArray()
         }
@@ -1119,7 +1113,6 @@ class LiteRtLmAdapterTest {
         modelNotDownloadedError = LiteRtLmAdapter.DEFAULT_MODEL_NOT_DOWNLOADED,
         tooManyImagesNotice = LiteRtLmAdapter.DEFAULT_TOO_MANY_IMAGES,
         loadingModelNotice = loadingModelNotice,
-        persistAcceleratorFallback = persistAcceleratorFallback,
         modelCatalogRepository = catalog,
         loadImageBytes = loadImageBytes
     )

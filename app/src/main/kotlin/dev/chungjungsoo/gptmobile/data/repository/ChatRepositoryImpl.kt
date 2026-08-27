@@ -39,7 +39,6 @@ import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.dto.ApiState
-import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalRuntime
 import dev.chungjungsoo.gptmobile.data.model.ApiType
 import dev.chungjungsoo.gptmobile.data.model.ClientType
@@ -116,12 +115,6 @@ class ChatRepositoryImpl @Inject constructor(
             R.string.local_platform_engine_load_failed,
             LiteRtLmAdapter.DEFAULT_ENGINE_LOAD_FAILED
         ),
-        persistAcceleratorFallback = { platformUid, accelerator ->
-            val current = settingRepository.fetchPlatformV2s().firstOrNull { it.uid == platformUid }
-            if (current != null && LocalAccelerators.normalize(current.accelerator) != accelerator) {
-                settingRepository.updatePlatformV2(current.copy(accelerator = accelerator))
-            }
-        },
         modelCatalogRepository = modelCatalogRepository,
         loadImageBytes = { attachment ->
             val filePath = attachment.preparedFilePath.ifBlank { attachment.localFilePath }

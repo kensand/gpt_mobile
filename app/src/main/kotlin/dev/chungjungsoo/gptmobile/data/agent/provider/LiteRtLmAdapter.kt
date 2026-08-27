@@ -44,7 +44,6 @@ class LiteRtLmAdapter(
     private val loadingModelNotice: String = DEFAULT_LOADING_MODEL,
     private val gpuUnavailableNotice: String = DEFAULT_GPU_UNAVAILABLE,
     private val engineLoadFailedError: String = DEFAULT_ENGINE_LOAD_FAILED,
-    private val persistAcceleratorFallback: (suspend (String, String) -> Unit)? = null,
     private val modelCatalogRepository: ModelCatalogRepository? = null,
     private val loadImageBytes: suspend (ChatAttachment) -> ByteArray? = { null }
 ) {
@@ -136,7 +135,7 @@ class LiteRtLmAdapter(
                         if (!isEngineLoaded(spec) && loadingModelNotice.isNotBlank()) {
                             send(ProviderEvent.Notice(loadingModelNotice))
                         }
-                        val loadedSpec = loadEngineOrFallback(spec, platform.uid) { event -> send(event) }
+                        val loadedSpec = loadEngineOrFallback(spec) { event -> send(event) }
                         val snapshot = openConversation
                         val canReuse = !isConversationDirty &&
                             hasOpenConversation() &&
@@ -325,7 +324,6 @@ class LiteRtLmAdapter(
 
     private suspend fun LocalRuntime.loadEngineOrFallback(
         requested: LocalEngineSpec,
-        platformUid: String,
         send: suspend (ProviderEvent) -> Unit
     ): LocalEngineSpec {
         try {
@@ -350,9 +348,6 @@ class LiteRtLmAdapter(
             cpuFallbackByModelPath[requested.modelPath] = true
             if (gpuUnavailableNotice.isNotBlank()) {
                 send(ProviderEvent.Notice(gpuUnavailableNotice, persistent = true))
-            }
-            persistAcceleratorFallback?.let { persist ->
-                runCatching { persist(platformUid, LocalAccelerators.CPU) }
             }
             return cpuSpec
         }
