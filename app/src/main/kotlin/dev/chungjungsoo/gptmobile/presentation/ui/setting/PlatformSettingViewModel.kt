@@ -13,6 +13,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
+import dev.chungjungsoo.gptmobile.data.localruntime.AcceleratorOption
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.localruntime.localSamplingDefaults
 import dev.chungjungsoo.gptmobile.data.model.ClientType
@@ -74,9 +75,9 @@ class PlatformSettingViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val acceleratorOptions: StateFlow<List<String>> = combine(_platformState, _catalogEntries) { platform, catalog ->
+    val acceleratorOptions: StateFlow<List<AcceleratorOption>> = combine(_platformState, _catalogEntries) { platform, catalog ->
         val entry = catalog.firstOrNull { it.id == platform?.model }
-        LocalAccelerators.selectable(
+        LocalAccelerators.choices(
             supported = entry?.supportedAccelerators.orEmpty(),
             socToModelFiles = entry?.socToModelFiles.orEmpty(),
             deviceSocModel = deviceSocModel
@@ -279,8 +280,8 @@ class PlatformSettingViewModel @Inject constructor(
         ) {
             return
         }
-        val options = acceleratorOptions.value
-        if (options.isNotEmpty() && normalized !in options) return
+        val option = acceleratorOptions.value.firstOrNull { it.accelerator == normalized }
+        if (option?.enabled != true) return
         _platformState.value?.let { platform ->
             updatePlatform(platform.copy(accelerator = normalized))
             closeAcceleratorDialog()

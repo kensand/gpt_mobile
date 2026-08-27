@@ -123,6 +123,56 @@ class LocalAcceleratorsTest {
     }
 
     @Test
+    fun `choices always lists CPU GPU and NPU`() {
+        val choices = LocalAccelerators.choices(
+            supported = listOf("gpu"),
+            socToModelFiles = emptyMap<String, Any>(),
+            deviceSocModel = "Tensor G4"
+        )
+
+        assertEquals(
+            listOf(LocalAccelerators.CPU, LocalAccelerators.GPU, LocalAccelerators.NPU),
+            choices.map { it.accelerator }
+        )
+        assertFalse(choices.single { it.accelerator == LocalAccelerators.CPU }.enabled)
+        assertTrue(choices.single { it.accelerator == LocalAccelerators.GPU }.enabled)
+        assertEquals(
+            AcceleratorUnavailableReason.MODEL_HAS_NO_BUILD,
+            choices.single { it.accelerator == LocalAccelerators.CPU }.unavailableReason
+        )
+        assertEquals(
+            AcceleratorUnavailableReason.MODEL_HAS_NO_BUILD,
+            choices.single { it.accelerator == LocalAccelerators.NPU }.unavailableReason
+        )
+    }
+
+    @Test
+    fun `NPU is disabled for device reason when variants omit this SOC`() {
+        val choices = LocalAccelerators.choices(
+            supported = listOf("cpu", "gpu", "npu"),
+            socToModelFiles = mapOf("SM8650" to VARIANT),
+            deviceSocModel = "Tensor G4"
+        )
+
+        val npu = choices.single { it.accelerator == LocalAccelerators.NPU }
+        assertFalse(npu.enabled)
+        assertEquals(AcceleratorUnavailableReason.DEVICE_NOT_SUPPORTED, npu.unavailableReason)
+    }
+
+    @Test
+    fun `NPU is enabled when the model and device SOC qualify`() {
+        val choices = LocalAccelerators.choices(
+            supported = listOf("cpu", "gpu", "npu"),
+            socToModelFiles = mapOf("Tensor G4" to VARIANT),
+            deviceSocModel = "Tensor G4"
+        )
+
+        val npu = choices.single { it.accelerator == LocalAccelerators.NPU }
+        assertTrue(npu.enabled)
+        assertEquals(null, npu.unavailableReason)
+    }
+
+    @Test
     fun `sampler config is skipped on NPU`() {
         assertFalse(LocalAccelerators.shouldApplySampler(LocalAccelerators.NPU))
         assertTrue(LocalAccelerators.shouldApplySampler(LocalAccelerators.CPU))

@@ -139,6 +139,10 @@
     <string name="accelerator_cpu">CPU</string>
     <string name="accelerator_gpu">GPU</string>
     <string name="accelerator_npu">NPU</string>
+    <string name="accelerator_unavailable_model_no_cpu_build">This model has no CPU build</string>
+    <string name="accelerator_unavailable_model_no_gpu_build">This model has no GPU build</string>
+    <string name="accelerator_unavailable_model_no_npu_build">This model has no NPU build</string>
+    <string name="accelerator_unavailable_device_npu">This device\'s NPU isn\'t supported</string>
     <string name="timeout">Timeout</string>
     <string name="timeout_icon">Timeout Icon</string>
     <string name="timeout_seconds_label">Timeout (seconds)</string>

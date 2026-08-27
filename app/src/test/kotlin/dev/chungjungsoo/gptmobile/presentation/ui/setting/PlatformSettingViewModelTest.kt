@@ -17,6 +17,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.dto.Platform
 import dev.chungjungsoo.gptmobile.data.dto.ThemeSetting
+import dev.chungjungsoo.gptmobile.data.localruntime.AcceleratorUnavailableReason
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.network.NetworkClient
@@ -178,7 +179,7 @@ class PlatformSettingViewModelTest {
     }
 
     @Test
-    fun `accelerator options are CPU and GPU supported by the catalog entry`() = runTest {
+    fun `accelerator options always list CPU GPU and NPU with enabled flags`() = runTest {
         val viewModel = localSettingsViewModel(
             settings = FakeSettingRepository(localPlatform(model = "gpu-only")),
             catalog = FakeModelCatalogRepository(
@@ -189,11 +190,26 @@ class PlatformSettingViewModelTest {
             )
         )
 
-        assertEquals(listOf(LocalAccelerators.GPU), viewModel.acceleratorOptions.value)
+        val options = viewModel.acceleratorOptions.value
+        assertEquals(
+            listOf(LocalAccelerators.CPU, LocalAccelerators.GPU, LocalAccelerators.NPU),
+            options.map { it.accelerator }
+        )
+        assertFalse(options.single { it.accelerator == LocalAccelerators.CPU }.enabled)
+        assertTrue(options.single { it.accelerator == LocalAccelerators.GPU }.enabled)
+        assertFalse(options.single { it.accelerator == LocalAccelerators.NPU }.enabled)
+        assertEquals(
+            AcceleratorUnavailableReason.MODEL_HAS_NO_BUILD,
+            options.single { it.accelerator == LocalAccelerators.CPU }.unavailableReason
+        )
+        assertEquals(
+            AcceleratorUnavailableReason.MODEL_HAS_NO_BUILD,
+            options.single { it.accelerator == LocalAccelerators.NPU }.unavailableReason
+        )
     }
 
     @Test
-    fun `accelerator options omit NPU when the device has no matching SOC variant`() = runTest {
+    fun `NPU is listed disabled with a model reason when there is no SOC variant`() = runTest {
         val viewModel = localSettingsViewModel(
             settings = FakeSettingRepository(localPlatform(model = "cpu-gpu")),
             catalog = FakeModelCatalogRepository(
@@ -201,11 +217,34 @@ class PlatformSettingViewModelTest {
             )
         )
 
-        assertEquals(listOf(LocalAccelerators.CPU, LocalAccelerators.GPU), viewModel.acceleratorOptions.value)
+        val npu = viewModel.acceleratorOptions.value.single { it.accelerator == LocalAccelerators.NPU }
+        assertFalse(npu.enabled)
+        assertEquals(AcceleratorUnavailableReason.MODEL_HAS_NO_BUILD, npu.unavailableReason)
     }
 
     @Test
-    fun `accelerator options include NPU when the model and device SOC qualify`() = runTest {
+    fun `NPU is listed disabled with a device reason when this SOC is missing`() = runTest {
+        val viewModel = localSettingsViewModel(
+            settings = FakeSettingRepository(localPlatform(model = "cpu-gpu")),
+            catalog = FakeModelCatalogRepository(
+                listOf(
+                    catalogEntry(
+                        id = "cpu-gpu",
+                        supportedAccelerators = listOf("npu", "cpu", "gpu"),
+                        socToModelFiles = mapOf("SM8650" to SocVariant(modelFile = "npu.litertlm"))
+                    )
+                )
+            ),
+            deviceSocModel = "Tensor G4"
+        )
+
+        val npu = viewModel.acceleratorOptions.value.single { it.accelerator == LocalAccelerators.NPU }
+        assertFalse(npu.enabled)
+        assertEquals(AcceleratorUnavailableReason.DEVICE_NOT_SUPPORTED, npu.unavailableReason)
+    }
+
+    @Test
+    fun `accelerator options include enabled NPU when the model and device SOC qualify`() = runTest {
         val viewModel = localSettingsViewModel(
             settings = FakeSettingRepository(localPlatform(model = "cpu-gpu")),
             catalog = FakeModelCatalogRepository(
@@ -220,10 +259,12 @@ class PlatformSettingViewModelTest {
             deviceSocModel = "SM8650"
         )
 
+        val options = viewModel.acceleratorOptions.value
         assertEquals(
             listOf(LocalAccelerators.CPU, LocalAccelerators.GPU, LocalAccelerators.NPU),
-            viewModel.acceleratorOptions.value
+            options.map { it.accelerator }
         )
+        assertTrue(options.all { it.enabled })
     }
 
     @Test

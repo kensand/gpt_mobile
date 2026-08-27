@@ -28,14 +28,26 @@ fun RadioItem(
     selected: Boolean = false,
     title: String = stringResource(R.string.sample_item_title),
     description: String? = stringResource(R.string.sample_item_description),
+    enabled: Boolean = true,
     onSelected: (String) -> Unit = { }
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val titleColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    val descriptionColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .selectable(
                 selected = selected,
+                enabled = enabled,
                 onClick = { onSelected(value) },
                 interactionSource = interactionSource,
                 indication = LocalIndication.current,
@@ -47,6 +59,7 @@ fun RadioItem(
         RadioButton(
             selected = selected,
             onClick = null,
+            enabled = enabled,
             interactionSource = interactionSource
         )
         Column(
@@ -55,12 +68,14 @@ fun RadioItem(
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium,
+                color = titleColor
             )
             description?.let {
                 Text(
                     text = it,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    color = descriptionColor
                 )
             }
         }

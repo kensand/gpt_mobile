@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.localruntime.AcceleratorOption
+import dev.chungjungsoo.gptmobile.data.localruntime.AcceleratorUnavailableReason
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.model.GeminiSafetySettings
 import dev.chungjungsoo.gptmobile.presentation.common.RadioItem
@@ -163,7 +165,7 @@ fun MaxTokensDialog(
 fun AcceleratorDialog(
     dialogState: PlatformSettingViewModel.DialogState,
     accelerator: String?,
-    options: List<String>,
+    options: List<AcceleratorOption>,
     settingViewModel: PlatformSettingViewModel
 ) {
     if (dialogState.isAcceleratorDialogOpen) {
@@ -684,7 +686,7 @@ private fun MaxTokensDialog(
 @Composable
 private fun AcceleratorDialog(
     accelerator: String?,
-    options: List<String>,
+    options: List<AcceleratorOption>,
     onDismissRequest: () -> Unit,
     onConfirmRequest: (String) -> Unit
 ) {
@@ -703,12 +705,15 @@ private fun AcceleratorDialog(
                 Text(stringResource(R.string.accelerator_setting_description))
                 options.forEach { option ->
                     RadioItem(
-                        title = acceleratorTitle(option),
-                        description = null,
-                        value = option,
-                        selected = LocalAccelerators.normalize(accelerator) == option
+                        title = acceleratorTitle(option.accelerator),
+                        description = acceleratorUnavailableReason(option),
+                        value = option.accelerator,
+                        selected = LocalAccelerators.normalize(accelerator) == option.accelerator,
+                        enabled = option.enabled
                     ) {
-                        onConfirmRequest(option)
+                        if (option.enabled) {
+                            onConfirmRequest(option.accelerator)
+                        }
                     }
                 }
             }
@@ -727,6 +732,22 @@ private fun acceleratorTitle(accelerator: String): String = when (accelerator) {
     LocalAccelerators.GPU -> stringResource(R.string.accelerator_gpu)
     LocalAccelerators.NPU -> stringResource(R.string.accelerator_npu)
     else -> stringResource(R.string.accelerator_cpu)
+}
+
+@Composable
+private fun acceleratorUnavailableReason(option: AcceleratorOption): String? {
+    if (option.enabled) return null
+    return when (option.unavailableReason) {
+        AcceleratorUnavailableReason.DEVICE_NOT_SUPPORTED -> stringResource(R.string.accelerator_unavailable_device_npu)
+
+        AcceleratorUnavailableReason.MODEL_HAS_NO_BUILD -> when (option.accelerator) {
+            LocalAccelerators.GPU -> stringResource(R.string.accelerator_unavailable_model_no_gpu_build)
+            LocalAccelerators.NPU -> stringResource(R.string.accelerator_unavailable_model_no_npu_build)
+            else -> stringResource(R.string.accelerator_unavailable_model_no_cpu_build)
+        }
+
+        null -> null
+    }
 }
 
 @Composable
