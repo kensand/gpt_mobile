@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.agent.tool.AgentToolResolver
 import dev.chungjungsoo.gptmobile.data.agent.tool.namespaceMcpToolName
 import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
@@ -92,6 +93,9 @@ class PlatformSettingViewModel @Inject constructor(
     private val _isDeleted = MutableStateFlow(false)
     val isDeleted: StateFlow<Boolean> = _isDeleted.asStateFlow()
 
+    private val _userMessage = MutableStateFlow<Int?>(null)
+    val userMessage: StateFlow<Int?> = _userMessage.asStateFlow()
+
     private val _toolBindingState = MutableStateFlow(ToolBindingState())
     val toolBindingState: StateFlow<ToolBindingState> = _toolBindingState.asStateFlow()
     private var mcpDiscoveryJob: Job? = null
@@ -144,9 +148,24 @@ class PlatformSettingViewModel @Inject constructor(
     }
 
     fun toggleEnabled() {
-        _platformState.value?.let { platform ->
-            updatePlatform(platform.copy(enabled = !platform.enabled))
+        val platform = _platformState.value ?: return
+        val enabling = !platform.enabled
+        if (enabling && platform.compatibleType == ClientType.LITERT_LM) {
+            viewModelScope.launch {
+                val model = localModelRepository.getById(platform.model)
+                if (model?.status != LocalModelStatus.READY) {
+                    _userMessage.value = R.string.local_platform_enable_model_not_ready
+                    return@launch
+                }
+                updatePlatform(platform.copy(enabled = true))
+            }
+            return
         }
+        updatePlatform(platform.copy(enabled = !platform.enabled))
+    }
+
+    fun consumeUserMessage() {
+        _userMessage.value = null
     }
 
     fun toggleReasoning() {
@@ -240,9 +259,9 @@ class PlatformSettingViewModel @Inject constructor(
             model = catalogEntryId,
             temperature = defaults?.temperature ?: platform.temperature,
             topP = defaults?.topP ?: platform.topP,
-            topK = defaults?.topK,
-            maxTokens = defaults?.maxTokens,
-            accelerator = defaults?.accelerator
+            topK = defaults?.topK ?: platform.topK,
+            maxTokens = defaults?.maxTokens ?: platform.maxTokens,
+            accelerator = defaults?.accelerator ?: platform.accelerator
         )
     }
 

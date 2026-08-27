@@ -115,13 +115,30 @@ class LocalModelsViewModelTest {
     }
 
     @Test
-    fun `retry of a failed download skips ram and metered guards`() = runTest {
+    fun `retry of a failed download skips ram but re-checks metered connection`() = runTest {
         val localModels = FakeLocalModelRepository(
             listOf(wizardStoredModel("pending-model", status = LocalModelStatus.FAILED))
         )
         val viewModel = localModelsViewModel(
             localModels = localModels,
             guards = FakeLocalDownloadGuards(metered = true, lowRamEntryIds = setOf("pending-model"))
+        )
+        val entry = viewModel.uiState.value.items.single { it.entry.id == "pending-model" }.entry
+
+        viewModel.onDownloadClick(entry)
+
+        assertTrue(localModels.startDownloadCalls.isEmpty())
+        assertTrue(viewModel.uiState.value.dialog is LocalModelsDialog.MeteredConfirm)
+    }
+
+    @Test
+    fun `retry of a failed download on unmetered starts immediately even when ram is low`() = runTest {
+        val localModels = FakeLocalModelRepository(
+            listOf(wizardStoredModel("pending-model", status = LocalModelStatus.FAILED))
+        )
+        val viewModel = localModelsViewModel(
+            localModels = localModels,
+            guards = FakeLocalDownloadGuards(metered = false, lowRamEntryIds = setOf("pending-model"))
         )
         val entry = viewModel.uiState.value.items.single { it.entry.id == "pending-model" }.entry
 

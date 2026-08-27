@@ -11,12 +11,14 @@ import dev.chungjungsoo.gptmobile.data.catalog.SocVariant
 import dev.chungjungsoo.gptmobile.data.database.dao.AgentToolBindingWithConnection
 import dev.chungjungsoo.gptmobile.data.database.dao.ToolConnectionDao
 import dev.chungjungsoo.gptmobile.data.database.entity.AgentToolBinding
+import dev.chungjungsoo.gptmobile.data.database.entity.LocalModel
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnection
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionAuthType
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolConnectionType
 import dev.chungjungsoo.gptmobile.data.dto.Platform
 import dev.chungjungsoo.gptmobile.data.dto.ThemeSetting
+import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.localruntime.AcceleratorUnavailableReason
 import dev.chungjungsoo.gptmobile.data.localruntime.LocalAccelerators
 import dev.chungjungsoo.gptmobile.data.model.ClientType
@@ -373,6 +375,80 @@ class PlatformSettingViewModelTest {
         assertEquals(20, updated.topK)
         assertEquals(4096, updated.maxTokens)
         assertEquals(LocalAccelerators.CPU, updated.accelerator)
+    }
+
+    @Test
+    fun `changing the local model preserves sampling fields when catalog defaults are missing`() = runTest {
+        val settings = FakeSettingRepository(
+            localPlatform(
+                model = "gemma3-1b-it",
+                temperature = 0.2f,
+                topP = 0.4f,
+                topK = 8,
+                maxTokens = 256,
+                accelerator = LocalAccelerators.CPU
+            )
+        )
+        val viewModel = localSettingsViewModel(
+            settings = settings,
+            catalog = FakeModelCatalogRepository(
+                listOf(catalogEntry("gemma3-1b-it", supportedAccelerators = listOf("cpu", "gpu")))
+            )
+        )
+
+        viewModel.updateApiModel("unknown-model")
+
+        val updated = settings.updatedPlatforms.single()
+        assertEquals("unknown-model", updated.model)
+        assertEquals(0.2f, updated.temperature)
+        assertEquals(0.4f, updated.topP)
+        assertEquals(8, updated.topK)
+        assertEquals(256, updated.maxTokens)
+        assertEquals(LocalAccelerators.CPU, updated.accelerator)
+    }
+
+    @Test
+    fun `enabling a local platform without a ready model stays disabled and explains why`() = runTest {
+        val settings = FakeSettingRepository(localPlatform().copy(enabled = false, model = "pending-model"))
+        val viewModel = localSettingsViewModel(
+            settings = settings,
+            localModels = FakeLocalModelRepository()
+        )
+
+        viewModel.toggleEnabled()
+
+        assertFalse(viewModel.platformState.value!!.enabled)
+        assertTrue(settings.updatedPlatforms.isEmpty())
+        assertEquals(
+            dev.chungjungsoo.gptmobile.R.string.local_platform_enable_model_not_ready,
+            viewModel.userMessage.value
+        )
+    }
+
+    @Test
+    fun `enabling a local platform with a ready model succeeds`() = runTest {
+        val settings = FakeSettingRepository(localPlatform().copy(enabled = false, model = "ready-model"))
+        val viewModel = localSettingsViewModel(
+            settings = settings,
+            localModels = FakeLocalModelRepository(
+                listOf(
+                    LocalModel(
+                        catalogEntryId = "ready-model",
+                        commitHash = "hash",
+                        fileName = "ready-model.litertlm",
+                        relativeDirectory = "models/ready-model/hash",
+                        totalBytes = 10L,
+                        status = LocalModelStatus.READY
+                    )
+                )
+            )
+        )
+
+        viewModel.toggleEnabled()
+
+        assertTrue(viewModel.platformState.value!!.enabled)
+        assertTrue(settings.updatedPlatforms.single().enabled)
+        assertNull(viewModel.userMessage.value)
     }
 
     private fun localSettingsViewModel(

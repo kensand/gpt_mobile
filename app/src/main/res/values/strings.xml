@@ -295,6 +295,9 @@
     <string name="local_platform_waiting_for_engine">Waiting for the local engine</string>
     <string name="local_platform_loading_model">Loading local model…</string>
     <string name="local_platform_gpu_unavailable_cpu">GPU unavailable on this device — running on CPU</string>
+    <string name="local_platform_npu_unavailable_cpu">NPU unavailable on this device — running on CPU</string>
+    <string name="local_platform_enable_model_not_ready">Download this Local Model before enabling the platform.</string>
+    <string name="local_model_open_link_failed">Couldn\'t open the link</string>
     <string name="local_platform_engine_load_failed">Couldn\'t load the local model on this device</string>
     <string name="local_platform_basics_description">Give this Local Platform a name. It will run a Local Model on-device.</string>
     <string name="api_url_hint">https://api.example.com</string>

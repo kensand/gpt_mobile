@@ -46,6 +46,29 @@ class PendingLocalPlatformActivatorTest {
     }
 
     @Test
+    fun `direct ready notification enables matching platforms even when already READY`() = runTest {
+        val localModels = FakeLocalModelRepository(
+            listOf(wizardStoredModel("ready-model", LocalModelStatus.READY))
+        )
+        val settings = RecordingPlatformRepository(
+            listOf(localPlatform("pending-local", "ready-model", enabled = false))
+        )
+        val activator = PendingLocalPlatformActivator(
+            localModelRepository = localModels,
+            settingRepository = settings,
+            scope = CoroutineScope(UnconfinedTestDispatcher())
+        )
+
+        activator.start()
+        assertTrue(settings.updatedPlatforms.isEmpty())
+
+        activator.onModelsBecameReady(setOf("ready-model"))
+
+        assertEquals(listOf("pending-local"), settings.updatedPlatforms.map { it.name })
+        assertTrue(settings.updatedPlatforms.single().enabled)
+    }
+
+    @Test
     fun `already READY at observation start does not enable user-disabled platforms`() = runTest {
         val localModels = FakeLocalModelRepository(
             listOf(wizardStoredModel("ready-model", LocalModelStatus.READY))

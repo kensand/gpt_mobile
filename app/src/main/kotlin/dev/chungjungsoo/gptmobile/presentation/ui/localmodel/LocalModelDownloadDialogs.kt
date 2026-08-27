@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
@@ -133,12 +134,16 @@ fun LocalModelDownloadDialogHost(
         }
 
         is LocalModelsDialog.License -> {
+            val context = LocalContext.current
             HuggingFaceLicenseSheet(
                 onOpenAgreement = {
-                    runCatching {
+                    val launched = runCatching {
                         val customTabsIntent = CustomTabsIntent.Builder().build()
                         customTabsIntent.intent.data = dialog.modelPageUrl.toUri()
                         licenseTabLauncher.launch(customTabsIntent.intent)
+                    }.isSuccess
+                    if (!launched) {
+                        Toast.makeText(context, R.string.local_model_open_link_failed, Toast.LENGTH_SHORT).show()
                     }
                 },
                 onRetry = onRetryAfterLicense,
@@ -300,9 +305,12 @@ private fun HuggingFaceAccessTokenDialog(
                 )
                 TextButton(
                     onClick = {
-                        runCatching {
+                        val launched = runCatching {
                             CustomTabsIntent.Builder().build()
                                 .launchUrl(context, HuggingFaceUrls.ACCESS_TOKENS_URL.toUri())
+                        }.isSuccess
+                        if (!launched) {
+                            Toast.makeText(context, R.string.local_model_open_link_failed, Toast.LENGTH_SHORT).show()
                         }
                     }
                 ) {

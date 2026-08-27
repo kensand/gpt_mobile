@@ -41,7 +41,7 @@ class PendingLocalPlatformActivator(
                         status == LocalModelStatus.READY && previousStatuses[id] != LocalModelStatus.READY
                     }.keys
                     if (newlyReady.isNotEmpty()) {
-                        enableMatchingPlatforms(newlyReady)
+                        onModelsBecameReady(newlyReady)
                     }
                 }
                 previousStatuses = current
@@ -50,7 +50,7 @@ class PendingLocalPlatformActivator(
         }
     }
 
-    private suspend fun enableMatchingPlatforms(catalogEntryIds: Set<String>) {
+    suspend fun onModelsBecameReady(catalogEntryIds: Set<String>) {
         settingRepository.fetchPlatformV2s()
             .filter { platform ->
                 !platform.enabled &&

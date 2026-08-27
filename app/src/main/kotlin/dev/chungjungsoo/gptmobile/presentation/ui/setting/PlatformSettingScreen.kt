@@ -93,6 +93,7 @@ fun PlatformSettingScreen(
     val toolBindingState by settingViewModel.toolBindingState.collectAsStateWithLifecycle()
     val downloadedLocalModels by settingViewModel.downloadedLocalModels.collectAsStateWithLifecycle()
     val acceleratorOptions by settingViewModel.acceleratorOptions.collectAsStateWithLifecycle()
+    val userMessage by settingViewModel.userMessage.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var openMcpToolsAfterPermission by remember { mutableStateOf(false) }
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
@@ -109,6 +110,13 @@ fun PlatformSettingScreen(
     LaunchedEffect(isDeleted) {
         if (isDeleted) {
             onNavigationClick()
+        }
+    }
+
+    LaunchedEffect(userMessage) {
+        userMessage?.let { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            settingViewModel.consumeUserMessage()
         }
     }
 

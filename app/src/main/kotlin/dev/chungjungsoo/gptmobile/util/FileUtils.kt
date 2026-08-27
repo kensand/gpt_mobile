@@ -111,7 +111,13 @@ object FileUtils {
         } ?: return null
 
         return try {
-            val bitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return rawBytes
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return rawBytes
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = calculateImageInSampleSize(bounds.outWidth, bounds.outHeight)
+            }
+            val bitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOptions) ?: return rawBytes
             try {
                 val output = ByteArrayOutputStream()
                 if (bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {

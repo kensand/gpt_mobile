@@ -38,7 +38,11 @@ class LocalModelDownloadActions(
             return
         }
         if (currentStatus == LocalModelItemStatus.FAILED) {
-            beginDownload(entry)
+            if (downloadGuards.isMeteredConnection()) {
+                _uiState.update { it.copy(dialog = LocalModelsDialog.MeteredConfirm(entryWithResolvedSize(entry))) }
+            } else {
+                beginDownload(entry)
+            }
             return
         }
         when {
