@@ -31,6 +31,9 @@ import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.MessageV2
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveContent
 import dev.chungjungsoo.gptmobile.data.database.entity.effectiveThoughts
+import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.DownloadedLocalModelOption
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.LocalModelPicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,6 +43,9 @@ fun ChatModelDialog(
     platformOrder: List<String>,
     initialModels: Map<String, String>,
     platformNames: Map<String, String>,
+    platformClientTypes: Map<String, ClientType> = emptyMap(),
+    downloadedLocalModels: List<DownloadedLocalModelOption> = emptyList(),
+    onNavigateToLocalModels: () -> Unit = {},
     onDismissRequest: () -> Unit,
     onConfirmRequest: (Map<String, String>) -> Unit
 ) {
@@ -64,20 +70,36 @@ fun ChatModelDialog(
                 )
                 platformOrder.forEach { platformUid ->
                     val platformName = platformNames[platformUid] ?: stringResource(R.string.unknown)
-                    OutlinedTextField(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                        value = models[platformUid].orEmpty(),
-                        onValueChange = { value ->
-                            models = models.toMutableMap().apply { put(platformUid, value) }
-                        },
-                        singleLine = true,
-                        label = { Text(text = stringResource(R.string.chat_model_for_platform, platformName)) },
-                        supportingText = {
-                            Text(stringResource(R.string.model_supporting))
-                        }
-                    )
+                    if (platformClientTypes[platformUid] == ClientType.LITERT_LM) {
+                        Text(
+                            text = stringResource(R.string.chat_model_for_platform, platformName),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                        LocalModelPicker(
+                            models = downloadedLocalModels,
+                            selectedCatalogEntryId = models[platformUid].orEmpty(),
+                            onModelSelected = { value ->
+                                models = models.toMutableMap().apply { put(platformUid, value) }
+                            },
+                            onNavigateToLocalModels = onNavigateToLocalModels,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
+                        )
+                    } else {
+                        OutlinedTextField(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            value = models[platformUid].orEmpty(),
+                            onValueChange = { value ->
+                                models = models.toMutableMap().apply { put(platformUid, value) }
+                            },
+                            singleLine = true,
+                            label = { Text(text = stringResource(R.string.chat_model_for_platform, platformName)) },
+                            supportingText = {
+                                Text(stringResource(R.string.model_supporting))
+                            }
+                        )
+                    }
                 }
             }
         },

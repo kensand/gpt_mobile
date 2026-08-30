@@ -119,7 +119,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ChatScreen(
     chatViewModel: ChatViewModel = hiltViewModel(),
-    onBackAction: () -> Unit
+    onBackAction: () -> Unit,
+    onNavigateToLocalModels: () -> Unit = {}
 ) {
     val containerSize = LocalWindowInfo.current.containerSize
     val screenWidthDp = with(LocalDensity.current) { containerSize.width.toDp() }
@@ -134,6 +135,7 @@ fun ChatScreen(
     val chatRoom by chatViewModel.chatRoom.collectAsStateWithLifecycle()
     val groupedMessages by chatViewModel.groupedMessages.collectAsStateWithLifecycle()
     val agentRunsById by chatViewModel.agentRunsById.collectAsStateWithLifecycle()
+    val runNoticesById by chatViewModel.runNoticesById.collectAsStateWithLifecycle()
     val toolEventsByRun by chatViewModel.toolEventsByRun.collectAsStateWithLifecycle()
     val indexStates by chatViewModel.indexStates.collectAsStateWithLifecycle()
     val loadingStates by chatViewModel.loadingStates.collectAsStateWithLifecycle()
@@ -148,6 +150,7 @@ fun ChatScreen(
     val appEnabledPlatforms by chatViewModel.enabledPlatformsInApp.collectAsStateWithLifecycle()
     val appAllPlatforms by chatViewModel.platformsInApp.collectAsStateWithLifecycle()
     val chatPlatformModels by chatViewModel.chatPlatformModels.collectAsStateWithLifecycle()
+    val downloadedLocalModels by chatViewModel.downloadedLocalModels.collectAsStateWithLifecycle()
     val enabledPlatformLookup = remember(appEnabledPlatforms) { appEnabledPlatforms.associateBy { it.uid } }
     val canUseChat = (chatViewModel.enabledPlatformsInChat.toSet() - appEnabledPlatforms.map { it.uid }.toSet()).isEmpty()
     val isIdle = loadingStates.all { it == ChatViewModel.LoadingState.Idle }
@@ -268,6 +271,7 @@ fun ChatScreen(
                             message = message,
                             assistantMessages = groupedMessages.assistantMessages.getOrNull(index) ?: emptyList(),
                             agentRunsById = agentRunsById,
+                            runNoticesById = runNoticesById,
                             toolEventsByRun = toolEventsByRun,
                             platformIndexState = indexStates.getOrElse(index) { 0 },
                             loadingStates = loadingStates,
@@ -361,6 +365,9 @@ fun ChatScreen(
                 platformOrder = chatViewModel.enabledPlatformsInChat,
                 initialModels = chatPlatformModels,
                 platformNames = platformNames,
+                platformClientTypes = appAllPlatforms.associate { it.uid to it.compatibleType },
+                downloadedLocalModels = downloadedLocalModels,
+                onNavigateToLocalModels = onNavigateToLocalModels,
                 onDismissRequest = chatViewModel::closeChatModelDialog,
                 onConfirmRequest = { models ->
                     chatViewModel.updateChatPlatformModels(models)
@@ -427,6 +434,7 @@ private fun ChatMessagePair(
     message: MessageV2,
     assistantMessages: List<MessageV2>,
     agentRunsById: Map<String, AgentRun>,
+    runNoticesById: Map<String, List<ChatRunNotice>>,
     toolEventsByRun: Map<String, List<ToolEvent>>,
     platformIndexState: Int,
     loadingStates: List<ChatViewModel.LoadingState>,
@@ -535,6 +543,7 @@ private fun ChatMessagePair(
                 timeline = assistantTimeline,
                 attachments = selectedAssistantMessage?.attachments.orEmpty().map { it.filePathForDisplay },
                 agentRun = agentRun,
+                runNotices = selectedRunId?.let(runNoticesById::get).orEmpty(),
                 toolEvents = toolEvents,
                 contentIdentity = "$messageIndex:$selectedPlatformUid:${selectedRunId.orEmpty()}:${selectedAssistantMessage?.activeRevisionIndex}",
                 revisionIndexLabel = selectedAssistantMessage?.let { assistantMessage ->

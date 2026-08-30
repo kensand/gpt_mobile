@@ -49,7 +49,12 @@ data class ActiveAgentRun(
     val profileUid: String
 )
 
-data class AgentRunNotice(val chatId: Int, val message: String)
+data class AgentRunNotice(
+    val chatId: Int,
+    val runId: String,
+    val message: String,
+    val persistent: Boolean = false
+)
 
 @Singleton
 class AgentRunCoordinator @Inject constructor(
@@ -221,7 +226,9 @@ class AgentRunCoordinator @Inject constructor(
                     )
                     chatRepository.updateAgentMessage(assistantMessage)
                 },
-                onNotice = { notice -> _notices.tryEmit(AgentRunNotice(request.chatId, notice)) },
+                onNotice = { notice, persistent ->
+                    _notices.tryEmit(AgentRunNotice(request.chatId, request.runId, notice, persistent))
+                },
                 publishIntervalMillis = 250L
             )
             val terminal = outcome.toTerminalUpdate()

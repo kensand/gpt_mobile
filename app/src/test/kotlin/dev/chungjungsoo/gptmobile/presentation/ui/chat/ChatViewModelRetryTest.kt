@@ -87,6 +87,26 @@ class ChatViewModelRetryTest {
     }
 
     @Test
+    fun `per-chat model override for a local platform is applied to the resolved platform`() {
+        val platform = PlatformV2(
+            uid = "local-1",
+            name = "Local",
+            compatibleType = ClientType.LITERT_LM,
+            enabled = true,
+            apiUrl = "",
+            model = "gemma3-1b-it"
+        )
+
+        val resolved = resolvePlatformModel(
+            platform = platform,
+            chatPlatformModels = mapOf("local-1" to "gemma-3n-e2b-it")
+        )
+
+        assertEquals("gemma-3n-e2b-it", resolved.model)
+        assertEquals(ClientType.LITERT_LM, resolved.compatibleType)
+    }
+
+    @Test
     fun `selected profiles resolve from all configured profiles without losing slot indexes`() {
         val configured = listOf(
             PlatformV2(

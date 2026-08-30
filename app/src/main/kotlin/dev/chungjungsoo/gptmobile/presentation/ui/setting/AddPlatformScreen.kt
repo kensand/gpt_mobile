@@ -38,11 +38,16 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.ModelConstants
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.presentation.common.DestinationCard
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadDialogHost
+import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.rememberLocalModelDownloader
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.LocalModelCatalogPicker
 import dev.chungjungsoo.gptmobile.util.pinnedExitUntilCollapsedScrollBehavior
 
 private enum class AddPlatformStep { API_TYPE, DETAILS }
@@ -51,8 +56,10 @@ private enum class AddPlatformStep { API_TYPE, DETAILS }
 @Composable
 fun AddPlatformScreen(
     modifier: Modifier = Modifier,
+    viewModel: AddPlatformViewModel = hiltViewModel(),
     onNavigationClick: () -> Unit,
-    onSave: (PlatformV2) -> Unit
+    onSave: (PlatformV2) -> Unit,
+    onNavigateToLocalModels: () -> Unit = {}
 ) {
     var step by remember { mutableStateOf(AddPlatformStep.API_TYPE) }
     var selectedClientType by remember { mutableStateOf<ClientType?>(null) }
@@ -65,8 +72,22 @@ fun AddPlatformScreen(
     val scrollBehavior = pinnedExitUntilCollapsedScrollBehavior(
         canScroll = { scrollState.canScrollForward || scrollState.canScrollBackward }
     )
+    val catalogModels by viewModel.catalogLocalModels.collectAsStateWithLifecycle()
+    val downloadState by viewModel.localModelDownloadState.collectAsStateWithLifecycle()
+    val selectedLocalModelId by viewModel.selectedCatalogEntryId.collectAsStateWithLifecycle()
+    val canSave by viewModel.canSave.collectAsStateWithLifecycle()
+    val isWaitingForDownload by viewModel.isWaitingForDownload.collectAsStateWithLifecycle()
+    val requestDownload = rememberLocalModelDownloader { entry ->
+        viewModel.selectLocalModel(entry.id)
+    }
+    val isLocalPlatform = selectedClientType == ClientType.LITERT_LM
     val title = stringResource(if (step == AddPlatformStep.API_TYPE) R.string.choose_platform_type else R.string.platform_details)
-    val isSaveEnabled = platformName.isNotBlank() && apiUrl.isNotBlank() && model.isNotBlank()
+    val isSaveEnabled = platformName.isNotBlank() &&
+        if (isLocalPlatform) {
+            canSave
+        } else {
+            model.isNotBlank() && apiUrl.isNotBlank()
+        }
     val navigateBack = { if (step == AddPlatformStep.DETAILS) step = AddPlatformStep.API_TYPE else onNavigationClick() }
     BackHandler(enabled = step == AddPlatformStep.DETAILS) { step = AddPlatformStep.API_TYPE }
 
@@ -81,19 +102,37 @@ fun AddPlatformScreen(
                 onNavigationClick = navigateBack,
                 onActionClick = {
                     val clientType = selectedClientType ?: return@AddPlatformTopBar
+                    val selectedModel = if (clientType == ClientType.LITERT_LM) {
+                        selectedLocalModelId.trim()
+                    } else {
+                        model.trim()
+                    }
+                    if (clientType == ClientType.LITERT_LM && !viewModel.canSaveLocalModel()) return@AddPlatformTopBar
+                    val defaults = if (clientType == ClientType.LITERT_LM) {
+                        viewModel.defaultsFor(selectedModel)
+                    } else {
+                        null
+                    }
                     onSave(
                         PlatformV2(
                             name = platformName.trim(),
                             compatibleType = clientType,
-                            enabled = true,
-                            apiUrl = apiUrl.trim(),
-                            token = apiKey.trim().takeIf(String::isNotEmpty),
-                            model = model.trim(),
-                            temperature = 1.0f,
-                            topP = 1.0f,
+                            enabled = if (clientType == ClientType.LITERT_LM) {
+                                viewModel.shouldEnableLocalPlatform()
+                            } else {
+                                true
+                            },
+                            apiUrl = if (clientType == ClientType.LITERT_LM) "" else apiUrl.trim(),
+                            token = apiKey.trim().takeIf { it.isNotEmpty() && clientType != ClientType.LITERT_LM },
+                            model = selectedModel,
+                            temperature = defaults?.temperature ?: 1.0f,
+                            topP = defaults?.topP ?: 1.0f,
+                            topK = defaults?.topK,
+                            maxTokens = defaults?.maxTokens,
+                            accelerator = defaults?.accelerator,
                             systemPrompt = ModelConstants.DEFAULT_PROMPT,
                             stream = true,
-                            reasoning = isReasoningEnabled,
+                            reasoning = isReasoningEnabled && clientType != ClientType.LITERT_LM,
                             timeout = 30
                         )
                     )
@@ -142,20 +181,52 @@ fun AddPlatformScreen(
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
                 OutlinedTextField(value = platformName, onValueChange = { platformName = it }, label = { Text(stringResource(R.string.platform_name)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, supportingText = { Text(stringResource(R.string.platform_name_supporting)) })
-                OutlinedTextField(value = apiUrl, onValueChange = { apiUrl = it }, label = { Text(stringResource(R.string.api_url)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true)
-                OutlinedTextField(value = apiKey, onValueChange = { apiKey = it }, label = { Text(stringResource(R.string.api_key)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, visualTransformation = PasswordVisualTransformation(), supportingText = { Text(stringResource(R.string.api_key_supporting)) })
-                OutlinedTextField(value = model, onValueChange = { model = it }, label = { Text(stringResource(R.string.model)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, supportingText = { Text(stringResource(R.string.model_supporting)) })
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = stringResource(R.string.extended_thinking), style = MaterialTheme.typography.bodyLarge)
-                        Text(text = stringResource(R.string.extended_thinking_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (clientType != ClientType.LITERT_LM) {
+                    OutlinedTextField(value = apiUrl, onValueChange = { apiUrl = it }, label = { Text(stringResource(R.string.api_url)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true)
+                    OutlinedTextField(value = apiKey, onValueChange = { apiKey = it }, label = { Text(stringResource(R.string.api_key)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, visualTransformation = PasswordVisualTransformation(), supportingText = { Text(stringResource(R.string.api_key_supporting)) })
+                    OutlinedTextField(value = model, onValueChange = { model = it }, label = { Text(stringResource(R.string.model)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, supportingText = { Text(stringResource(R.string.model_supporting)) })
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = stringResource(R.string.extended_thinking), style = MaterialTheme.typography.bodyLarge)
+                            Text(text = stringResource(R.string.extended_thinking_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = isReasoningEnabled, onCheckedChange = { isReasoningEnabled = it })
                     }
-                    Switch(checked = isReasoningEnabled, onCheckedChange = { isReasoningEnabled = it })
+                } else {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LocalModelCatalogPicker(
+                        items = catalogModels,
+                        selectedCatalogEntryId = selectedLocalModelId,
+                        checkingAccessEntryId = downloadState.checkingAccessEntryId,
+                        showPendingActivationHint = isWaitingForDownload,
+                        onModelSelected = { catalogEntryId ->
+                            val entry = catalogModels.firstOrNull { it.entry.id == catalogEntryId }?.entry
+                            if (entry != null) {
+                                requestDownload(entry)
+                            } else {
+                                viewModel.selectLocalModel(catalogEntryId)
+                            }
+                        },
+                        onNavigateToLocalModels = onNavigateToLocalModels
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
+
+    LocalModelDownloadDialogHost(
+        dialog = downloadState.dialog,
+        onConfirmRamWarning = viewModel::confirmRamWarning,
+        onConfirmMeteredDownload = viewModel::confirmMeteredDownload,
+        onDismissDialog = viewModel::dismissDownloadDialog,
+        onStartSignIn = viewModel::startHuggingFaceSignIn,
+        onAuthActivityResult = viewModel::onAuthActivityResult,
+        onLicenseTabClosed = viewModel::onLicenseTabClosed,
+        onRetryAfterLicense = viewModel::retryAfterLicense,
+        onEnterAccessToken = viewModel::openAccessTokenDialog,
+        onSaveAccessToken = viewModel::saveHuggingFaceAccessToken
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -200,4 +271,5 @@ private fun getClientTypeDescription(clientType: ClientType): String = when (cli
     ClientType.OLLAMA -> stringResource(R.string.client_type_ollama_desc)
     ClientType.OPENROUTER -> stringResource(R.string.client_type_openrouter_desc)
     ClientType.CUSTOM -> stringResource(R.string.client_type_custom_desc)
+    ClientType.LITERT_LM -> stringResource(R.string.client_type_litert_lm_desc)
 }
