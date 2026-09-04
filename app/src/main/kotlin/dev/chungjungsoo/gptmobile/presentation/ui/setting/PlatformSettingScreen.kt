@@ -62,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -802,6 +803,7 @@ private fun PreferenceListSwitch(
             )
         },
         colors = ListItemDefaults.colors(
+            containerColor = Color.Transparent,
             headlineColor = if (enabled) colors.headlineColor else colors.disabledHeadlineColor,
             supportingColor = if (enabled) colors.supportingTextColor else colors.disabledHeadlineColor,
             leadingIconColor = if (enabled) colors.leadingIconColor else colors.disabledLeadingIconColor,

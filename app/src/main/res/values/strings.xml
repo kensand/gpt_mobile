@@ -548,6 +548,7 @@
     <string name="local_model_oauth_not_configured_message">This build does not have Hugging Face sign-in. Paste a read access token instead to download gated models.</string>
     <string name="huggingface_account">Hugging Face account</string>
     <string name="huggingface_token_saved">Access token saved</string>
+    <string name="huggingface_no_token_saved">No access token saved</string>
     <string name="huggingface_add_access_token">Add access token</string>
     <string name="huggingface_remove_token">Remove</string>
     <string name="huggingface_enter_access_token">Enter access token</string>

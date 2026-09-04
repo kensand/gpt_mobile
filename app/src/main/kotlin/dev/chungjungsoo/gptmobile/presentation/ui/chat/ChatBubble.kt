@@ -214,31 +214,33 @@ fun OpponentChatBubble(
             label = "assistant details"
         ) { showDetails ->
             if (showDetails) {
-                if (contentTimeline.isNotEmpty() && !hasUnavailableOrder) {
-                    AssistantTimelineContent(
-                        timeline = contentTimeline,
-                        toolEvents = toolEvents,
-                        showStreamingIndicator = isLoading && activeToolEvents.isEmpty(),
-                        contentIdentity = contentIdentity,
-                        onViewFull = onViewFull
-                    )
-                    MessageFileThumbnailRow(
-                        files = attachments,
-                        usePrimaryColors = false,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                } else {
-                    LegacyAssistantContent(
-                        cardColor = cardColor,
-                        text = text,
-                        thoughts = thoughts,
-                        toolEvents = toolEvents,
-                        attachments = attachments,
-                        showStreamingIndicator = isLoading && activeToolEvents.isEmpty(),
-                        contentIdentity = contentIdentity,
-                        showOrderNotice = hasUnavailableOrder,
-                        onViewFull = onViewFull
-                    )
+                Column {
+                    if (contentTimeline.isNotEmpty() && !hasUnavailableOrder) {
+                        AssistantTimelineContent(
+                            timeline = contentTimeline,
+                            toolEvents = toolEvents,
+                            showStreamingIndicator = isLoading && activeToolEvents.isEmpty(),
+                            contentIdentity = contentIdentity,
+                            onViewFull = onViewFull
+                        )
+                        MessageFileThumbnailRow(
+                            files = attachments,
+                            usePrimaryColors = false,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    } else {
+                        LegacyAssistantContent(
+                            cardColor = cardColor,
+                            text = text,
+                            thoughts = thoughts,
+                            toolEvents = toolEvents,
+                            attachments = attachments,
+                            showStreamingIndicator = isLoading && activeToolEvents.isEmpty(),
+                            contentIdentity = contentIdentity,
+                            showOrderNotice = hasUnavailableOrder,
+                            onViewFull = onViewFull
+                        )
+                    }
                 }
             } else {
                 QuietAssistantContent(

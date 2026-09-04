@@ -201,7 +201,7 @@ private fun HuggingFaceAccountSection(
                 text = if (hasToken) {
                     stringResource(R.string.huggingface_token_saved)
                 } else {
-                    stringResource(R.string.huggingface_add_access_token)
+                    stringResource(R.string.huggingface_no_token_saved)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
