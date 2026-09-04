@@ -216,7 +216,6 @@
     <string name="api_key_optional_note">API-ключ необязателен для локальных поставщиков, таких как Ollama</string>
     <string name="model_description">Введите идентификатор модели, которую хотите использовать</string>
     <string name="model_examples">Примеры: gpt-4o, claude-sonnet-4-20250514, gemini-1.5-pro</string>
-    <string name="back">Назад</string>
     <string name="finish">Завершить</string>
     <string name="openrouter_description">Доступ к нескольким моделям ИИ через один API</string>
     <string name="custom_provider">Пользовательский поставщик</string>

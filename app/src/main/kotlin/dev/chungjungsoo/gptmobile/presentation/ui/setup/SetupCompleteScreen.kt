@@ -26,6 +26,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.presentation.common.PrimaryLongButton
 import dev.chungjungsoo.gptmobile.presentation.common.Route
 import dev.chungjungsoo.gptmobile.presentation.icons.Done
@@ -84,7 +85,7 @@ private fun SetupCompleteText(
     platforms: List<PlatformV2> = emptyList()
 ) {
     val configuredNames = platforms.filter(PlatformV2::enabled).joinToString(", ", transform = PlatformV2::name)
-    val pendingNames = platforms.filterNot(PlatformV2::enabled).joinToString(", ", transform = PlatformV2::name)
+    val pendingNames = platforms.filter { !it.enabled && it.compatibleType == ClientType.LITERT_LM }.joinToString(", ", transform = PlatformV2::name)
     Column(
         modifier = modifier
             .fillMaxWidth()
