@@ -12,6 +12,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 enum class ThemeLoadState { LOADING, READY, FALLBACK_SYSTEM }
 
@@ -23,6 +25,8 @@ class ThemeViewModel @Inject constructor(private val settingRepository: SettingR
 
     private val _loadState = MutableStateFlow(ThemeLoadState.LOADING)
     val loadState = _loadState.asStateFlow()
+
+    private val themeMutex = Mutex()
 
     init {
         fetchThemes()
@@ -44,15 +48,19 @@ class ThemeViewModel @Inject constructor(private val settingRepository: SettingR
 
     fun updateDynamicTheme(theme: DynamicTheme) {
         viewModelScope.launch {
-            val updated = _themeSetting.value.copy(dynamicTheme = theme)
-            settingRepository.updateThemes(updated)
-            _themeSetting.value = updated
+            persistTheme { it.copy(dynamicTheme = theme) }
         }
     }
 
     fun updateThemeMode(theme: ThemeMode) {
         viewModelScope.launch {
-            val updated = _themeSetting.value.copy(themeMode = theme)
+            persistTheme { it.copy(themeMode = theme) }
+        }
+    }
+
+    private suspend fun persistTheme(transform: (ThemeSetting) -> ThemeSetting) {
+        themeMutex.withLock {
+            val updated = transform(_themeSetting.value)
             settingRepository.updateThemes(updated)
             _themeSetting.value = updated
         }

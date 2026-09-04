@@ -3,6 +3,7 @@ package dev.chungjungsoo.gptmobile.presentation.common
 import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
 import dev.chungjungsoo.gptmobile.data.dto.Platform
 import dev.chungjungsoo.gptmobile.data.dto.ThemeSetting
+import dev.chungjungsoo.gptmobile.data.model.DynamicTheme
 import dev.chungjungsoo.gptmobile.data.model.ThemeMode
 import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
@@ -60,6 +61,53 @@ class ThemeViewModelTest {
 
         assertEquals(ThemeLoadState.FALLBACK_SYSTEM, viewModel.loadState.value)
         assertEquals(ThemeMode.SYSTEM, viewModel.themeSetting.value.themeMode)
+    }
+
+    @Test
+    fun fetchThemesSuccessPublishesReadyWithPersistedSetting() = runTest {
+        val persisted = ThemeSetting(dynamicTheme = DynamicTheme.ON, themeMode = ThemeMode.LIGHT)
+        val viewModel = ThemeViewModel(RecordingSettingRepository(persisted))
+        advanceUntilIdle()
+
+        assertEquals(ThemeLoadState.READY, viewModel.loadState.value)
+        assertEquals(persisted, viewModel.themeSetting.value)
+    }
+
+    @Test
+    fun updateDynamicThemePublishesOnlyAfterPersistence() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = RecordingSettingRepository(ThemeSetting(), gate)
+        val viewModel = ThemeViewModel(repository)
+        advanceUntilIdle()
+
+        viewModel.updateDynamicTheme(DynamicTheme.ON)
+        runCurrent()
+        assertEquals(DynamicTheme.OFF, viewModel.themeSetting.value.dynamicTheme)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(DynamicTheme.ON, viewModel.themeSetting.value.dynamicTheme)
+        assertEquals(DynamicTheme.ON, repository.updated.single().dynamicTheme)
+    }
+
+    @Test
+    fun concurrentThemeUpdatesSerializeReadPersistPublish() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = RecordingSettingRepository(ThemeSetting(), gate)
+        val viewModel = ThemeViewModel(repository)
+        advanceUntilIdle()
+
+        viewModel.updateDynamicTheme(DynamicTheme.ON)
+        viewModel.updateThemeMode(ThemeMode.DARK)
+        runCurrent()
+        assertEquals(ThemeSetting(), viewModel.themeSetting.value)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val expected = ThemeSetting(dynamicTheme = DynamicTheme.ON, themeMode = ThemeMode.DARK)
+        assertEquals(expected, viewModel.themeSetting.value)
+        assertEquals(expected, repository.updated.last())
     }
 }
 
