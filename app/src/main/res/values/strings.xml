@@ -185,6 +185,10 @@
     <string name="gemini_safety_block_low_and_above">Block low and above</string>
     <string name="about">About</string>
     <string name="about_description">Version, License, Feedback</string>
+    <string name="app_identity">App</string>
+    <string name="legal">Legal</string>
+    <string name="project_links">Project links</string>
+    <string name="support">Support</string>
     <string name="version">Version</string>
     <string name="license">License</string>
     <string name="github" translatable="false">GitHub</string>
@@ -492,6 +496,10 @@
     <string name="local_models">Local Models</string>
     <string name="local_models_description">Browse the Model Catalog</string>
     <string name="local_models_empty">No Local Models are available.</string>
+    <string name="local_models_empty_title">No models available</string>
+    <string name="local_models_load_error">Couldn’t load Local Models</string>
+    <string name="local_models_load_error_description">Check your connection and try again.</string>
+    <string name="storage">Storage</string>
     <string name="local_model_requirements">%1$s · %2$d GB RAM</string>
     <string name="local_model_not_downloaded">Not downloaded</string>
     <string name="download">Download</string>

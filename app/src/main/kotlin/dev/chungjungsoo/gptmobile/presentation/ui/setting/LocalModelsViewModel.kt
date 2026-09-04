@@ -15,6 +15,8 @@ import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.HuggingFaceAuthClie
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalDownloadGuards
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadActions
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +62,7 @@ class LocalModelsViewModel @Inject constructor(
         LocalModelsUiState(
             items = list.items,
             isLoading = list.isLoading,
+            loadError = list.loadError,
             totalStorageBytes = list.totalStorageBytes,
             checkingAccessEntryId = download.checkingAccessEntryId,
             dialog = if (delete !is LocalModelsDialog.Hidden) delete else download.dialog,
@@ -67,35 +70,54 @@ class LocalModelsViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LocalModelsUiState())
 
+    private var loadJob: Job? = null
+
     init {
         viewModelScope.launch {
             hasHuggingFaceToken.value = huggingFaceTokenStore.readAccessToken() != null
         }
-        viewModelScope.launch {
-            runCatching { localModelRepository.reconcile() }
-            val catalogEntries = runCatching { modelCatalogRepository.getVisibleEntries() }
-                .getOrDefault(emptyList())
-            combine(
-                localModelRepository.observeAll(),
-                localModelRepository.observeWorkInfos()
-            ) { localModels, workInfos ->
-                val items = catalogLocalModelItems(
-                    catalogEntries,
-                    localModels,
-                    workInfos,
-                    localModels.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) },
-                    deviceSocModel = deviceSocModel
-                )
-                val storage = localModels
-                    .filter { it.status == LocalModelStatus.READY }
-                    .sumOf { it.totalBytes }
-                items to storage
-            }.collect { (items, storage) ->
+        retryLoad()
+    }
+
+    fun retryLoad() {
+        loadJob?.cancel()
+        _listState.update { it.copy(isLoading = true, loadError = null) }
+        loadJob = viewModelScope.launch {
+            try {
+                localModelRepository.reconcile()
+                val catalogEntries = modelCatalogRepository.getVisibleEntries()
+                combine(
+                    localModelRepository.observeAll(),
+                    localModelRepository.observeWorkInfos()
+                ) { localModels, workInfos ->
+                    val items = catalogLocalModelItems(
+                        catalogEntries,
+                        localModels,
+                        workInfos,
+                        localModels.associate { it.catalogEntryId to localModelRepository.diskPartialBytes(it) },
+                        deviceSocModel = deviceSocModel
+                    )
+                    val storage = localModels
+                        .filter { it.status == LocalModelStatus.READY }
+                        .sumOf { it.totalBytes }
+                    items to storage
+                }.collect { (items, storage) ->
+                    _listState.update {
+                        it.copy(
+                            items = items,
+                            isLoading = false,
+                            loadError = null,
+                            totalStorageBytes = storage
+                        )
+                    }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (throwable: Throwable) {
                 _listState.update {
                     it.copy(
-                        items = items,
                         isLoading = false,
-                        totalStorageBytes = storage
+                        loadError = throwable.message.orEmpty()
                     )
                 }
             }
@@ -182,5 +204,6 @@ class LocalModelsViewModel @Inject constructor(
 private data class LocalModelsListState(
     val items: List<LocalModelListItem> = emptyList(),
     val isLoading: Boolean = true,
+    val loadError: String? = null,
     val totalStorageBytes: Long = 0L
 )

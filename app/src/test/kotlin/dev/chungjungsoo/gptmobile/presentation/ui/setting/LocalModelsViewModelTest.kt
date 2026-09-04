@@ -1,11 +1,15 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
+import dev.chungjungsoo.gptmobile.data.catalog.CatalogEntry
 import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.repository.FakeLocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.ModelCatalogRepository
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.FakeHuggingFaceAuthClient
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.FakeLocalDownloadGuards
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.MapSecretVault
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.RecordingProber
+import dev.chungjungsoo.gptmobile.presentation.ui.setup.defaultWizardCatalog
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.localModelsViewModel
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.wizardGatedCoordinator
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.wizardStoredModel
@@ -33,6 +37,32 @@ class LocalModelsViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `catalog failure is retryable and is not reported as empty success`() = runTest {
+        val catalog = FailOnceCatalog(defaultWizardCatalog().getVisibleEntries())
+        val localModels = FakeLocalModelRepository()
+        val tokenStore = HuggingFaceTokenStore(MapSecretVault())
+        val viewModel = LocalModelsViewModel(
+            modelCatalogRepository = catalog,
+            localModelRepository = localModels,
+            gatedDownloadCoordinator = wizardGatedCoordinator(tokenStore = tokenStore),
+            huggingFaceTokenStore = tokenStore,
+            downloadGuards = FakeLocalDownloadGuards(),
+            huggingFaceAuthClient = FakeHuggingFaceAuthClient(),
+            deviceSocModel = ""
+        )
+
+        assertFalse(viewModel.uiState.value.isLoading)
+        assertEquals("Catalog failed", viewModel.uiState.value.loadError)
+        assertTrue(viewModel.uiState.value.items.isEmpty())
+
+        viewModel.retryLoad()
+
+        assertFalse(viewModel.uiState.value.isLoading)
+        assertNull(viewModel.uiState.value.loadError)
+        assertEquals(3, viewModel.uiState.value.items.size)
     }
 
     @Test
@@ -161,5 +191,19 @@ class LocalModelsViewModelTest {
 
         assertTrue(viewModel.uiState.value.dialog is LocalModelsDialog.RamWarning)
         assertTrue(localModels.startDownloadCalls.isEmpty())
+    }
+}
+
+private class FailOnceCatalog(
+    private val entries: List<CatalogEntry>
+) : ModelCatalogRepository {
+    private var shouldFail = true
+
+    override suspend fun getVisibleEntries(): List<CatalogEntry> {
+        if (shouldFail) {
+            shouldFail = false
+            error("Catalog failed")
+        }
+        return entries
     }
 }
