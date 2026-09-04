@@ -227,11 +227,9 @@ fun NavGraphBuilder.settingNavigation(
             }
             val settingViewModel: SettingViewModelV2 = hiltViewModel(parentEntry)
             AddPlatformScreen(
+                settingViewModel = settingViewModel,
                 onNavigationClick = { navController.navigateUp() },
-                onSave = { platform ->
-                    settingViewModel.addPlatform(platform)
-                    navController.navigateUp()
-                },
+                onSave = { navController.navigateUp() },
                 onNavigateToLocalModels = { navController.navigate(Route.LOCAL_MODELS) }
             )
         }
