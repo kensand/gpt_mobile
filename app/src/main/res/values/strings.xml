@@ -373,6 +373,14 @@
     <string name="next_revision">Next revision</string>
     <string name="web_tools">Tool connections</string>
     <string name="tool_connections">Tool connections</string>
+    <string name="loading_tool_connections">Loading tool connections…</string>
+    <string name="loading_tool_connection">Loading connection…</string>
+    <string name="tool_connections_load_error">Couldn’t load tool connections</string>
+    <string name="no_tool_connections_title">No tool connections yet</string>
+    <string name="mcp_servers">MCP servers</string>
+    <string name="connection_action_in_progress">Connection action in progress</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="identity">Identity</string>
     <string name="web_tools_description">Web search and MCP connections</string>
     <string name="add_tool_connection">Add tool connection</string>
     <string name="no_tool_connections">Add a Web Search or MCP Server connection to give agents extra tools.</string>
@@ -381,6 +389,7 @@
     <string name="delete_tool_connection">Delete tool connection</string>
     <string name="delete_tool_connection_confirmation">Delete %1$s?</string>
     <string name="tool_connection_not_found">Tool connection not found.</string>
+    <string name="tool_connection_not_found_description">This connection may have been removed.</string>
     <string name="tool_connection_provider_section">Provider</string>
     <string name="tool_connection_details_section">Connection details</string>
     <string name="tool_connection_credentials_section">Credentials</string>
