@@ -74,6 +74,15 @@
     <string name="off">Off</string>
     <string name="system_default">System Default</string>
     <string name="theme_settings">Theme Settings</string>
+    <string name="theme_summary">Dynamic color: %1$s · %2$s</string>
+    <string name="theme_mode">Theme mode</string>
+    <string name="light">Light</string>
+    <string name="dark">Dark</string>
+    <string name="appearance">Appearance</string>
+    <string name="providers">Providers</string>
+    <string name="tools">Tools</string>
+    <string name="settings_app">App</string>
+    <string name="no_platforms_configured">No providers yet. Add one to start chatting.</string>
     <string name="supported_soon">Supported Soon</string>
     <string name="theme_description">Dynamic theme, Dark mode</string>
     <string name="openai_setting">OpenAI Settings</string>
