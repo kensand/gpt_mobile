@@ -69,6 +69,12 @@
     <string name="cancel">Cancel</string>
     <string name="go_back">Go back</string>
     <string name="more_options">More options</string>
+    <string name="message_actions">Message actions</string>
+    <string name="details">Details</string>
+    <string name="details_unavailable">Details unavailable</string>
+    <string name="view_full">View full</string>
+    <string name="view_full_value">View full %1$s</string>
+    <string name="tool_in_progress">Tool in progress</string>
     <string name="arrow_icon">Arrow Icon</string>
     <string name="on">On</string>
     <string name="off">Off</string>

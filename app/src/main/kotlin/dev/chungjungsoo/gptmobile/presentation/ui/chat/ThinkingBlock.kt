@@ -3,6 +3,8 @@ package dev.chungjungsoo.gptmobile.presentation.ui.chat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,7 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +36,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
+import dev.chungjungsoo.gptmobile.presentation.theme.defaultSpatialSpec
+import dev.chungjungsoo.gptmobile.presentation.theme.fastEffectsSpec
+import dev.chungjungsoo.gptmobile.presentation.theme.fastSpatialSpec
 
 @Composable
 fun ThinkingBlock(
@@ -43,9 +49,10 @@ fun ThinkingBlock(
 ) {
     if (thoughts.isBlank()) return
 
-    var isExpanded by remember { mutableStateOf(false) }
+    var isExpanded by rememberSaveable(contentIdentity) { mutableStateOf(false) }
     val rotationAngle by animateFloatAsState(
         targetValue = if (isExpanded) 180f else 0f,
+        animationSpec = fastSpatialSpec(),
         label = "rotation"
     )
 
@@ -58,6 +65,7 @@ fun ThinkingBlock(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 48.dp)
                 .clickable { isExpanded = !isExpanded }
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -77,21 +85,9 @@ fun ThinkingBlock(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
-            if (isLoading) {
-                Text(
-                    text = stringResource(R.string.thinking_in_progress),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
             Icon(
                 imageVector = Icons.Rounded.KeyboardArrowDown,
-                contentDescription = if (isExpanded) {
-                    stringResource(R.string.collapse)
-                } else {
-                    stringResource(R.string.expand)
-                },
+                contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.rotate(rotationAngle)
             )
@@ -99,8 +95,10 @@ fun ThinkingBlock(
 
         AnimatedVisibility(
             visible = isExpanded,
-            enter = expandVertically(),
-            exit = shrinkVertically()
+            enter = expandVertically(animationSpec = defaultSpatialSpec()) +
+                fadeIn(animationSpec = fastEffectsSpec()),
+            exit = shrinkVertically(animationSpec = defaultSpatialSpec()) +
+                fadeOut(animationSpec = fastEffectsSpec())
         ) {
             val displayText = if (isLoading) thoughts + "●" else thoughts
 
@@ -114,8 +112,10 @@ fun ThinkingBlock(
         }
 
         if (!isExpanded && thoughts.isNotBlank()) {
+            val preview = thoughts.take(100).replace("\n", " ") +
+                if (thoughts.length > 100) "..." else ""
             Text(
-                text = thoughts.take(100).replace("\n", " ") + if (thoughts.length > 100) "..." else "",
+                text = if (isLoading) preview + "●" else preview,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 maxLines = 2,

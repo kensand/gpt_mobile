@@ -46,7 +46,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -60,6 +59,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -472,7 +472,11 @@ private fun ChatMessagePair(
     val selectedPlatformUid = enabledPlatformsInChat.getOrElse(platformIndexState) { "" }
     val isCurrentPlatformLoading =
         loadingStates.getOrElse(platformIndexState) { ChatViewModel.LoadingState.Idle } == ChatViewModel.LoadingState.Loading
-    var isDropDownMenuExpanded by remember { mutableStateOf(false) }
+    val canEdit = canUseChat && isIdle
+    val canRetry = canUseChat && isActiveMessage && !isCurrentPlatformLoading
+    val isError = agentRun?.status == AgentRunStatus.FAILED && isAssistantErrorMessage(assistantContent)
+    val isFailedResponse = agentRun?.status == AgentRunStatus.FAILED || isAssistantErrorMessage(assistantContent)
+    val showInlineRetry = canRetry && isFailedResponse
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -481,21 +485,15 @@ private fun ChatMessagePair(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.End
         ) {
-            Box {
-                UserChatBubble(
-                    modifier = Modifier.widthIn(max = maximumUserChatBubbleWidth),
-                    text = message.content,
-                    files = message.attachments.map { it.filePathForDisplay },
-                    onLongPress = { isDropDownMenuExpanded = true }
-                )
-                ChatBubbleDropdownMenu(
-                    isChatBubbleDropdownMenuExpanded = isDropDownMenuExpanded,
-                    canEdit = canUseChat && isIdle,
-                    onDismissRequest = { isDropDownMenuExpanded = false },
-                    onEditItemClick = { onEditQuestion(message) },
-                    onCopyItemClick = { onCopyText(message.content) }
-                )
-            }
+            UserChatBubble(
+                modifier = Modifier.widthIn(max = maximumUserChatBubbleWidth),
+                text = message.content,
+                files = message.attachments.map { it.filePathForDisplay },
+                contentIdentity = chatMessagePairKey(message, messageIndex),
+                canEdit = canEdit,
+                onCopyClick = { onCopyText(message.content) },
+                onEditClick = { onEditQuestion(message) }
+            )
         }
 
         Column(
@@ -509,7 +507,7 @@ private fun ChatMessagePair(
                     .padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                GPTMobileIcon(loading = isActiveMessage && !isIdle)
+                GPTMobileIcon()
                 if (enabledPlatformsInChat.size > 1) {
                     Row(
                         modifier = Modifier
@@ -519,7 +517,6 @@ private fun ChatMessagePair(
                     ) {
                         enabledPlatformsInChat.forEachIndexed { platformIndex, uid ->
                             PlatformButton(
-                                isLoading = isActiveMessage && loadingStates[platformIndex] == ChatViewModel.LoadingState.Loading,
                                 name = enabledPlatformLookup[uid]?.name ?: stringResource(R.string.unknown),
                                 selected = platformIndexState == platformIndex,
                                 onPlatformClick = { onPlatformClick(messageIndex, platformIndex) }
@@ -534,10 +531,10 @@ private fun ChatMessagePair(
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
                     .widthIn(max = maximumOpponentChatBubbleWidth),
-                canEdit = canUseChat && isIdle,
-                canRetry = canUseChat && isActiveMessage && !isCurrentPlatformLoading,
+                canEdit = canEdit,
+                canRetry = canRetry,
                 isLoading = isActiveMessage && isCurrentPlatformLoading,
-                isError = agentRun?.status == AgentRunStatus.FAILED && isAssistantErrorMessage(assistantContent),
+                isError = isError,
                 text = assistantContent,
                 thoughts = assistantThoughts,
                 timeline = assistantTimeline,
@@ -564,8 +561,10 @@ private fun ChatMessagePair(
                 },
                 canShowPreviousRevision = canShowPreviousRevision,
                 canShowNextRevision = canShowNextRevision,
+                showInlineRetry = showInlineRetry,
                 onCopyClick = { onCopyText(assistantContent) },
                 onSelectClick = { onSelectText(assistantContent) },
+                onViewFull = onSelectText,
                 onRetryClick = { onRetry(messageIndex, platformIndexState) },
                 onEditClick = { onEditAssistant(messageIndex, platformIndexState) },
                 onShowPreviousRevision = { onShowPreviousRevision(messageIndex, platformIndexState) },
@@ -665,49 +664,6 @@ fun ChatDropdownMenu(
     }
 }
 
-@Composable
-fun ChatBubbleDropdownMenu(
-    isChatBubbleDropdownMenuExpanded: Boolean,
-    canEdit: Boolean,
-    onDismissRequest: () -> Unit,
-    onEditItemClick: () -> Unit,
-    onCopyItemClick: () -> Unit
-) {
-    DropdownMenu(
-        modifier = Modifier.wrapContentSize(),
-        expanded = isChatBubbleDropdownMenuExpanded,
-        onDismissRequest = onDismissRequest
-    ) {
-        DropdownMenuItem(
-            enabled = canEdit,
-            leadingIcon = {
-                Icon(
-                    Icons.Outlined.Edit,
-                    contentDescription = stringResource(R.string.edit)
-                )
-            },
-            text = { Text(text = stringResource(R.string.edit)) },
-            onClick = {
-                onEditItemClick.invoke()
-                onDismissRequest.invoke()
-            }
-        )
-        DropdownMenuItem(
-            leadingIcon = {
-                Icon(
-                    imageVector = ImageVector.vectorResource(id = R.drawable.ic_copy),
-                    contentDescription = stringResource(R.string.copy_text)
-                )
-            },
-            text = { Text(text = stringResource(R.string.copy_text)) },
-            onClick = {
-                onCopyItemClick.invoke()
-                onDismissRequest.invoke()
-            }
-        )
-    }
-}
-
 private fun exportChat(context: Context, chatViewModel: ChatViewModel) {
     try {
         val (fileName, fileContent) = chatViewModel.exportChat(
@@ -794,76 +750,79 @@ fun ChatInputBox(
         }
     }
 
-    Column(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .background(color = MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 2.dp
     ) {
-        if (selectedAttachments.isNotEmpty()) {
-            FileThumbnailRow(
-                selectedAttachments = selectedAttachments,
-                onFileRemoved = onFileRemoved
-            )
-        }
-        BasicTextField(
-            state = inputState,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = chatEnabled,
-            textStyle = mergedStyle,
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            lineLimits = chatInputLineLimits,
-            decorator = { innerTextField ->
-                Row(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .fillMaxWidth()
-                        .background(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(size = 24.dp))
-                        .padding(all = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        enabled = chatEnabled,
-                        onClick = { filePickerLauncher.launch("image/*") }
-                    ) {
-                        Icon(
-                            imageVector = ImageVector.vectorResource(R.drawable.ic_attach_file),
-                            contentDescription = stringResource(R.string.attach_file)
-                        )
-                    }
-                    Box(
+        Column {
+            if (selectedAttachments.isNotEmpty()) {
+                FileThumbnailRow(
+                    selectedAttachments = selectedAttachments,
+                    onFileRemoved = onFileRemoved
+                )
+            }
+            BasicTextField(
+                state = inputState,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = chatEnabled,
+                textStyle = mergedStyle,
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                lineLimits = chatInputLineLimits,
+                decorator = { innerTextField ->
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 8.dp)
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (inputState.text.isEmpty()) {
-                            Text(
-                                modifier = Modifier.alpha(0.38f),
-                                text = if (chatEnabled) stringResource(R.string.ask_a_question) else stringResource(R.string.some_platforms_disabled)
+                        IconButton(
+                            enabled = chatEnabled,
+                            onClick = { filePickerLauncher.launch("image/*") }
+                        ) {
+                            Icon(
+                                imageVector = ImageVector.vectorResource(R.drawable.ic_attach_file),
+                                contentDescription = stringResource(R.string.attach_file)
                             )
                         }
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            innerTextField()
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 8.dp)
+                        ) {
+                            if (inputState.text.isEmpty()) {
+                                Text(
+                                    modifier = Modifier.alpha(0.38f),
+                                    text = if (chatEnabled) stringResource(R.string.ask_a_question) else stringResource(R.string.some_platforms_disabled)
+                                )
+                            }
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                innerTextField()
+                            }
                         }
-                    }
-                    IconButton(
-                        enabled = isRunning || (chatEnabled && sendButtonEnabled && hasQuestionText),
-                        onClick = if (isRunning) onCancelButtonClick else onSendButtonClick
-                    ) {
-                        if (isRunning) {
-                            Icon(
-                                imageVector = Icons.Filled.Stop,
-                                contentDescription = stringResource(R.string.cancel_active_runs)
-                            )
-                        } else {
-                            Icon(
-                                imageVector = ImageVector.vectorResource(id = R.drawable.ic_send),
-                                contentDescription = stringResource(R.string.send)
-                            )
+                        IconButton(
+                            enabled = isRunning || (chatEnabled && sendButtonEnabled && hasQuestionText),
+                            onClick = if (isRunning) onCancelButtonClick else onSendButtonClick
+                        ) {
+                            if (isRunning) {
+                                Icon(
+                                    imageVector = Icons.Filled.Stop,
+                                    contentDescription = stringResource(R.string.cancel_active_runs)
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = ImageVector.vectorResource(id = R.drawable.ic_send),
+                                    contentDescription = stringResource(R.string.send)
+                                )
+                            }
                         }
                     }
                 }
-            }
-        )
+            )
+        }
     }
 }
 
