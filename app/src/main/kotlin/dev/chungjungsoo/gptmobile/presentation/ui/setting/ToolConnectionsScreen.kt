@@ -271,6 +271,11 @@ fun ToolConnectionsScreen(
             text = { Text(message) },
             onDismissRequest = viewModel::clearError,
             confirmButton = {
+                TextButton(onClick = viewModel::refresh) {
+                    Text(stringResource(R.string.retry))
+                }
+            },
+            dismissButton = {
                 TextButton(onClick = viewModel::clearError) {
                     Text(stringResource(R.string.close))
                 }
@@ -309,7 +314,7 @@ fun ToolConnectionEditorScreen(
         )
         return
     }
-    if (isEditing && uiState.errorMessage != null && uiState.connections.isEmpty()) {
+    if (isEditing && uiState.errorMessage != null && editingFlow == null) {
         ToolConnectionEditorStatusScreen(
             modifier = modifier,
             title = stringResource(R.string.tool_connections_load_error),
