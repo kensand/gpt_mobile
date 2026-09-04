@@ -98,8 +98,10 @@ fun AddPlatformScreen(
             model.isNotBlank() && apiUrl.isNotBlank()
         }
     val navigateBack = { if (step == AddPlatformStep.DETAILS) step = AddPlatformStep.API_TYPE else onNavigationClick() }
-    BackHandler(enabled = step == AddPlatformStep.DETAILS && !saveState.isSaving) {
-        step = AddPlatformStep.API_TYPE
+    BackHandler(enabled = step == AddPlatformStep.DETAILS) {
+        if (!saveState.isSaving) {
+            step = AddPlatformStep.API_TYPE
+        }
     }
 
     fun savePlatform() {
