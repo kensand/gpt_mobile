@@ -92,7 +92,8 @@ fun AddPlatformScreen(
     }
     val isLocalPlatform = selectedClientType == ClientType.LITERT_LM
     val title = stringResource(if (step == AddPlatformStep.API_TYPE) R.string.choose_platform_type else R.string.platform_details)
-    val isSaveEnabled = !saveState.isSaving && platformName.isNotBlank() &&
+    val isSaveEnabled = !saveState.isSaving &&
+        platformName.isNotBlank() &&
         if (isLocalPlatform) {
             canSave
         } else {

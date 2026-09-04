@@ -386,12 +386,13 @@ fun ToolConnectionEditorScreen(
         authType == ToolConnectionAuthType.BEARER -> credentialState != CredentialEditState.MISSING
         else -> true
     }
-    val isActionEnabled = !uiState.isSaving && when (setupFlow.step) {
-        ToolConnectionSetupStep.CONNECTION_TYPE -> false
-        ToolConnectionSetupStep.WEB_SEARCH_PROVIDER -> setupFlow.canContinue
-        ToolConnectionSetupStep.DETAILS -> detailsValid && (!setupFlow.isSaveStep || credentialValid)
-        ToolConnectionSetupStep.AUTHENTICATION -> detailsValid && credentialValid
-    }
+    val isActionEnabled = !uiState.isSaving &&
+        when (setupFlow.step) {
+            ToolConnectionSetupStep.CONNECTION_TYPE -> false
+            ToolConnectionSetupStep.WEB_SEARCH_PROVIDER -> setupFlow.canContinue
+            ToolConnectionSetupStep.DETAILS -> detailsValid && (!setupFlow.isSaveStep || credentialValid)
+            ToolConnectionSetupStep.AUTHENTICATION -> detailsValid && credentialValid
+        }
     val actionLabel = when {
         setupFlow.step == ToolConnectionSetupStep.CONNECTION_TYPE -> null
         setupFlow.isSaveStep -> stringResource(R.string.save)
