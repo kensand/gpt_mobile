@@ -195,7 +195,8 @@ fun HomeScreen(
                 chatListState.loadError != null -> item {
                     EmptyErrorState(
                         title = stringResource(R.string.chats_load_error),
-                        description = chatListState.loadError.orEmpty(),
+                        description = chatListState.loadError.orEmpty().takeIf { it.isNotBlank() }
+                            ?: stringResource(R.string.chats_load_error_description),
                         modifier = Modifier.fillParentMaxSize(),
                         primaryActionLabel = stringResource(R.string.retry),
                         onPrimaryAction = homeViewModel::retryFetchChats,
@@ -252,7 +253,7 @@ fun HomeScreen(
                                 if (chatListState.isSelectionMode) {
                                     Checkbox(
                                         checked = chatListState.selectedChats[idx],
-                                        onCheckedChange = null
+                                        onCheckedChange = { homeViewModel.selectChat(idx) }
                                     )
                                 } else {
                                     Icon(

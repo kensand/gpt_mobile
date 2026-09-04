@@ -67,7 +67,7 @@ class MigrateViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         platformState = MigrationState.ERROR,
-                        platformErrorMessage = throwable.message ?: "Platform migration failed"
+                        platformErrorMessage = throwable.message.orEmpty()
                     )
                 }
                 Log.e("Migration", "Error migrating platform", throwable)
@@ -103,7 +103,7 @@ class MigrateViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         chatState = MigrationState.ERROR,
-                        chatErrorMessage = throwable.message ?: "Chat migration failed"
+                        chatErrorMessage = throwable.message.orEmpty()
                     )
                 }
                 Log.e("Migration", "Error migrating chats", throwable)

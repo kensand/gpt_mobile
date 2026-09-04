@@ -215,7 +215,12 @@ fun PlatformMigrationCard(
         status = status,
         title = stringResource(R.string.migrate_platform),
         description = stringResource(R.string.enabled_platform_numbers, numberOfPlatforms),
-        errorMessage = errorMessage,
+        errorMessage = if (status == MigrateViewModel.MigrationState.ERROR) {
+            errorMessage?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.platform_migration_failed)
+        } else {
+            null
+        },
         onMigrationClick = onMigrationClick
     )
 }
@@ -231,7 +236,12 @@ fun ChatRoomMessageMigrationCard(
         status = status,
         title = stringResource(R.string.migrate_chat),
         description = stringResource(R.string.existing_chats, numberOfChats),
-        errorMessage = errorMessage,
+        errorMessage = if (status == MigrateViewModel.MigrationState.ERROR) {
+            errorMessage?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.chat_migration_failed)
+        } else {
+            null
+        },
         onMigrationClick = onMigrationClick
     )
 }

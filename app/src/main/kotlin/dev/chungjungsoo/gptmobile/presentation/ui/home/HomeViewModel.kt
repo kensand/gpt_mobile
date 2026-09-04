@@ -207,7 +207,7 @@ class HomeViewModel @Inject constructor(
                 _chatListState.update {
                     it.copy(
                         isLoading = false,
-                        loadError = throwable.message ?: "Could not load chats"
+                        loadError = throwable.message.orEmpty()
                     )
                 }
             }
