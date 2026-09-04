@@ -78,6 +78,7 @@ fun SetupPlatformListScreen(
 
             // Next button
             PrimaryLongButton(
+                modifier = Modifier.padding(20.dp),
                 enabled = platforms.isNotEmpty(),
                 onClick = onComplete,
                 text = stringResource(R.string.next)

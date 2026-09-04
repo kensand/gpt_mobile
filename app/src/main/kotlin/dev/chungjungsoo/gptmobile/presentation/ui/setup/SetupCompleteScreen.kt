@@ -56,6 +56,7 @@ fun SetupCompleteScreen(
             )
             Spacer(modifier = Modifier.weight(1f))
             PrimaryLongButton(
+                modifier = Modifier.padding(20.dp),
                 onClick = { onNavigate(Route.CHAT_LIST) },
                 text = stringResource(R.string.done)
             )

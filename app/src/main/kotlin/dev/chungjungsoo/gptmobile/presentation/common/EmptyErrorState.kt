@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -33,7 +34,10 @@ fun EmptyErrorState(
     isError: Boolean = false
 ) {
     val stateSemantics = if (isError) {
-        Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
+        Modifier.semantics {
+            error(description)
+            liveRegion = LiveRegionMode.Assertive
+        }
     } else {
         Modifier
     }

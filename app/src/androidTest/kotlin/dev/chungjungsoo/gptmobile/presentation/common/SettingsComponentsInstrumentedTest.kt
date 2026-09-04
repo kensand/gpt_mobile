@@ -1,5 +1,7 @@
 package dev.chungjungsoo.gptmobile.presentation.common
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -32,5 +34,22 @@ class SettingsComponentsInstrumentedTest {
         composeRule.onNodeWithText("Theme").assertHasClickAction().performClick()
         assertTrue(clicked)
         composeRule.onNodeWithContentDescription("Arrow Icon").assertDoesNotExist()
+    }
+
+    @Test
+    fun errorStateExposesItsDescriptionAsAnError() {
+        composeRule.setContent {
+            GPTMobileTheme {
+                EmptyErrorState(
+                    title = "Could not load",
+                    description = "Try again",
+                    isError = true
+                )
+            }
+        }
+
+        composeRule
+            .onNode(SemanticsMatcher.expectValue(SemanticsProperties.Error, "Try again"))
+            .assertExists()
     }
 }

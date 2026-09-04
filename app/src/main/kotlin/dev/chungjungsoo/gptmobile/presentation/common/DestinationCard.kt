@@ -34,6 +34,22 @@ fun DestinationCard(
     selected: Boolean = false,
     enabled: Boolean = true
 ) {
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val supportingColor = if (selected) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }.let { if (enabled) it else it.copy(alpha = 0.38f) }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -45,12 +61,10 @@ fun DestinationCard(
         onClick = onClick,
         enabled = enabled,
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            },
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.38f)
+            containerColor = containerColor,
+            contentColor = contentColor,
+            disabledContainerColor = containerColor.copy(alpha = 0.38f),
+            disabledContentColor = contentColor.copy(alpha = 0.38f)
         ),
         shape = MaterialTheme.shapes.medium
     ) {
@@ -66,14 +80,14 @@ fun DestinationCard(
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = supportingColor
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = supportingColor,
                 modifier = Modifier.size(24.dp)
             )
         }

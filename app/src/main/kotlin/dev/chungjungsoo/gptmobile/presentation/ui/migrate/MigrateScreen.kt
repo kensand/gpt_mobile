@@ -70,6 +70,7 @@ fun MigrateScreen(
             )
             Spacer(modifier = Modifier.weight(1f))
             PrimaryLongButton(
+                modifier = Modifier.padding(20.dp),
                 enabled = uiState.platformState == MigrateViewModel.MigrationState.MIGRATED &&
                     uiState.chatState == MigrateViewModel.MigrationState.MIGRATED,
                 onClick = onFinish,
