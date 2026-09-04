@@ -68,8 +68,11 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -534,17 +537,19 @@ fun PlatformSettingScreen(
                     DeletePlatformDialog(dialogState, settingViewModel)
                     SearchBackendDialog(toolBindingState, settingViewModel)
                     McpToolsDialog(toolBindingState, settingViewModel)
-                    toolBindingState.errorMessage?.let { message ->
-                        AlertDialog(
-                            title = { Text(stringResource(R.string.error)) },
-                            text = { Text(message) },
-                            onDismissRequest = settingViewModel::clearToolError,
-                            confirmButton = {
-                                TextButton(onClick = settingViewModel::clearToolError) {
-                                    Text(stringResource(R.string.close))
+                    if (!toolBindingState.isMcpToolsDialogOpen) {
+                        toolBindingState.errorMessage?.let { message ->
+                            AlertDialog(
+                                title = { Text(stringResource(R.string.error)) },
+                                text = { Text(message) },
+                                onDismissRequest = settingViewModel::clearToolError,
+                                confirmButton = {
+                                    TextButton(onClick = settingViewModel::clearToolError) {
+                                        Text(stringResource(R.string.close))
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
                 }
             } ?: EmptyErrorState(
@@ -570,13 +575,14 @@ private fun McpToolsDialog(
         title = { Text(stringResource(R.string.mcp_tools)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                val discoveringMcpToolsDescription = stringResource(R.string.discovering_mcp_tools)
                 when {
                     toolBindingState.mcpConnections.isEmpty() -> Text(stringResource(R.string.no_mcp_connections))
 
                     toolBindingState.isMcpToolsLoading -> CircularProgressIndicator(
                         modifier = Modifier
                             .padding(16.dp)
-                            .semantics { contentDescription = "Discovering MCP tools" }
+                            .semantics { contentDescription = discoveringMcpToolsDescription }
                     )
 
                     toolBindingState.mcpToolOptions.isEmpty() -> Text(stringResource(R.string.no_mcp_tools))
@@ -585,6 +591,11 @@ private fun McpToolsDialog(
                         val selected = toolBindingState.pendingMcpTools.any {
                             it.connectionUid == option.connectionUid && it.toolName == option.toolName
                         }
+                        val optionDescription = stringResource(
+                            R.string.mcp_tool_option_content_description,
+                            option.connectionName,
+                            option.toolName
+                        )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -592,7 +603,7 @@ private fun McpToolsDialog(
                                     value = selected,
                                     onValueChange = { settingViewModel.toggleMcpTool(option.connectionUid, option.toolName) }
                                 )
-                                .semantics { contentDescription = "${option.connectionName} ${option.toolName}" }
+                                .semantics { contentDescription = optionDescription }
                                 .padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -607,12 +618,34 @@ private fun McpToolsDialog(
                         }
                     }
                 }
+                toolBindingState.errorMessage?.let { message ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                    ) {
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics {
+                                    error(message)
+                                    liveRegion = LiveRegionMode.Assertive
+                                }
+                        )
+                        TextButton(onClick = settingViewModel::openMcpToolsDialog) {
+                            Text(stringResource(R.string.retry))
+                        }
+                    }
+                }
             }
         },
         onDismissRequest = settingViewModel::closeMcpToolsDialog,
         confirmButton = {
             TextButton(
-                enabled = !toolBindingState.isMcpToolsLoading,
+                enabled = !toolBindingState.isMcpToolsLoading && toolBindingState.errorMessage == null,
                 onClick = settingViewModel::saveMcpTools
             ) {
                 Text(stringResource(R.string.save))
@@ -636,8 +669,12 @@ private fun SearchBackendDialog(
             title = { Text(stringResource(R.string.search_backend)) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
+                    val noneSearchBackendDescription = stringResource(
+                        R.string.search_backend_option_content_description,
+                        stringResource(R.string.none)
+                    )
                     RadioItem(
-                        modifier = Modifier.semantics { contentDescription = "Search backend None" },
+                        modifier = Modifier.semantics { contentDescription = noneSearchBackendDescription },
                         title = stringResource(R.string.none),
                         description = null,
                         value = "",
@@ -646,8 +683,12 @@ private fun SearchBackendDialog(
                         settingViewModel.selectSearchBackend(null)
                     }
                     toolBindingState.searchConnections.forEach { connection ->
+                        val searchBackendDescription = stringResource(
+                            R.string.search_backend_option_content_description,
+                            connection.name
+                        )
                         RadioItem(
-                            modifier = Modifier.semantics { contentDescription = "Search backend ${connection.name}" },
+                            modifier = Modifier.semantics { contentDescription = searchBackendDescription },
                             title = connection.name,
                             description = connection.alias,
                             value = connection.connectionUid,

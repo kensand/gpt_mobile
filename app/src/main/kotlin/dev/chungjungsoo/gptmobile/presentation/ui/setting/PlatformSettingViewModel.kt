@@ -484,7 +484,7 @@ class PlatformSettingViewModel @Inject constructor(
 
     fun closeMcpToolsDialog() {
         mcpDiscoveryJob?.cancel()
-        _toolBindingState.update { it.copy(isMcpToolsDialogOpen = false, isMcpToolsLoading = false) }
+        _toolBindingState.update { it.copy(isMcpToolsDialogOpen = false, isMcpToolsLoading = false, errorMessage = null) }
     }
 
     private suspend fun discoverMcpTools(connection: ToolConnection) = try {

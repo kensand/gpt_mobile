@@ -35,7 +35,7 @@ fun SettingsSection(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .semantics { heading() }
                     .padding(vertical = 8.dp)

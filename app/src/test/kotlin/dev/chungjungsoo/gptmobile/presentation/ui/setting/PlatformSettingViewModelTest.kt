@@ -212,6 +212,27 @@ class PlatformSettingViewModelTest {
     }
 
     @Test
+    fun `closing MCP tools dialog clears discovery error`() = runTest {
+        val dao = FakeToolConnectionDao(
+            connections = mutableMapOf(
+                "mcp-1" to testConnection("mcp-1", ToolConnectionType.MCP).copy(endpointUrl = null)
+            )
+        )
+        val viewModel = testViewModel(dao)
+
+        viewModel.loadToolBindings()
+        viewModel.openMcpToolsDialog()
+
+        assertTrue(viewModel.toolBindingState.value.errorMessage != null)
+
+        viewModel.closeMcpToolsDialog()
+
+        assertFalse(viewModel.toolBindingState.value.isMcpToolsDialogOpen)
+        assertFalse(viewModel.toolBindingState.value.isMcpToolsLoading)
+        assertNull(viewModel.toolBindingState.value.errorMessage)
+    }
+
+    @Test
     fun `updating top-k persists to the local profile`() = runTest {
         val settings = FakeSettingRepository(localPlatform())
         val viewModel = localSettingsViewModel(settings)

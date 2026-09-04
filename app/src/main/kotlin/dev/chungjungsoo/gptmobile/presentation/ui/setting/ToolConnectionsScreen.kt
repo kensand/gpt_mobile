@@ -388,13 +388,12 @@ fun ToolConnectionEditorScreen(
     }
     val isActionEnabled = !uiState.isSaving &&
         when (setupFlow.step) {
-            ToolConnectionSetupStep.CONNECTION_TYPE -> false
+            ToolConnectionSetupStep.CONNECTION_TYPE -> setupFlow.canContinue
             ToolConnectionSetupStep.WEB_SEARCH_PROVIDER -> setupFlow.canContinue
             ToolConnectionSetupStep.DETAILS -> detailsValid && (!setupFlow.isSaveStep || credentialValid)
             ToolConnectionSetupStep.AUTHENTICATION -> detailsValid && credentialValid
         }
     val actionLabel = when {
-        setupFlow.step == ToolConnectionSetupStep.CONNECTION_TYPE -> null
         setupFlow.isSaveStep -> stringResource(R.string.save)
         else -> stringResource(R.string.next)
     }
@@ -441,21 +440,19 @@ fun ToolConnectionEditorScreen(
             )
         },
         bottomBar = {
-            actionLabel?.let { label ->
-                ToolConnectionEditorBottomBar(
-                    label = label,
-                    isEnabled = isActionEnabled,
-                    isSaving = uiState.isSaving,
-                    errorMessage = uiState.errorMessage,
-                    onClick = {
-                        if (setupFlow.isSaveStep) {
-                            save()
-                        } else {
-                            setupFlow = setupFlow.next()
-                        }
+            ToolConnectionEditorBottomBar(
+                label = actionLabel,
+                isEnabled = isActionEnabled,
+                isSaving = uiState.isSaving,
+                errorMessage = uiState.errorMessage,
+                onClick = {
+                    if (setupFlow.isSaveStep) {
+                        save()
+                    } else {
+                        setupFlow = setupFlow.next()
                     }
-                )
-            }
+                }
+            )
         }
     ) { innerPadding ->
         ToolConnectionStepContent(
@@ -479,7 +476,7 @@ fun ToolConnectionEditorScreen(
             isEndpointValid = isEndpointValid,
             onPathSelected = { path ->
                 val previousPath = setupFlow.path
-                setupFlow = setupFlow.selectPath(path).next()
+                setupFlow = setupFlow.selectPath(path)
                 if (previousPath != null && previousPath != path) {
                     name = ""
                     alias = ""
@@ -858,12 +855,14 @@ private fun ToolConnectionStepContent(
                     DestinationCard(
                         title = stringResource(R.string.web_search),
                         description = stringResource(R.string.web_search_connection_description),
+                        selected = setupFlow.path == ToolConnectionSetupPath.WEB_SEARCH,
                         onClick = { onPathSelected(ToolConnectionSetupPath.WEB_SEARCH) }
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     DestinationCard(
                         title = stringResource(R.string.mcp_server),
                         description = stringResource(R.string.mcp_server_connection_description),
+                        selected = setupFlow.path == ToolConnectionSetupPath.MCP_SERVER,
                         onClick = { onPathSelected(ToolConnectionSetupPath.MCP_SERVER) }
                     )
                 }

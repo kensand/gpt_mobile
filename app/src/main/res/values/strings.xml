@@ -423,6 +423,7 @@
     <string name="clear_api_key">Clear API key</string>
     <string name="clear_saved_credential">Clear saved credential</string>
     <string name="search_backend">Search backend</string>
+    <string name="search_backend_option_content_description">Search backend %1$s</string>
     <string name="search_tool_trace">Search tool trace</string>
     <string name="tool_trace_block_content_description">Tool trace block, %1$s</string>
     <string name="tool_trace_expand_content_description">Expand tool trace</string>
@@ -453,6 +454,8 @@
     <string name="mcp_tools_assigned">%1$d assigned</string>
     <string name="no_mcp_connections">Add an MCP connection first.</string>
     <string name="no_mcp_tools">No tools were discovered.</string>
+    <string name="discovering_mcp_tools">Discovering MCP tools</string>
+    <string name="mcp_tool_option_content_description">%1$s %2$s</string>
     <string name="public_access">Public</string>
     <string name="oauth_not_connected">OAuth not connected</string>
     <string name="oauth_connected">OAuth connected</string>
