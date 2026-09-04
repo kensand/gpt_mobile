@@ -1,5 +1,8 @@
 package dev.chungjungsoo.gptmobile.presentation.common
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -17,6 +20,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.navigation
 import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.presentation.theme.fastEffectsSpec
+import dev.chungjungsoo.gptmobile.presentation.theme.fastSpatialSpec
 import dev.chungjungsoo.gptmobile.presentation.ui.chat.ChatScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.home.HomeScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.migrate.MigrateScreen
@@ -47,7 +52,17 @@ fun SetupNavGraph(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
         navController = navController,
-        startDestination = Route.CHAT_LIST
+        startDestination = Route.CHAT_LIST,
+        enterTransition = {
+            fadeIn(fastEffectsSpec()) +
+                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, fastSpatialSpec()) { it / 12 }
+        },
+        exitTransition = { fadeOut(fastEffectsSpec()) },
+        popEnterTransition = { fadeIn(fastEffectsSpec()) },
+        popExitTransition = {
+            fadeOut(fastEffectsSpec()) +
+                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, fastSpatialSpec()) { it / 12 }
+        }
     ) {
         homeScreenNavigation(navController)
         migrationScreenNavigation(navController)
