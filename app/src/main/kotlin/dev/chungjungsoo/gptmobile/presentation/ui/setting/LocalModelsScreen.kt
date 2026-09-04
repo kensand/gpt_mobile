@@ -194,7 +194,7 @@ private fun HuggingFaceAccountSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
