@@ -1,6 +1,7 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.chat
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -66,6 +67,7 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolEvent
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventStatus
 import dev.chungjungsoo.gptmobile.data.database.entity.hasUnavailableAssistantOrder
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
+import dev.chungjungsoo.gptmobile.presentation.theme.defaultSpatialSpec
 import dev.chungjungsoo.gptmobile.presentation.theme.fastEffectsSpec
 import dev.chungjungsoo.gptmobile.presentation.theme.fastSpatialSpec
 import java.io.File
@@ -209,7 +211,8 @@ fun OpponentChatBubble(
             targetState = isDetailsExpanded && hasDetails,
             transitionSpec = {
                 fadeIn(animationSpec = fastEffectsSpec()) togetherWith
-                    fadeOut(animationSpec = fastEffectsSpec())
+                    fadeOut(animationSpec = fastEffectsSpec()) using
+                    SizeTransform(sizeAnimationSpec = { _, _ -> defaultSpatialSpec() })
             },
             label = "assistant details"
         ) { showDetails ->
