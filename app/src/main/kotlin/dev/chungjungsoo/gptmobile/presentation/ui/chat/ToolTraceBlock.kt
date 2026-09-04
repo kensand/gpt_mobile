@@ -210,7 +210,12 @@ private fun ToolTraceEventCard(
             connectionLabel(event)?.let { ToolTraceLine(labels.connection, it) }
             toolTimingLabel(event, labels)?.let { ToolTraceLine(labels.timing, it) }
             event.error?.takeIf { it.isNotBlank() }?.let {
-                ToolTraceBlockText(labels.error, toolEventErrorText(it), onViewFull)
+                ToolTraceBlockText(
+                    label = labels.error,
+                    value = toolEventErrorText(it),
+                    onViewFull = onViewFull,
+                    fullValue = it
+                )
             }
             ToolTraceBlockText(labels.arguments, event.arguments, onViewFull)
             event.result?.takeIf { it.isNotBlank() }?.let {
@@ -235,7 +240,8 @@ private fun ToolTraceLine(label: String, value: String) {
 private fun ToolTraceBlockText(
     label: String,
     value: String,
-    onViewFull: (String) -> Unit
+    onViewFull: (String) -> Unit,
+    fullValue: String = value
 ) {
     var hasVisualOverflow by remember(value) { mutableStateOf(false) }
     val viewFullDescription = stringResource(R.string.view_full_value, label)
@@ -253,10 +259,10 @@ private fun ToolTraceBlockText(
         overflow = TextOverflow.Ellipsis,
         onTextLayout = { hasVisualOverflow = it.hasVisualOverflow }
     )
-    if (toolTextRequiresViewFull(value) || hasVisualOverflow) {
+    if (toolTextRequiresViewFull(fullValue) || hasVisualOverflow) {
         TextButton(
             modifier = Modifier.semantics { contentDescription = viewFullDescription },
-            onClick = { onViewFull(value) }
+            onClick = { onViewFull(fullValue) }
         ) {
             Text(stringResource(R.string.view_full))
         }

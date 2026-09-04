@@ -81,6 +81,30 @@ class ChatMessagePresentationInstrumentedTest {
     }
 
     @Test
+    fun expandedPostToolStreamingRetainsOneTrailingDot() {
+        composeRule.setContent {
+            GPTMobileTheme {
+                OpponentChatBubble(
+                    text = "Answer",
+                    canRetry = false,
+                    isLoading = true,
+                    timeline = listOf(
+                        AssistantTimelineItem(AssistantTimelineItemType.TEXT, content = "Answer"),
+                        AssistantTimelineItem(AssistantTimelineItemType.TOOL, toolSequence = 0)
+                    ),
+                    toolEvents = listOf(toolEvent()),
+                    contentIdentity = "post-tool"
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Details").performClick()
+
+        composeRule.onAllNodesWithText("●").assertCountEquals(1)
+        composeRule.onNodeWithContentDescription("Tool in progress").assertDoesNotExist()
+    }
+
+    @Test
     fun failedRetryStaysInlineAndIsAbsentFromActionsSheet() {
         composeRule.setContent {
             GPTMobileTheme {

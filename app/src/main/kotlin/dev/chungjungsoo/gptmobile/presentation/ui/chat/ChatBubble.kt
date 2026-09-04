@@ -463,6 +463,13 @@ private fun AssistantTimelineContent(
             }
         }
     }
+    if (showStreamingIndicator && timeline.lastOrNull()?.type == AssistantTimelineItemType.TOOL) {
+        Text(
+            text = "●",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+    }
 }
 
 internal fun hasUnresolvedToolReferences(
