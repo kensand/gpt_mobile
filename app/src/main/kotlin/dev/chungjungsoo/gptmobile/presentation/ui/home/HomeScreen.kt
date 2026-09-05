@@ -204,7 +204,7 @@ fun HomeScreen(
                     )
                 }
 
-                chatListState.isSearchMode && chatListState.chats.isEmpty() -> item {
+                chatListState.isSearchMode && searchQuery.isNotBlank() && chatListState.chats.isEmpty() -> item {
                     EmptyErrorState(
                         title = stringResource(R.string.no_search_results),
                         description = stringResource(R.string.no_search_results_description),

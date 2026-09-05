@@ -645,7 +645,7 @@ private fun McpToolsDialog(
         onDismissRequest = settingViewModel::closeMcpToolsDialog,
         confirmButton = {
             TextButton(
-                enabled = !toolBindingState.isMcpToolsLoading && toolBindingState.errorMessage == null,
+                enabled = !toolBindingState.isMcpToolsLoading,
                 onClick = settingViewModel::saveMcpTools
             ) {
                 Text(stringResource(R.string.save))

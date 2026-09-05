@@ -1,7 +1,6 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setup
 
 import android.content.Intent
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -235,11 +234,12 @@ class SetupViewModelV2 @Inject constructor(
         downloadActions.openAccessTokenDialog()
     }
 
-    fun savePlatform() {
+    fun savePlatform(onSuccess: (() -> Unit)? = null) {
+        if (_saveStatus.value is SaveStatus.Saving) return
         val clientType = _selectedClientType.value ?: return
+        _saveStatus.value = SaveStatus.Saving
 
         viewModelScope.launch {
-            _saveStatus.value = SaveStatus.Saving
             try {
                 val defaults = if (clientType == ClientType.LITERT_LM) {
                     catalogDefaultsFor(_model.value.trim())
@@ -267,8 +267,8 @@ class SetupViewModelV2 @Inject constructor(
                 loadPlatforms()
                 _saveStatus.value = SaveStatus.Success
                 resetWizard()
+                onSuccess?.invoke()
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to save platform", e)
                 val errorMessage = when (e) {
                     is android.database.sqlite.SQLiteConstraintException -> "A platform with this name already exists."
                     is android.database.sqlite.SQLiteException -> "Database error: ${e.message}"
@@ -362,7 +362,6 @@ class SetupViewModelV2 @Inject constructor(
     private fun getDefaultApiUrl(clientType: ClientType): String = ModelConstants.defaultApiUrl(clientType)
 
     companion object {
-        private const val TAG = "SetupViewModelV2"
         const val WIZARD_STEP_BASICS = 0
         const val WIZARD_STEP_API_KEY = 1
         const val WIZARD_STEP_MODEL = 2

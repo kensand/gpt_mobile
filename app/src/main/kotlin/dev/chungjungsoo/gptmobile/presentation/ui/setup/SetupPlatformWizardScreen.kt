@@ -34,7 +34,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -66,6 +69,7 @@ fun SetupPlatformWizardScreen(
     val downloadState by setupViewModel.localModelDownloadState.collectAsStateWithLifecycle()
     val canProceed by setupViewModel.canProceed.collectAsStateWithLifecycle()
     val isWaitingForDownload by setupViewModel.isWaitingForDownload.collectAsStateWithLifecycle()
+    val saveStatus by setupViewModel.saveStatus.collectAsStateWithLifecycle()
     val requestDownload = rememberLocalModelDownloader { entry ->
         setupViewModel.selectLocalModel(entry.id)
     }
@@ -189,16 +193,17 @@ fun SetupPlatformWizardScreen(
                 }
 
                 WizardNavigationButton(
-                    canProceed = canProceed,
+                    canProceed = canProceed && saveStatus !is SaveStatus.Saving,
                     onNext = {
                         if (wizardStep == WIZARD_STEP_MODEL) {
-                            setupViewModel.savePlatform()
-                            onComplete()
+                            setupViewModel.savePlatform(onComplete)
                         } else {
                             setupViewModel.nextWizardStep()
                         }
                     },
-                    isLastStep = wizardStep == WIZARD_STEP_MODEL
+                    isLastStep = wizardStep == WIZARD_STEP_MODEL,
+                    isSaving = saveStatus is SaveStatus.Saving,
+                    errorMessage = (saveStatus as? SaveStatus.Error)?.message
                 )
             }
         }
@@ -544,15 +549,40 @@ private fun WizardNavigationButton(
     canProceed: Boolean,
     onNext: () -> Unit,
     isLastStep: Boolean,
+    isSaving: Boolean = false,
+    errorMessage: String? = null,
     modifier: Modifier = Modifier
 ) {
-    PrimaryLongButton(
+    Column(
         modifier = modifier
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-        enabled = canProceed,
-        onClick = onNext,
-        text = stringResource(if (isLastStep) R.string.finish else R.string.next)
-    )
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+    ) {
+        errorMessage?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        error(message)
+                        liveRegion = LiveRegionMode.Assertive
+                    }
+                    .padding(bottom = 8.dp)
+            )
+        }
+        PrimaryLongButton(
+            enabled = canProceed,
+            onClick = onNext,
+            text = stringResource(
+                when {
+                    isLastStep && isSaving -> R.string.saving
+                    isLastStep -> R.string.finish
+                    else -> R.string.next
+                }
+            )
+        )
+    }
 }
 
 private fun getApiHelpUrl(clientType: ClientType): String? = when (clientType) {

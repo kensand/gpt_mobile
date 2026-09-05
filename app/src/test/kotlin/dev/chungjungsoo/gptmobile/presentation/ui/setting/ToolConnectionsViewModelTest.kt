@@ -112,6 +112,56 @@ class ToolConnectionsViewModelTest {
     }
 
     @Test
+    fun `save stays busy through close and rejects a second new save`() = runTest {
+        val dao = FakeToolConnectionDao()
+        val vault = FakeSecretVault()
+        val networkClient = NetworkClient(CIO)
+        val manager = McpClientManager(networkClient())
+        val repository = ToolConnectionRepository(dao, vault)
+        val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+        val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+        val provider = ToolConnectionsViewModel.providers.first { it.type == ToolConnectionType.FIRECRAWL }
+        var firstCompleted = false
+        var secondCompleted = false
+
+        viewModel.saveConnection(
+            existing = null,
+            provider = provider,
+            name = "Search",
+            alias = "search",
+            endpointUrl = "",
+            authType = ToolConnectionAuthType.BEARER,
+            credential = "key",
+            oauthClientId = "",
+            allowCleartext = false,
+            clearCredential = false,
+            onSuccess = {
+                firstCompleted = true
+                viewModel.saveConnection(
+                    existing = null,
+                    provider = provider,
+                    name = "Search Two",
+                    alias = "search_two",
+                    endpointUrl = "",
+                    authType = ToolConnectionAuthType.BEARER,
+                    credential = "key-two",
+                    oauthClientId = "",
+                    allowCleartext = false,
+                    clearCredential = false,
+                    onSuccess = { secondCompleted = true }
+                )
+            }
+        )
+
+        assertTrue(firstCompleted)
+        assertFalse(secondCompleted)
+        assertFalse(viewModel.uiState.value.isSaving)
+        assertEquals(1, dao.listConnections().size)
+        manager.closeAll()
+        networkClient().close()
+    }
+
+    @Test
     fun `save failure clears busy state and does not invoke callback`() = runTest {
         val dao = ControllableToolConnectionDao(
             FakeToolConnectionDao(),
@@ -592,6 +642,7 @@ class ToolConnectionsViewModelTest {
             viewModel.completeOAuthCallback(
                 "$MCP_OAUTH_SCHEME://oauth/mcp/connection-1?code=auth-code&state=$state"
             )
+            viewModel.cancelPendingOAuth()
             completion.await()
 
             val saved = dao.getConnection("connection-1")!!
@@ -604,6 +655,8 @@ class ToolConnectionsViewModelTest {
             assertEquals("fixture-client", saved.oauthClientId)
             assertEquals("access-1", credential.accessToken)
             assertNull(viewModel.uiState.value.errorMessage)
+            assertNull(viewModel.uiState.value.rowErrorConnectionUid)
+            assertNull(viewModel.uiState.value.rowErrorMessage)
             assertTrue(viewModel.uiState.value.connections.any { it.connectionUid == "connection-1" && it.secretRef != null })
             manager.closeAll()
             networkClient().close()
@@ -641,6 +694,51 @@ class ToolConnectionsViewModelTest {
             viewModel.uiState.first { it.busyConnectionUid == null }
 
             assertEquals(1, server.protectedResourceRequests.get())
+            manager.closeAll()
+            networkClient().close()
+        }
+    }
+
+    @Test
+    fun `OAuth cancel reset permits a second launch`() = runBlocking {
+        McpOAuthClientTest.OAuthFixtureServer().use { server ->
+            val dao = FakeToolConnectionDao()
+            val vault = FakeSecretVault()
+            val repository = ToolConnectionRepository(dao, vault)
+            val networkClient = NetworkClient(CIO)
+            val manager = McpClientManager(networkClient())
+            val coordinator = McpOAuthCoordinator(McpOAuthClient(networkClient()), repository, vault, manager)
+            dao.upsertConnection(
+                ToolConnection(
+                    connectionUid = "connection-1",
+                    name = "OAuth MCP",
+                    alias = "oauth_mcp",
+                    type = ToolConnectionType.MCP,
+                    endpointUrl = server.mcpUrl,
+                    authType = ToolConnectionAuthType.OAUTH,
+                    secretRef = null,
+                    oauthClientId = null,
+                    allowCleartext = true
+                )
+            )
+            val viewModel = ToolConnectionsViewModel(dao, vault, coordinator, manager)
+            val firstLaunch = async(start = CoroutineStart.UNDISPATCHED) { viewModel.oauthLaunches.first() }
+
+            viewModel.startOAuth("connection-1")
+            firstLaunch.await()
+            viewModel.uiState.first { it.busyConnectionUid == null }
+            viewModel.cancelPendingOAuth()
+
+            assertEquals("connection-1", viewModel.uiState.value.rowErrorConnectionUid)
+            assertTrue(viewModel.uiState.value.rowErrorMessage!!.contains("canceled"))
+
+            viewModel.clearRowError("connection-1")
+            val secondLaunch = async(start = CoroutineStart.UNDISPATCHED) { viewModel.oauthLaunches.first() }
+            viewModel.startOAuth("connection-1")
+            secondLaunch.await()
+            viewModel.uiState.first { it.busyConnectionUid == null }
+
+            assertEquals(2, server.protectedResourceRequests.get())
             manager.closeAll()
             networkClient().close()
         }

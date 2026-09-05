@@ -20,6 +20,7 @@ import dev.chungjungsoo.gptmobile.data.repository.ChatRepository
 import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
 import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -61,18 +62,92 @@ class HomeViewModelInstrumentedTest {
         assertNull(ready.loadError)
         assertFalse(ready.isLoading)
     }
+
+    @Test
+    fun successfulSearchClearsStaleLoadError() = runBlocking {
+        val chats = listOf(ChatRoomV2(id = 1, title = "Saved chat", enabledPlatform = listOf("platform-1")))
+        val repository = QueueChatRepository(
+            responses = ArrayDeque(listOf(Result.failure(IOException("offline")))),
+            searchResults = ArrayDeque(listOf(chats))
+        )
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val viewModel = HomeViewModel(
+            chatRepository = repository,
+            settingRepository = EmptySettingRepository(),
+            agentRunCoordinator = AgentRunCoordinator(context, repository)
+        )
+
+        viewModel.fetchChats()
+        withTimeout(5_000) {
+            viewModel.chatListState.first { it.loadError == "offline" }
+        }
+
+        viewModel.enableSearchMode()
+        viewModel.updateSearchQuery("Saved")
+        val searched = withTimeout(5_000) {
+            viewModel.chatListState.first { it.loadError == null && it.chats == chats }
+        }
+        assertNull(searched.loadError)
+        assertEquals(chats, searched.chats)
+    }
+
+    @Test
+    fun populatedRefreshRetainsExistingChats() = runBlocking {
+        val chats = listOf(ChatRoomV2(id = 1, title = "Saved chat", enabledPlatform = listOf("platform-1")))
+        val secondFetch = CompletableDeferred<Unit>()
+        val repository = QueueChatRepository(
+            responses = ArrayDeque(
+                listOf(
+                    Result.success(chats),
+                    Result.success(chats)
+                )
+            ),
+            fetchGate = secondFetch
+        )
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val viewModel = HomeViewModel(
+            chatRepository = repository,
+            settingRepository = EmptySettingRepository(),
+            agentRunCoordinator = AgentRunCoordinator(context, repository)
+        )
+
+        viewModel.fetchChats()
+        withTimeout(5_000) {
+            viewModel.chatListState.first { !it.isLoading && it.chats == chats }
+        }
+
+        viewModel.fetchChats()
+        withTimeout(5_000) { repository.fetchStarted.await() }
+        val refreshing = viewModel.chatListState.value
+        assertFalse(refreshing.isLoading)
+        assertEquals(chats, refreshing.chats)
+        assertNull(refreshing.loadError)
+        secondFetch.complete(Unit)
+        Unit
+    }
 }
 
 private class QueueChatRepository(
-    private val responses: ArrayDeque<Result<List<ChatRoomV2>>>
+    private val responses: ArrayDeque<Result<List<ChatRoomV2>>>,
+    private val searchResults: ArrayDeque<List<ChatRoomV2>> = ArrayDeque(),
+    private val fetchGate: CompletableDeferred<Unit>? = null,
+    val fetchStarted: CompletableDeferred<Unit> = CompletableDeferred()
 ) : ChatRepository {
-    override suspend fun fetchChatListV2(): List<ChatRoomV2> = responses.removeFirst().getOrThrow()
+    override suspend fun fetchChatListV2(): List<ChatRoomV2> {
+        val remainingBefore = responses.size
+        val result = responses.removeFirst()
+        if (fetchGate != null && remainingBefore == 1) {
+            fetchStarted.complete(Unit)
+            fetchGate.await()
+        }
+        return result.getOrThrow()
+    }
     override suspend fun completeChat(userMessages: List<MessageV2>, assistantMessages: List<List<MessageV2>>, platform: PlatformV2, runId: String): Flow<ApiState> = error("unused")
     override fun observeMessagesV2(chatId: Int): Flow<List<MessageV2>> = error("unused")
     override fun observeAgentRuns(chatId: Int): Flow<List<AgentRun>> = error("unused")
     override fun observeToolEvents(chatId: Int): Flow<List<ToolEvent>> = error("unused")
     override suspend fun fetchChatList(): List<ChatRoom> = error("unused")
-    override suspend fun searchChatsV2(query: String): List<ChatRoomV2> = error("unused")
+    override suspend fun searchChatsV2(query: String): List<ChatRoomV2> = searchResults.removeFirst()
     override suspend fun fetchMessages(chatId: Int): List<Message> = error("unused")
     override suspend fun fetchMessagesV2(chatId: Int): List<MessageV2> = error("unused")
     override suspend fun fetchChatPlatformModels(chatId: Int): Map<String, String> = error("unused")

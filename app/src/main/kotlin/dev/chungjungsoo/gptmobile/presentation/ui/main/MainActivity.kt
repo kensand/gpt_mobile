@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.browser.auth.AuthTabIntent
 import androidx.browser.customtabs.CustomTabsIntent
@@ -40,6 +41,7 @@ class MainActivity : ComponentActivity() {
     private val themeViewModel: ThemeViewModel by viewModels()
     private val toolConnectionsViewModel: ToolConnectionsViewModel by viewModels()
     private lateinit var authTabLauncher: ActivityResultLauncher<Intent>
+    private lateinit var oauthCustomTabLauncher: ActivityResultLauncher<Intent>
     private var lastOAuthCallback: String? = null
 
     @Volatile
@@ -56,6 +58,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         authTabLauncher = AuthTabIntent.registerActivityResultLauncher(this) { result ->
             dispatchOAuthCallback(result.resultUri?.toString())
+        }
+        oauthCustomTabLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            toolConnectionsViewModel.cancelPendingOAuth()
         }
 
         // Prevent keyboard from pushing the entire view up - composable handles insets via imePadding()
@@ -110,7 +115,9 @@ class MainActivity : ComponentActivity() {
             AuthTabIntent.Builder().build().launch(authTabLauncher, uri, MCP_OAUTH_SCHEME)
         } catch (_: ActivityNotFoundException) {
             try {
-                CustomTabsIntent.Builder().build().launchUrl(this, uri)
+                val customTabsIntent = CustomTabsIntent.Builder().build()
+                customTabsIntent.intent.data = uri
+                oauthCustomTabLauncher.launch(customTabsIntent.intent)
             } catch (_: ActivityNotFoundException) {
                 toolConnectionsViewModel.failOAuthLaunch()
             }

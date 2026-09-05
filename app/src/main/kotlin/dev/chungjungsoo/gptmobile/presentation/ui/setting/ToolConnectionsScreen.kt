@@ -1017,9 +1017,19 @@ private fun ConnectionDetailsStep(
                     value = endpoint,
                     onValueChange = onEndpointChange,
                     label = { Text(stringResource(R.string.api_url)) },
-                    isError = endpoint.isNotBlank() && !isEndpointValid,
-                    supportingText = if (endpoint.isNotBlank() && !isEndpointValid) {
-                        { Text(stringResource(R.string.mcp_endpoint_error)) }
+                    isError = !isEndpointValid,
+                    supportingText = if (!isEndpointValid) {
+                        {
+                            Text(
+                                stringResource(
+                                    if (endpoint.isBlank()) {
+                                        R.string.field_required
+                                    } else {
+                                        R.string.mcp_endpoint_error
+                                    }
+                                )
+                            )
+                        }
                     } else {
                         null
                     },

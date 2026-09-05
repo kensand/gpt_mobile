@@ -56,7 +56,7 @@ fun DestinationCard(
             .heightIn(min = 48.dp)
             .semantics(mergeDescendants = true) {
                 role = Role.Button
-                if (selected) this.selected = true
+                this.selected = selected
             },
         onClick = onClick,
         enabled = enabled,

@@ -2,9 +2,10 @@ package dev.chungjungsoo.gptmobile.presentation.common
 
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
@@ -33,7 +34,13 @@ class SettingsComponentsInstrumentedTest {
 
         composeRule.onNodeWithText("Theme").assertHasClickAction().performClick()
         assertTrue(clicked)
-        composeRule.onNodeWithContentDescription("Arrow Icon").assertDoesNotExist()
+        composeRule.onAllNodes(hasClickAction(), useUnmergedTree = false).assertCountEquals(1)
+        composeRule
+            .onAllNodes(
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription),
+                useUnmergedTree = true
+            )
+            .assertCountEquals(0)
     }
 
     @Test

@@ -104,7 +104,8 @@ class HomeViewModel @Inject constructor(
             _chatListState.update {
                 it.copy(
                     chats = chats,
-                    selectedChats = List(chats.size) { false }
+                    selectedChats = List(chats.size) { false },
+                    loadError = null
                 )
             }
         }
@@ -187,7 +188,7 @@ class HomeViewModel @Inject constructor(
 
     fun fetchChats() {
         fetchChatsJob?.cancel()
-        _chatListState.update { it.copy(isLoading = true, loadError = null) }
+        _chatListState.update { it.copy(isLoading = it.chats.isEmpty(), loadError = null) }
         fetchChatsJob = viewModelScope.launch {
             try {
                 val chats = chatRepository.fetchChatListV2()

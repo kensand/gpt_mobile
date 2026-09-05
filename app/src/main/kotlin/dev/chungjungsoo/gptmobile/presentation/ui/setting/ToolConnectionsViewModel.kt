@@ -136,7 +136,6 @@ class ToolConnectionsViewModel @Inject constructor(
             } else {
                 null
             }
-            var didSave = false
             try {
                 val shouldClearCredential = shouldClearCredential(
                     existingType = existing?.type,
@@ -149,18 +148,15 @@ class ToolConnectionsViewModel @Inject constructor(
                     credential = credentialBytes,
                     clearCredential = (shouldClear || shouldClearCredential) && credentialBytes == null
                 )
-                didSave = true
+                mcpClientManager.close(connection.connectionUid)
+                refresh()
+                onSuccess()
             } catch (exception: CancellationException) {
                 throw exception
             } catch (throwable: Throwable) {
                 showError(throwable)
             } finally {
                 _uiState.update { it.copy(isSaving = false) }
-            }
-            if (didSave) {
-                mcpClientManager.close(connection.connectionUid)
-                refresh()
-                onSuccess()
             }
         }
     }
@@ -238,7 +234,7 @@ class ToolConnectionsViewModel @Inject constructor(
             return
         }
         if (_uiState.value.busyConnectionUid != null) return
-        pendingOAuthConnectionUid = connectionUid
+        pendingOAuthConnectionUid = null
         setRowBusy(connectionUid)
         viewModelScope.launch {
             var didComplete = false
@@ -250,7 +246,6 @@ class ToolConnectionsViewModel @Inject constructor(
             } catch (throwable: Throwable) {
                 showRowError(connectionUid, throwable)
             } finally {
-                if (pendingOAuthConnectionUid == connectionUid) pendingOAuthConnectionUid = null
                 clearRowBusy(connectionUid)
             }
             if (didComplete) refresh()
@@ -259,6 +254,11 @@ class ToolConnectionsViewModel @Inject constructor(
 
     fun failOAuthLaunch(message: String = "No browser is available for OAuth authorization.") {
         showOAuthCallbackError(pendingOAuthConnectionUid, message)
+    }
+
+    fun cancelPendingOAuth() {
+        val pendingConnectionUid = pendingOAuthConnectionUid ?: return
+        showOAuthCallbackError(pendingConnectionUid, "OAuth authorization was canceled.")
     }
 
     private fun showError(error: Throwable) {

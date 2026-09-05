@@ -66,6 +66,23 @@ class SettingViewModelV2Test {
         assertFalse(didNavigate)
         assertEquals("Save failed", viewModel.addPlatformSaveState.value.errorMessage)
     }
+
+    @Test
+    fun addPlatformSuccessCallbackObservesRefreshedPlatformState() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val repository = AddPlatformRepository()
+        val viewModel = SettingViewModelV2(repository)
+        var observedDuringCallback: List<PlatformV2> = emptyList()
+
+        viewModel.addPlatform(testPlatform()) {
+            observedDuringCallback = viewModel.platformState.value
+        }
+        advanceUntilIdle()
+
+        val refreshed = listOf(testPlatform().copy(id = 42))
+        assertEquals(refreshed, observedDuringCallback)
+        assertEquals(refreshed, viewModel.platformState.value)
+    }
 }
 
 private class AddPlatformRepository(
@@ -73,9 +90,10 @@ private class AddPlatformRepository(
     private val failure: Throwable? = null
 ) : SettingRepository {
     var addedPlatform: PlatformV2? = null
+    private val platforms = mutableListOf<PlatformV2>()
 
     override suspend fun fetchPlatforms(): List<Platform> = emptyList()
-    override suspend fun fetchPlatformV2s(): List<PlatformV2> = emptyList()
+    override suspend fun fetchPlatformV2s(): List<PlatformV2> = platforms.toList()
     override suspend fun fetchThemes(): ThemeSetting = ThemeSetting()
     override suspend fun migrateToPlatformV2() = Unit
     override suspend fun migrateSecrets(): List<SecretMigrationError> = emptyList()
@@ -86,6 +104,7 @@ private class AddPlatformRepository(
         gate?.await()
         failure?.let { throw it }
         addedPlatform = platform
+        platforms += platform.copy(id = 42)
     }
 
     override suspend fun updatePlatformV2(platform: PlatformV2) = Unit
