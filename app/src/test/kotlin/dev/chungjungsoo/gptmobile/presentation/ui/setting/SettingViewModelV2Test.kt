@@ -83,17 +83,39 @@ class SettingViewModelV2Test {
         assertEquals(refreshed, observedDuringCallback)
         assertEquals(refreshed, viewModel.platformState.value)
     }
+
+    @Test
+    fun addPlatformRefreshFailureStillInvokesSuccess() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val repository = AddPlatformRepository(refreshFailure = IllegalStateException("Refresh failed"))
+        val viewModel = SettingViewModelV2(repository)
+        var didNavigate = false
+
+        viewModel.addPlatform(testPlatform()) { didNavigate = true }
+        advanceUntilIdle()
+
+        assertFalse(viewModel.addPlatformSaveState.value.isSaving)
+        assertTrue(didNavigate)
+        assertNull(viewModel.addPlatformSaveState.value.errorMessage)
+    }
 }
 
 private class AddPlatformRepository(
     private val gate: CompletableDeferred<Unit>? = null,
-    private val failure: Throwable? = null
+    private val failure: Throwable? = null,
+    private val refreshFailure: Throwable? = null
 ) : SettingRepository {
     var addedPlatform: PlatformV2? = null
     private val platforms = mutableListOf<PlatformV2>()
 
     override suspend fun fetchPlatforms(): List<Platform> = emptyList()
-    override suspend fun fetchPlatformV2s(): List<PlatformV2> = platforms.toList()
+    override suspend fun fetchPlatformV2s(): List<PlatformV2> {
+        if (addedPlatform != null) {
+            refreshFailure?.let { throw it }
+        }
+        return platforms.toList()
+    }
+
     override suspend fun fetchThemes(): ThemeSetting = ThemeSetting()
     override suspend fun migrateToPlatformV2() = Unit
     override suspend fun migrateSecrets(): List<SecretMigrationError> = emptyList()

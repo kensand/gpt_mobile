@@ -52,8 +52,6 @@ class SettingViewModelV2 @Inject constructor(
         viewModelScope.launch {
             try {
                 settingRepository.addPlatformV2(platform)
-                val platforms = settingRepository.fetchPlatformV2s()
-                _platformState.value = platforms
             } catch (exception: CancellationException) {
                 throw exception
             } catch (throwable: Throwable) {
@@ -61,6 +59,13 @@ class SettingViewModelV2 @Inject constructor(
                     errorMessage = throwable.message ?: "Could not save platform"
                 )
                 return@launch
+            }
+            try {
+                val platforms = settingRepository.fetchPlatformV2s()
+                _platformState.update { platforms }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Throwable) {
             }
             _addPlatformSaveState.value = AddPlatformSaveState()
             onSuccess()

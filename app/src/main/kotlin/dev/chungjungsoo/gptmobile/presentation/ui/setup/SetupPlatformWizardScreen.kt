@@ -74,28 +74,26 @@ fun SetupPlatformWizardScreen(
         setupViewModel.selectLocalModel(entry.id)
     }
 
-    // Handle back press
-    BackHandler {
-        if (wizardStep > 0) {
-            setupViewModel.previousWizardStep()
-        } else {
-            setupViewModel.resetWizard()
-            onBackAction()
+    val isSaving = saveStatus is SaveStatus.Saving
+    val handleBack = {
+        if (!isSaving) {
+            if (wizardStep > 0) {
+                setupViewModel.previousWizardStep()
+            } else {
+                setupViewModel.resetWizard()
+                onBackAction()
+            }
         }
     }
+
+    BackHandler(onBack = handleBack)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             SetupAppBar(
-                backAction = {
-                    if (wizardStep > 0) {
-                        setupViewModel.previousWizardStep()
-                    } else {
-                        setupViewModel.resetWizard()
-                        onBackAction()
-                    }
-                }
+                backAction = handleBack,
+                enabled = !isSaving
             )
         }
     ) { innerPadding ->
@@ -202,7 +200,7 @@ fun SetupPlatformWizardScreen(
                         }
                     },
                     isLastStep = wizardStep == WIZARD_STEP_MODEL,
-                    isSaving = saveStatus is SaveStatus.Saving,
+                    isSaving = isSaving,
                     errorMessage = (saveStatus as? SaveStatus.Error)?.message
                 )
             }
