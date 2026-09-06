@@ -196,6 +196,8 @@ fun OpponentChatBubble(
     val hasMessageActions = canCopy || canSelectText || canEdit || retryInSheet || revisionIndexLabel != null
     var isDetailsExpanded by rememberSaveable(contentIdentity) { mutableStateOf(false) }
     var isActionsSheetOpen by rememberSaveable(contentIdentity) { mutableStateOf(false) }
+    val showAnswerStreamingIndicator = isLoading && activeToolEvents.isEmpty()
+    val showProcessStreamingIndicator = showAnswerStreamingIndicator && text.isBlank()
 
     Column(modifier = modifier) {
         RunNoticeChips(
@@ -206,6 +208,21 @@ fun OpponentChatBubble(
             run = agentRun,
             modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp)
         )
+
+        if (hasDetails) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DetailsButton(
+                    isExpanded = isDetailsExpanded,
+                    activeToolEvents = activeToolEvents,
+                    onClick = { isDetailsExpanded = !isDetailsExpanded }
+                )
+            }
+        }
 
         AnimatedContent(
             targetState = isDetailsExpanded && hasDetails,
@@ -219,29 +236,36 @@ fun OpponentChatBubble(
             if (showDetails) {
                 Column {
                     if (contentTimeline.isNotEmpty() && !hasUnavailableOrder) {
-                        AssistantTimelineContent(
+                        AssistantProcessContent(
                             timeline = contentTimeline,
                             toolEvents = toolEvents,
-                            showStreamingIndicator = isLoading && activeToolEvents.isEmpty(),
+                            showStreamingIndicator = showProcessStreamingIndicator,
                             contentIdentity = contentIdentity,
                             onViewFull = onViewFull
-                        )
-                        MessageFileThumbnailRow(
-                            files = attachments,
-                            usePrimaryColors = false,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
                     } else {
-                        LegacyAssistantContent(
-                            cardColor = cardColor,
-                            text = text,
+                        LegacyAssistantProcessContent(
                             thoughts = thoughts,
                             toolEvents = toolEvents,
-                            attachments = attachments,
-                            showStreamingIndicator = isLoading && activeToolEvents.isEmpty(),
                             contentIdentity = contentIdentity,
                             showOrderNotice = hasUnavailableOrder,
+                            showStreamingIndicator = showProcessStreamingIndicator,
                             onViewFull = onViewFull
+                        )
+                    }
+                    QuietAssistantContent(
+                        cardColor = cardColor,
+                        text = text,
+                        attachments = attachments,
+                        showStreamingIndicator = false,
+                        contentIdentity = contentIdentity
+                    )
+                    if (showAnswerStreamingIndicator && text.isNotBlank()) {
+                        // ponytail: expanded ChatMarkdown does not expose concatenated ● to semantics; sibling Text until that renderer does
+                        Text(
+                            text = "●",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
                     }
                 }
@@ -250,27 +274,20 @@ fun OpponentChatBubble(
                     cardColor = cardColor,
                     text = text,
                     attachments = attachments,
-                    showStreamingIndicator = isLoading && activeToolEvents.isEmpty(),
+                    showStreamingIndicator = showAnswerStreamingIndicator,
                     contentIdentity = contentIdentity
                 )
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (hasDetails) {
-                DetailsButton(
-                    isExpanded = isDetailsExpanded,
-                    activeToolEvents = activeToolEvents,
-                    onClick = { isDetailsExpanded = !isDetailsExpanded }
-                )
-            }
-            Spacer(modifier = Modifier.weight(1f))
-            if (!isLoading && hasMessageActions) {
+        if (!isLoading && hasMessageActions) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Spacer(modifier = Modifier.weight(1f))
                 MessageActionsButton(onClick = { isActionsSheetOpen = true })
             }
         }
@@ -412,7 +429,7 @@ private fun MessageActionsButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun AssistantTimelineContent(
+private fun AssistantProcessContent(
     timeline: List<AssistantTimelineItem>,
     toolEvents: List<ToolEvent>,
     showStreamingIndicator: Boolean,
@@ -420,6 +437,10 @@ private fun AssistantTimelineContent(
     onViewFull: (String) -> Unit
 ) {
     val toolEventsBySequence = toolEvents.associateBy(ToolEvent::sequence)
+    val lastProcessIndex = timeline.indexOfLast {
+        it.type == AssistantTimelineItemType.THINKING ||
+            it.type == AssistantTimelineItemType.TOOL
+    }
     timeline.forEachIndexed { index, item ->
         key(contentIdentity, item.type, item.toolSequence, index) {
             when (item.type) {
@@ -427,21 +448,12 @@ private fun AssistantTimelineContent(
                     modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp),
                     thoughts = item.content,
                     contentIdentity = "$contentIdentity:thinking:$index",
-                    isLoading = showStreamingIndicator && index == timeline.lastIndex
+                    isLoading = showStreamingIndicator && index == lastProcessIndex
                 )
 
-                AssistantTimelineItemType.TEXT -> {
-                    val displayText = if (showStreamingIndicator && index == timeline.lastIndex) {
-                        item.content + "●"
-                    } else {
-                        item.content
-                    }
-                    ChatMarkdown(
-                        content = displayText,
-                        contentIdentity = "$contentIdentity:text:$index",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                }
+                AssistantTimelineItemType.TEXT,
+                AssistantTimelineItemType.NOTICE,
+                AssistantTimelineItemType.LEGACY_ORDER -> Unit
 
                 AssistantTimelineItemType.TOOL -> {
                     val event = item.toolSequence?.let(toolEventsBySequence::get)
@@ -461,14 +473,14 @@ private fun AssistantTimelineContent(
                         )
                     }
                 }
-
-                AssistantTimelineItemType.NOTICE -> Unit
-
-                AssistantTimelineItemType.LEGACY_ORDER -> Unit
             }
         }
     }
-    if (showStreamingIndicator && timeline.lastOrNull()?.type == AssistantTimelineItemType.TOOL) {
+    if (
+        showStreamingIndicator &&
+        lastProcessIndex >= 0 &&
+        timeline[lastProcessIndex].type == AssistantTimelineItemType.TOOL
+    ) {
         Text(
             text = "●",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -489,18 +501,15 @@ internal fun hasUnresolvedToolReferences(
 }
 
 @Composable
-private fun LegacyAssistantContent(
-    cardColor: CardColors,
-    text: String,
+private fun LegacyAssistantProcessContent(
     thoughts: String,
     toolEvents: List<ToolEvent>,
-    attachments: List<String>,
-    showStreamingIndicator: Boolean,
     contentIdentity: Any,
     showOrderNotice: Boolean,
+    showStreamingIndicator: Boolean,
     onViewFull: (String) -> Unit
 ) {
-    val isThinking = showStreamingIndicator && thoughts.isNotBlank() && text.isBlank()
+    val isThinking = showStreamingIndicator && thoughts.isNotBlank()
     if (showOrderNotice) {
         Text(
             text = stringResource(R.string.legacy_assistant_order_unavailable),
@@ -523,22 +532,12 @@ private fun LegacyAssistantContent(
         contentIdentity = contentIdentity,
         onViewFull = onViewFull
     )
-    Card(
-        shape = RoundedCornerShape(0.dp),
-        colors = cardColor
-    ) {
-        Column {
-            ChatMarkdown(
-                content = if (showStreamingIndicator) text + "●" else text,
-                contentIdentity = contentIdentity,
-                modifier = Modifier.padding(16.dp)
-            )
-            MessageFileThumbnailRow(
-                files = attachments,
-                usePrimaryColors = false,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-        }
+    if (showStreamingIndicator && thoughts.isBlank()) {
+        Text(
+            text = "●",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
     }
 }
 

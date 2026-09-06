@@ -126,7 +126,7 @@ class ChatMessagePresentationInstrumentedTest {
     }
 
     @Test
-    fun detailsSwapQuietAnswerForChronologicalNestedContent() {
+    fun expandedDetailsKeepProcessesAboveSingleAnswer() {
         composeRule.setContent {
             GPTMobileTheme {
                 OpponentChatBubble(
@@ -148,11 +148,13 @@ class ChatMessagePresentationInstrumentedTest {
         composeRule.onAllNodesWithText("Answer").assertCountEquals(1)
         composeRule.onNodeWithText("Details").performClick()
         composeRule.onAllNodesWithText("Answer").assertCountEquals(1)
+        val detailsTop = composeRule.onNodeWithText("Details").fetchSemanticsNode().boundsInRoot.top
         val thinkingTop = composeRule.onNodeWithText("View thinking process").fetchSemanticsNode().boundsInRoot.top
-        val answerTop = composeRule.onNodeWithText("Answer").fetchSemanticsNode().boundsInRoot.top
         val toolTop = composeRule.onNodeWithContentDescription("Expand tool trace").fetchSemanticsNode().boundsInRoot.top
-        assertTrue(thinkingTop < answerTop)
-        assertTrue(answerTop < toolTop)
+        val answerTop = composeRule.onNodeWithText("Answer").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(detailsTop < thinkingTop)
+        assertTrue(thinkingTop < toolTop)
+        assertTrue(toolTop < answerTop)
         composeRule.onNodeWithContentDescription("Expand tool trace").performClick()
         composeRule.onNodeWithText("Arguments:").assertExists()
         composeRule.onNodeWithText("View thinking process").performClick()
