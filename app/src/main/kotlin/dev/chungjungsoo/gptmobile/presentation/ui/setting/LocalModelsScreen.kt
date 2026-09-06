@@ -1,5 +1,6 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.setting
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.data.catalog.ModelCatalogParser
+import dev.chungjungsoo.gptmobile.presentation.common.EmptyErrorState
+import dev.chungjungsoo.gptmobile.presentation.common.SettingsSection
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadDialogHost
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelDownloadStatus
 import dev.chungjungsoo.gptmobile.presentation.ui.localmodel.LocalModelRequirements
@@ -74,25 +77,34 @@ fun LocalModelsScreen(
                 }
             }
 
+            uiState.loadError != null -> {
+                EmptyErrorState(
+                    title = stringResource(R.string.local_models_load_error),
+                    description = uiState.loadError.orEmpty().takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.local_models_load_error_description),
+                    modifier = Modifier
+                        .padding(innerPadding)
+                        .fillMaxSize(),
+                    primaryActionLabel = stringResource(R.string.retry),
+                    onPrimaryAction = viewModel::retryLoad,
+                    isError = true
+                )
+            }
+
             else -> {
                 Column(
-                    Modifier
+                    modifier = Modifier
                         .padding(innerPadding)
                         .verticalScroll(scrollState)
+                        .padding(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
                     HuggingFaceAccountSection(
                         hasToken = uiState.hasHuggingFaceToken,
                         onAddToken = viewModel::openAccessTokenDialog,
                         onRemoveToken = viewModel::removeHuggingFaceAccessToken
                     )
-                    if (uiState.items.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.local_models_empty),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
-                        )
-                    } else {
+                    SettingsSection(title = stringResource(R.string.storage)) {
                         Text(
                             text = stringResource(
                                 R.string.local_model_storage_used,
@@ -100,16 +112,25 @@ fun LocalModelsScreen(
                             ),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
+                            modifier = Modifier.padding(20.dp)
                         )
+                    }
+                    if (uiState.items.isEmpty()) {
+                        EmptyErrorState(
+                            title = stringResource(R.string.local_models_empty_title),
+                            description = stringResource(R.string.local_models_empty)
+                        )
+                    } else {
                         uiState.items.forEach { item ->
-                            LocalModelItem(
-                                item = item,
-                                isCheckingAccess = uiState.checkingAccessEntryId == item.entry.id,
-                                onDownload = { requestDownload(item.entry) },
-                                onCancel = { viewModel.cancelDownload(item.entry) },
-                                onDelete = { viewModel.onDeleteClick(item.entry) }
-                            )
+                            SettingsSection(title = item.entry.displayName) {
+                                LocalModelItem(
+                                    item = item,
+                                    isCheckingAccess = uiState.checkingAccessEntryId == item.entry.id,
+                                    onDownload = { requestDownload(item.entry) },
+                                    onCancel = { viewModel.cancelDownload(item.entry) },
+                                    onDelete = { viewModel.onDeleteClick(item.entry) }
+                                )
+                            }
                         }
                     }
                 }
@@ -169,24 +190,18 @@ private fun HuggingFaceAccountSection(
     onAddToken: () -> Unit,
     onRemoveToken: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 16.dp)
-    ) {
-        Text(
-            text = stringResource(R.string.huggingface_account),
-            style = MaterialTheme.typography.titleMedium
-        )
+    SettingsSection(title = stringResource(R.string.huggingface_account)) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = if (hasToken) {
                     stringResource(R.string.huggingface_token_saved)
                 } else {
-                    stringResource(R.string.huggingface_add_access_token)
+                    stringResource(R.string.huggingface_no_token_saved)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -216,13 +231,8 @@ private fun LocalModelItem(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .padding(20.dp)
     ) {
-        Text(
-            text = item.entry.displayName,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
         LocalModelRequirements(item = item)
         LocalModelDownloadStatus(
             item = item,

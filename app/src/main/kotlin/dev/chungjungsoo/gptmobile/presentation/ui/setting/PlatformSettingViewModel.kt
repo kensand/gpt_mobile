@@ -44,6 +44,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+sealed interface PlatformLoadState {
+    data object Loading : PlatformLoadState
+    data object Loaded : PlatformLoadState
+    data object NotFound : PlatformLoadState
+    data class Error(val message: String) : PlatformLoadState
+}
+
 @HiltViewModel
 class PlatformSettingViewModel @Inject constructor(
     private val settingRepository: SettingRepository,
@@ -61,6 +68,9 @@ class PlatformSettingViewModel @Inject constructor(
 
     private val _platformState = MutableStateFlow<PlatformV2?>(null)
     val platformState: StateFlow<PlatformV2?> = _platformState.asStateFlow()
+
+    private val _platformLoadState = MutableStateFlow<PlatformLoadState>(PlatformLoadState.Loading)
+    val platformLoadState: StateFlow<PlatformLoadState> = _platformLoadState.asStateFlow()
 
     private val _catalogEntries = MutableStateFlow<List<CatalogEntry>>(emptyList())
     val catalogEntries = _catalogEntries.asStateFlow()
@@ -113,12 +123,28 @@ class PlatformSettingViewModel @Inject constructor(
     }
 
     private fun loadPlatform() {
+        _platformLoadState.value = PlatformLoadState.Loading
         viewModelScope.launch {
-            val platforms = settingRepository.fetchPlatformV2s()
-            val platform = platforms.firstOrNull { it.uid == platformUid }
-            _platformState.update { platform }
+            try {
+                val platform = settingRepository.fetchPlatformV2s().firstOrNull { it.uid == platformUid }
+                _platformState.value = platform
+                _platformLoadState.value = if (platform == null) {
+                    PlatformLoadState.NotFound
+                } else {
+                    PlatformLoadState.Loaded
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (throwable: Throwable) {
+                _platformState.value = null
+                _platformLoadState.value = PlatformLoadState.Error(
+                    throwable.message ?: "Could not load platform"
+                )
+            }
         }
     }
+
+    fun retryLoadPlatform() = loadPlatform()
 
     fun loadToolBindings() {
         viewModelScope.launch {
@@ -458,7 +484,7 @@ class PlatformSettingViewModel @Inject constructor(
 
     fun closeMcpToolsDialog() {
         mcpDiscoveryJob?.cancel()
-        _toolBindingState.update { it.copy(isMcpToolsDialogOpen = false, isMcpToolsLoading = false) }
+        _toolBindingState.update { it.copy(isMcpToolsDialogOpen = false, isMcpToolsLoading = false, errorMessage = null) }
     }
 
     private suspend fun discoverMcpTools(connection: ToolConnection) = try {

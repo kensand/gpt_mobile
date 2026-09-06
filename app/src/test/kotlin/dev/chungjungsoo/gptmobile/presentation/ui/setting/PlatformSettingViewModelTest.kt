@@ -33,8 +33,10 @@ import dev.chungjungsoo.gptmobile.data.security.SecretVault
 import io.ktor.client.engine.cio.CIO
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -55,6 +57,71 @@ class PlatformSettingViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `platform load transitions from Loading to Loaded`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val viewModel = testViewModel(
+            dao = FakeToolConnectionDao(),
+            settingRepository = FakeSettingRepository()
+        )
+
+        assertEquals(PlatformLoadState.Loading, viewModel.platformLoadState.value)
+        runCurrent()
+
+        assertEquals(PlatformLoadState.Loaded, viewModel.platformLoadState.value)
+        assertEquals("profile-1", viewModel.platformState.value?.uid)
+    }
+
+    @Test
+    fun `missing platform transitions from Loading to NotFound`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val viewModel = testViewModel(
+            dao = FakeToolConnectionDao(),
+            settingRepository = FakeSettingRepository(fetchPlatformsResult = emptyList())
+        )
+
+        assertEquals(PlatformLoadState.Loading, viewModel.platformLoadState.value)
+        runCurrent()
+
+        assertEquals(PlatformLoadState.NotFound, viewModel.platformLoadState.value)
+        assertNull(viewModel.platformState.value)
+    }
+
+    @Test
+    fun `repository failure transitions from Loading to Error`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val viewModel = testViewModel(
+            dao = FakeToolConnectionDao(),
+            settingRepository = FakeSettingRepository(fetchFailure = IllegalStateException("Load failed"))
+        )
+
+        assertEquals(PlatformLoadState.Loading, viewModel.platformLoadState.value)
+        runCurrent()
+
+        val state = viewModel.platformLoadState.value
+        assertTrue(state is PlatformLoadState.Error)
+        assertEquals("Load failed", (state as PlatformLoadState.Error).message)
+    }
+
+    @Test
+    fun `retry returns from Error to Loaded`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val repository = FakeSettingRepository(fetchFailure = IllegalStateException("Load failed"))
+        val viewModel = testViewModel(
+            dao = FakeToolConnectionDao(),
+            settingRepository = repository
+        )
+        runCurrent()
+        assertTrue(viewModel.platformLoadState.value is PlatformLoadState.Error)
+
+        repository.fetchFailure = null
+        viewModel.retryLoadPlatform()
+
+        assertEquals(PlatformLoadState.Loading, viewModel.platformLoadState.value)
+        runCurrent()
+        assertEquals(PlatformLoadState.Loaded, viewModel.platformLoadState.value)
     }
 
     @Test
@@ -142,6 +209,27 @@ class PlatformSettingViewModelTest {
 
         assertFalse(viewModel.toolBindingState.value.isMcpToolsDialogOpen)
         assertFalse(viewModel.toolBindingState.value.isMcpToolsLoading)
+    }
+
+    @Test
+    fun `closing MCP tools dialog clears discovery error`() = runTest {
+        val dao = FakeToolConnectionDao(
+            connections = mutableMapOf(
+                "mcp-1" to testConnection("mcp-1", ToolConnectionType.MCP).copy(endpointUrl = null)
+            )
+        )
+        val viewModel = testViewModel(dao)
+
+        viewModel.loadToolBindings()
+        viewModel.openMcpToolsDialog()
+
+        assertTrue(viewModel.toolBindingState.value.errorMessage != null)
+
+        viewModel.closeMcpToolsDialog()
+
+        assertFalse(viewModel.toolBindingState.value.isMcpToolsDialogOpen)
+        assertFalse(viewModel.toolBindingState.value.isMcpToolsLoading)
+        assertNull(viewModel.toolBindingState.value.errorMessage)
     }
 
     @Test
@@ -596,14 +684,19 @@ private class FakeSettingRepository(
         enabled = true,
         apiUrl = "https://example.com",
         model = "gpt"
-    )
+    ),
+    private val fetchPlatformsResult: List<PlatformV2> = listOf(initialPlatform),
+    var fetchFailure: Throwable? = null
 ) : SettingRepository {
     private var platform = initialPlatform
     val updatedPlatforms = mutableListOf<PlatformV2>()
 
     override suspend fun fetchPlatforms(): List<Platform> = emptyList()
 
-    override suspend fun fetchPlatformV2s(): List<PlatformV2> = listOf(platform)
+    override suspend fun fetchPlatformV2s(): List<PlatformV2> {
+        fetchFailure?.let { throw it }
+        return fetchPlatformsResult.map { if (it.uid == platform.uid) platform else it }
+    }
 
     override suspend fun fetchThemes(): ThemeSetting = ThemeSetting()
     override suspend fun migrateToPlatformV2() = Unit

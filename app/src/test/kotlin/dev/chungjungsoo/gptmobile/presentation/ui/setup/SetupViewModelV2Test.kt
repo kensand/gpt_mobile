@@ -3,15 +3,25 @@ package dev.chungjungsoo.gptmobile.presentation.ui.setup
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
+import dev.chungjungsoo.gptmobile.data.database.entity.PlatformV2
+import dev.chungjungsoo.gptmobile.data.dto.Platform
+import dev.chungjungsoo.gptmobile.data.dto.ThemeSetting
+import dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore
 import dev.chungjungsoo.gptmobile.data.localmodel.LocalModelStatus
 import dev.chungjungsoo.gptmobile.data.model.ClientType
 import dev.chungjungsoo.gptmobile.data.repository.FakeLocalModelRepository
+import dev.chungjungsoo.gptmobile.data.repository.SecretMigrationError
+import dev.chungjungsoo.gptmobile.data.repository.SettingRepository
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelItemStatus
 import dev.chungjungsoo.gptmobile.presentation.ui.setting.LocalModelsDialog
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -218,6 +228,55 @@ class SetupViewModelV2Test {
         assertTrue(localModels.startDownloadCalls.isEmpty())
     }
 
+    @Test
+    fun `savePlatform invokes callback only after persistence succeeds`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val gate = CompletableDeferred<Unit>()
+        val settings = GatedSettingRepository(gate = gate)
+        val viewModel = gatedSaveViewModel(settings)
+        var didComplete = false
+        viewModel.selectClientType(ClientType.LITERT_LM)
+        viewModel.updatePlatformName("On-device")
+        viewModel.selectLocalModel("ready-model")
+
+        viewModel.savePlatform { didComplete = true }
+        viewModel.savePlatform { didComplete = true }
+        runCurrent()
+
+        assertEquals(SaveStatus.Saving, viewModel.saveStatus.value)
+        assertFalse(didComplete)
+        assertTrue(settings.addedPlatforms.isEmpty())
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(SaveStatus.Success, viewModel.saveStatus.value)
+        assertTrue(didComplete)
+        assertEquals(1, settings.addCallCount)
+        assertEquals("On-device", settings.addedPlatforms.single().name)
+    }
+
+    @Test
+    fun `savePlatform does not invoke callback when persistence fails`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val settings = GatedSettingRepository(failure = IllegalStateException("Save failed"))
+        val viewModel = gatedSaveViewModel(settings)
+        var didComplete = false
+        viewModel.selectClientType(ClientType.LITERT_LM)
+        viewModel.updatePlatformName("On-device")
+        viewModel.selectLocalModel("ready-model")
+
+        viewModel.savePlatform { didComplete = true }
+        advanceUntilIdle()
+
+        assertFalse(didComplete)
+        val status = viewModel.saveStatus.value
+        assertTrue(status is SaveStatus.Error)
+        assertEquals("Save failed", (status as SaveStatus.Error).message)
+        assertEquals("On-device", viewModel.platformName.value)
+        assertEquals("ready-model", viewModel.model.value)
+    }
+
     private fun statusOf(viewModel: SetupViewModelV2, catalogEntryId: String) = viewModel.catalogLocalModels.value
         .first { it.entry.id == catalogEntryId }
         .status
@@ -226,3 +285,41 @@ class SetupViewModelV2Test {
 private fun huggingFaceTokenStoreWithToken(token: String) = dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore(
     MapSecretVault(mapOf(dev.chungjungsoo.gptmobile.data.huggingface.HuggingFaceTokenStore.SECRET_REF to token.encodeToByteArray()))
 )
+
+private fun gatedSaveViewModel(settings: GatedSettingRepository) = SetupViewModelV2(
+    settingRepository = settings,
+    localModelRepository = FakeLocalModelRepository(listOf(wizardStoredModel("ready-model"))),
+    modelCatalogRepository = defaultWizardCatalog(),
+    gatedDownloadCoordinator = wizardGatedCoordinator(),
+    huggingFaceTokenStore = HuggingFaceTokenStore(MapSecretVault()),
+    downloadGuards = FakeLocalDownloadGuards(),
+    huggingFaceAuthClient = FakeHuggingFaceAuthClient(),
+    deviceSocModel = ""
+)
+
+private class GatedSettingRepository(
+    private val gate: CompletableDeferred<Unit>? = null,
+    private val failure: Throwable? = null
+) : SettingRepository {
+    val addedPlatforms = mutableListOf<PlatformV2>()
+    var addCallCount = 0
+
+    override suspend fun fetchPlatforms() = emptyList<Platform>()
+    override suspend fun fetchPlatformV2s() = emptyList<PlatformV2>()
+    override suspend fun fetchThemes() = ThemeSetting()
+    override suspend fun migrateToPlatformV2() = Unit
+    override suspend fun migrateSecrets() = emptyList<SecretMigrationError>()
+    override suspend fun updatePlatforms(platforms: List<Platform>) = Unit
+    override suspend fun updateThemes(themeSetting: ThemeSetting) = Unit
+
+    override suspend fun addPlatformV2(platform: PlatformV2) {
+        addCallCount++
+        gate?.await()
+        failure?.let { throw it }
+        addedPlatforms += platform
+    }
+
+    override suspend fun updatePlatformV2(platform: PlatformV2) = Unit
+    override suspend fun deletePlatformV2(platform: PlatformV2) = Unit
+    override suspend fun getPlatformV2ById(id: Int): PlatformV2? = null
+}

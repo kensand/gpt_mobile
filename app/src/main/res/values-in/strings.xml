@@ -234,7 +234,6 @@
     <string name="api_key_optional_note">Kunci API bersifat opsional untuk penyedia lokal seperti Ollama</string>
     <string name="model_description">Masukkan pengenal model yang ingin Anda gunakan</string>
     <string name="model_examples">Contoh: gpt-4o, claude-sonnet-4-20250514, gemini-1.5-pro</string>
-    <string name="back">Kembali</string>
     <string name="finish">Selesai</string>
     <string name="openrouter_description">Akses beberapa model AI melalui satu API</string>
     <string name="custom_provider">Penyedia Kustom</string>

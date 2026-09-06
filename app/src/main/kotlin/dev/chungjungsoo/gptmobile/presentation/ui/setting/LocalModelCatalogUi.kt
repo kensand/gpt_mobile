@@ -13,6 +13,7 @@ import dev.chungjungsoo.gptmobile.data.worker.LocalModelDownloadWorker
 data class LocalModelsUiState(
     val items: List<LocalModelListItem> = emptyList(),
     val isLoading: Boolean = true,
+    val loadError: String? = null,
     val totalStorageBytes: Long = 0L,
     val checkingAccessEntryId: String? = null,
     val dialog: LocalModelsDialog = LocalModelsDialog.Hidden,

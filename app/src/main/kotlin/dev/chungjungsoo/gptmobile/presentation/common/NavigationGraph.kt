@@ -1,5 +1,8 @@
 package dev.chungjungsoo.gptmobile.presentation.common
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -16,7 +19,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.navigation
-import dev.chungjungsoo.gptmobile.data.model.ClientType
+import dev.chungjungsoo.gptmobile.presentation.theme.fastEffectsSpec
+import dev.chungjungsoo.gptmobile.presentation.theme.fastSpatialSpec
 import dev.chungjungsoo.gptmobile.presentation.ui.chat.ChatScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.home.HomeScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.migrate.MigrateScreen
@@ -36,6 +40,7 @@ import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformTypeScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupPlatformWizardScreen
 import dev.chungjungsoo.gptmobile.presentation.ui.setup.SetupViewModelV2
 import dev.chungjungsoo.gptmobile.presentation.ui.startscreen.StartScreen
+
 @Composable
 fun SetupNavGraph(
     navController: NavHostController,
@@ -47,7 +52,17 @@ fun SetupNavGraph(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
         navController = navController,
-        startDestination = Route.CHAT_LIST
+        startDestination = Route.CHAT_LIST,
+        enterTransition = {
+            fadeIn(fastEffectsSpec()) +
+                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, fastSpatialSpec()) { it / 12 }
+        },
+        exitTransition = { fadeOut(fastEffectsSpec()) },
+        popEnterTransition = { fadeIn(fastEffectsSpec()) },
+        popExitTransition = {
+            fadeOut(fastEffectsSpec()) +
+                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, fastSpatialSpec()) { it / 12 }
+        }
     ) {
         homeScreenNavigation(navController)
         migrationScreenNavigation(navController)
@@ -128,9 +143,7 @@ fun NavGraphBuilder.setupNavigation(
             val setupViewModel: SetupViewModelV2 = hiltViewModel(parentEntry)
             val platforms by setupViewModel.platforms.collectAsStateWithLifecycle()
             SetupCompleteScreen(
-                isPendingLocalPlatform = platforms.any { platform ->
-                    !platform.enabled && platform.compatibleType == ClientType.LITERT_LM
-                },
+                platforms = platforms,
                 onNavigate = { route ->
                     navController.navigate(route) {
                         popUpTo(Route.GET_STARTED) { inclusive = true }
@@ -212,11 +225,9 @@ fun NavGraphBuilder.settingNavigation(
             }
             val settingViewModel: SettingViewModelV2 = hiltViewModel(parentEntry)
             AddPlatformScreen(
+                settingViewModel = settingViewModel,
                 onNavigationClick = { navController.navigateUp() },
-                onSave = { platform ->
-                    settingViewModel.addPlatform(platform)
-                    navController.navigateUp()
-                },
+                onSave = { navController.navigateUp() },
                 onNavigateToLocalModels = { navController.navigate(Route.LOCAL_MODELS) }
             )
         }
