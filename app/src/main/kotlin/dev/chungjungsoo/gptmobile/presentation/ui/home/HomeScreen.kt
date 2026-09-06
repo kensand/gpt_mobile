@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
@@ -390,8 +391,8 @@ fun HomeTopAppBar(
                         onClick = navigationOnClick
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = stringResource(R.string.close)
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.go_back)
                         )
                     }
                 }
