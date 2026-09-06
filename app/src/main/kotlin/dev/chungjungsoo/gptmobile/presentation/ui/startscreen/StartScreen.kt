@@ -1,14 +1,12 @@
 package dev.chungjungsoo.gptmobile.presentation.ui.startscreen
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -30,28 +28,21 @@ import dev.chungjungsoo.gptmobile.presentation.icons.GptMobileStartScreen
 @Composable
 fun StartScreen(onStartClick: () -> Unit) {
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .padding(innerPadding)
-                .fillMaxSize(),
-            contentAlignment = Alignment.TopCenter
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 720.dp)
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                StartScreenLogo()
-                Spacer(modifier = Modifier.weight(1f))
-                WelcomeText()
-                PrimaryLongButton(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                    onClick = onStartClick,
-                    text = stringResource(R.string.get_started)
-                )
-            }
+            StartScreenLogo()
+            Spacer(modifier = Modifier.weight(1f))
+            WelcomeText()
+            PrimaryLongButton(
+                modifier = Modifier.padding(20.dp),
+                onClick = onStartClick,
+                text = stringResource(R.string.get_started)
+            )
         }
     }
 }
@@ -62,11 +53,10 @@ fun StartScreenLogo(modifier: Modifier = Modifier) {
     Image(
         imageVector = GptMobileStartScreen,
         contentDescription = stringResource(R.string.gpt_mobile_introduction_logo),
-        contentScale = ContentScale.Fit,
+        contentScale = ContentScale.FillHeight,
         modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 24.dp)
-            .heightIn(max = 360.dp)
+            .padding(top = 50.dp)
+            .height(400.dp)
     )
 }
 
@@ -76,15 +66,17 @@ fun WelcomeText(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .padding(20.dp)
     ) {
         Text(
-            modifier = Modifier.semantics { heading() },
+            modifier = Modifier
+                .padding(4.dp)
+                .semantics { heading() },
             text = stringResource(R.string.welcome_title),
             style = MaterialTheme.typography.headlineMedium
         )
         Text(
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(4.dp),
             text = stringResource(R.string.welcome_description),
             style = MaterialTheme.typography.bodyLarge
         )
