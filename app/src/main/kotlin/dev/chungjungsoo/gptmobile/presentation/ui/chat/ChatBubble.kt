@@ -54,8 +54,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -69,7 +72,6 @@ import dev.chungjungsoo.gptmobile.data.database.entity.hasUnavailableAssistantOr
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
 import dev.chungjungsoo.gptmobile.presentation.theme.defaultSpatialSpec
 import dev.chungjungsoo.gptmobile.presentation.theme.fastEffectsSpec
-import dev.chungjungsoo.gptmobile.presentation.theme.fastSpatialSpec
 import java.io.File
 
 @Composable
@@ -371,15 +373,25 @@ private fun DetailsButton(
 ) {
     val rotationAngle by animateFloatAsState(
         targetValue = if (isExpanded) 180f else 0f,
-        animationSpec = fastSpatialSpec(),
+        animationSpec = fastEffectsSpec(),
         label = "details rotation"
     )
     val progressDescription = stringResource(R.string.tool_in_progress)
+    val expandStateDescription = stringResource(R.string.expand)
+    val collapseStateDescription = stringResource(R.string.collapse)
     Surface(
         onClick = onClick,
         modifier = Modifier
             .widthIn(max = 320.dp)
-            .heightIn(min = 48.dp),
+            .heightIn(min = 48.dp)
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                stateDescription = if (isExpanded) {
+                    collapseStateDescription
+                } else {
+                    expandStateDescription
+                }
+            },
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceContainerLow
     ) {

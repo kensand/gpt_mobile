@@ -31,6 +31,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -38,7 +42,6 @@ import dev.chungjungsoo.gptmobile.R
 import dev.chungjungsoo.gptmobile.presentation.theme.GPTMobileTheme
 import dev.chungjungsoo.gptmobile.presentation.theme.defaultSpatialSpec
 import dev.chungjungsoo.gptmobile.presentation.theme.fastEffectsSpec
-import dev.chungjungsoo.gptmobile.presentation.theme.fastSpatialSpec
 
 @Composable
 fun ThinkingBlock(
@@ -50,9 +53,11 @@ fun ThinkingBlock(
     if (thoughts.isBlank()) return
 
     var isExpanded by rememberSaveable(contentIdentity) { mutableStateOf(false) }
+    val expandLabel = stringResource(R.string.expand)
+    val collapseLabel = stringResource(R.string.collapse)
     val rotationAngle by animateFloatAsState(
         targetValue = if (isExpanded) 180f else 0f,
-        animationSpec = fastSpatialSpec(),
+        animationSpec = fastEffectsSpec(),
         label = "rotation"
     )
 
@@ -67,6 +72,10 @@ fun ThinkingBlock(
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .clickable { isExpanded = !isExpanded }
+                .semantics(mergeDescendants = true) {
+                    role = Role.Button
+                    stateDescription = if (isExpanded) collapseLabel else expandLabel
+                }
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {

@@ -98,6 +98,10 @@ internal fun apiKeySummary(
     notSet: String
 ): String = if (token.isNullOrEmpty()) notSet else set
 
+internal fun advancedGenerationSummary(values: List<Pair<String, String?>>): String = values.mapNotNull { (label, value) ->
+    value?.let { "$label $it" }
+}.joinToString(" · ")
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlatformSettingScreen(
@@ -314,7 +318,18 @@ fun PlatformSettingScreen(
                         SettingItem(
                             modifier = Modifier.heightIn(min = 64.dp),
                             title = stringResource(R.string.advanced_generation),
-                            description = stringResource(if (isAdvancedExpanded) R.string.hide else R.string.show),
+                            description = if (isAdvancedExpanded) {
+                                stringResource(R.string.hide)
+                            } else {
+                                advancedGenerationSummary(
+                                    listOf(
+                                        stringResource(R.string.temperature) to (platformData.temperature?.toString() ?: notSetText),
+                                        stringResource(R.string.top_p) to (platformData.topP?.toString() ?: notSetText),
+                                        stringResource(R.string.top_k) to if (isLocalPlatform) platformData.topK?.toString() ?: notSetText else null,
+                                        stringResource(R.string.max_tokens) to if (isLocalPlatform) platformData.maxTokens?.toString() ?: notSetText else null
+                                    )
+                                )
+                            },
                             enabled = platformData.enabled,
                             onItemClick = { isAdvancedExpanded = !isAdvancedExpanded },
                             showTrailingIcon = true,
@@ -481,7 +496,7 @@ fun PlatformSettingScreen(
                             modifier = Modifier.heightIn(min = 64.dp),
                             title = stringResource(R.string.read_url),
                             icon = ImageVector.vectorResource(id = R.drawable.ic_link),
-                            enabled = true,
+                            enabled = platformData.enabled,
                             isChecked = toolBindingState.readUrlEnabled,
                             onCheckedChange = settingViewModel::toggleReadUrl
                         )

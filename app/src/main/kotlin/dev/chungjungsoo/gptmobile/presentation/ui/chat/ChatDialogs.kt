@@ -141,6 +141,7 @@ internal fun MessageActionsSheet(
                     if (canRetry) {
                         SettingItem(
                             title = stringResource(R.string.retry),
+                            description = stringResource(R.string.retry_tools_warning),
                             onItemClick = { runAction(onRetry) },
                             showTrailingIcon = false,
                             showLeadingIcon = false

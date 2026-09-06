@@ -883,23 +883,28 @@ internal fun FileThumbnail(
                 )
             }
 
-            Box(
+            IconButton(
+                onClick = onRemove,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .size(16.dp)
-                    .background(
-                        MaterialTheme.colorScheme.error,
-                        RoundedCornerShape(8.dp)
-                    )
-                    .clickable { onRemove() },
-                contentAlignment = Alignment.Center
+                    .size(48.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = stringResource(R.string.remove),
-                    tint = MaterialTheme.colorScheme.onError,
-                    modifier = Modifier.size(10.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .background(
+                            MaterialTheme.colorScheme.error,
+                            RoundedCornerShape(8.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.remove),
+                        tint = MaterialTheme.colorScheme.onError,
+                        modifier = Modifier.size(10.dp)
+                    )
+                }
             }
 
             if (attachment.status == ChatAttachmentDraft.Status.Preparing) {

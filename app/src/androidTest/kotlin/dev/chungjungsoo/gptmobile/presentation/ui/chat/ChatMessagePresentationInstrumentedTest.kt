@@ -130,6 +130,24 @@ class ChatMessagePresentationInstrumentedTest {
     }
 
     @Test
+    fun successfulRetryInActionsSheetShowsToolsWarningOnce() {
+        composeRule.setContent {
+            GPTMobileTheme {
+                OpponentChatBubble(
+                    text = "Answer",
+                    canRetry = true,
+                    isLoading = false,
+                    showInlineRetry = false
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Message actions").performClick()
+        composeRule.onAllNodesWithText("Retry").assertCountEquals(1)
+        composeRule.onAllNodesWithText("Retry may run assigned tools again.").assertCountEquals(1)
+    }
+
+    @Test
     fun expandedDetailsKeepProcessesAboveSingleAnswer() {
         composeRule.setContent {
             GPTMobileTheme {

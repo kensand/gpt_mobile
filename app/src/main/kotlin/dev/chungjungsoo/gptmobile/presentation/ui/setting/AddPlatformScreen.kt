@@ -34,7 +34,7 @@ import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,13 +70,13 @@ fun AddPlatformScreen(
     onSave: () -> Unit,
     onNavigateToLocalModels: () -> Unit = {}
 ) {
-    var step by remember { mutableStateOf(AddPlatformStep.API_TYPE) }
-    var selectedClientType by remember { mutableStateOf<ClientType?>(null) }
-    var platformName by remember { mutableStateOf("") }
-    var apiUrl by remember { mutableStateOf("") }
-    var apiKey by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf("") }
-    var isReasoningEnabled by remember { mutableStateOf(false) }
+    var step by rememberSaveable { mutableStateOf(AddPlatformStep.API_TYPE) }
+    var selectedClientType by rememberSaveable { mutableStateOf<ClientType?>(null) }
+    var platformName by rememberSaveable { mutableStateOf("") }
+    var apiUrl by rememberSaveable { mutableStateOf("") }
+    var apiKey by rememberSaveable { mutableStateOf("") }
+    var model by rememberSaveable { mutableStateOf("") }
+    var isReasoningEnabled by rememberSaveable { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val scrollBehavior = pinnedExitUntilCollapsedScrollBehavior(
         canScroll = { scrollState.canScrollForward || scrollState.canScrollBackward }

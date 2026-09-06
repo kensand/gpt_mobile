@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +51,6 @@ import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventError
 import dev.chungjungsoo.gptmobile.data.database.entity.ToolEventStatus
 import dev.chungjungsoo.gptmobile.presentation.theme.defaultSpatialSpec
 import dev.chungjungsoo.gptmobile.presentation.theme.fastEffectsSpec
-import dev.chungjungsoo.gptmobile.presentation.theme.fastSpatialSpec
 import java.time.Instant
 import java.util.Locale
 
@@ -70,7 +70,7 @@ fun ToolTraceBlock(
     var query by rememberSaveable(contentIdentity) { mutableStateOf("") }
     val rotationAngle by animateFloatAsState(
         targetValue = if (isExpanded) 180f else 0f,
-        animationSpec = fastSpatialSpec(),
+        animationSpec = fastEffectsSpec(),
         label = "tool trace rotation"
     )
     val summary = toolTraceStatusSummary(events, labels)
@@ -92,6 +92,7 @@ fun ToolTraceBlock(
                 .semantics {
                     role = Role.Button
                     contentDescription = if (isExpanded) labels.collapseToolTrace else labels.expandToolTrace
+                    stateDescription = if (isExpanded) labels.collapse else labels.expand
                 }
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
