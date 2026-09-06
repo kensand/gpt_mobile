@@ -257,17 +257,10 @@ fun OpponentChatBubble(
                         cardColor = cardColor,
                         text = text,
                         attachments = attachments,
-                        showStreamingIndicator = false,
-                        contentIdentity = contentIdentity
+                        showStreamingIndicator = showAnswerStreamingIndicator && text.isNotBlank(),
+                        contentIdentity = contentIdentity,
+                        standaloneStreamingIndicator = true
                     )
-                    if (showAnswerStreamingIndicator && text.isNotBlank()) {
-                        // ponytail: expanded ChatMarkdown does not expose concatenated ● to semantics; sibling Text until that renderer does
-                        Text(
-                            text = "●",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                    }
                 }
             } else {
                 QuietAssistantContent(
@@ -340,7 +333,8 @@ private fun QuietAssistantContent(
     text: String,
     attachments: List<String>,
     showStreamingIndicator: Boolean,
-    contentIdentity: Any
+    contentIdentity: Any,
+    standaloneStreamingIndicator: Boolean = false
 ) {
     Card(
         shape = RoundedCornerShape(0.dp),
@@ -348,10 +342,18 @@ private fun QuietAssistantContent(
     ) {
         Column {
             ChatMarkdown(
-                content = if (showStreamingIndicator) text + "●" else text,
+                content = if (showStreamingIndicator && !standaloneStreamingIndicator) text + "●" else text,
                 contentIdentity = contentIdentity,
                 modifier = Modifier.padding(16.dp)
             )
+            if (showStreamingIndicator && standaloneStreamingIndicator) {
+                // ponytail: ChatMarkdown still hides concatenated ● from semantics; standalone Text until that renderer exposes it
+                Text(
+                    text = "●",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
             MessageFileThumbnailRow(
                 files = attachments,
                 usePrimaryColors = false,

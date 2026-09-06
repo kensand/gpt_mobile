@@ -94,6 +94,7 @@ class ChatMessagePresentationInstrumentedTest {
                         AssistantTimelineItem(AssistantTimelineItemType.TOOL, toolSequence = 0)
                     ),
                     toolEvents = listOf(toolEvent()),
+                    attachments = listOf("cache/notes.txt"),
                     contentIdentity = "post-tool"
                 )
             }
@@ -103,6 +104,9 @@ class ChatMessagePresentationInstrumentedTest {
 
         composeRule.onAllNodesWithText("●").assertCountEquals(1)
         composeRule.onNodeWithContentDescription("Tool in progress").assertDoesNotExist()
+        val dotTop = composeRule.onNodeWithText("●").fetchSemanticsNode().boundsInRoot.top
+        val attachmentTop = composeRule.onNodeWithContentDescription("notes.txt").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(dotTop < attachmentTop)
     }
 
     @Test
